@@ -1,0 +1,77 @@
+<?xml version="1.0"?>
+<doc>
+    <assembly>
+        <name>FiveOS.Plugins.Sdk</name>
+    </assembly>
+    <members>
+        <member name="T:FiveOS.Plugins.IFiveOSHost">
+            <summary>
+            Services the host exposes to plugins via <see cref="M:FiveOS.Plugins.IFiveOSPlugin.Initialize(FiveOS.Plugins.IFiveOSHost)"/>.
+            The interface is intentionally small — every method is a stable
+            affordance plugins can rely on across host versions. New capabilities
+            should be added as new methods/properties (never break existing ones).
+            </summary>
+        </member>
+        <member name="P:FiveOS.Plugins.IFiveOSHost.HostVersion">
+            <summary>Semver string of the running host (e.g. "0.2.3"). Plugins
+            can compare against their declared <c>minHostVersion</c> if they
+            want to gracefully degrade on older hosts.</summary>
+        </member>
+        <member name="P:FiveOS.Plugins.IFiveOSHost.PluginDirectory">
+            <summary>Absolute path to this plugin's own folder under
+            <c>%AppData%\FiveOS\plugins\&lt;name&gt;\</c>. Use it to resolve
+            bundled assets (PNGs, JSON tables, etc.) without hard-coding paths.</summary>
+        </member>
+        <member name="M:FiveOS.Plugins.IFiveOSHost.GetSetting(System.String)">
+            <summary>Read a plugin-scoped string setting. Keys are namespaced by
+            the plugin id internally so two plugins can use the same key name
+            without collision. Returns null if the key was never set.</summary>
+        </member>
+        <member name="M:FiveOS.Plugins.IFiveOSHost.SetSetting(System.String,System.String)">
+            <summary>Persist a plugin-scoped string setting. Pass null to clear.</summary>
+        </member>
+        <member name="M:FiveOS.Plugins.IFiveOSHost.Toast(System.String)">
+            <summary>Show a non-blocking toast / status update to the user. The
+            host decides where it surfaces (status bar, transient overlay,
+            etc.) — plugins should treat this as fire-and-forget.</summary>
+        </member>
+        <member name="T:FiveOS.Plugins.IFiveOSPlugin">
+             <summary>
+             The contract a .NET FiveOS plugin must implement. Plugin DLLs reference
+             <c>FiveOS.Plugins.Sdk.dll</c> (a tiny stable assembly) and expose a single
+             public type implementing this interface — <c>PluginManager</c> reflects
+             over <c>plugin.json:entry</c> and instantiates the first match.
+            
+             Lifecycle:
+               1. The host instantiates the plugin via its parameterless constructor.
+               2. The host calls <see cref="M:FiveOS.Plugins.IFiveOSPlugin.Initialize(FiveOS.Plugins.IFiveOSHost)"/> exactly once with a host
+                  reference. Plugins should stash this and use it for settings,
+                  toasts, and folder lookups.
+               3. The host calls <see cref="M:FiveOS.Plugins.IFiveOSPlugin.CreateView"/> when the plugin's rail
+                  entry is first activated. The returned <see cref="T:System.Windows.Controls.UserControl"/>
+                  is cached for the session.
+             </summary>
+        </member>
+        <member name="P:FiveOS.Plugins.IFiveOSPlugin.Id">
+            <summary>Stable identifier (lowercase, dash-separated). Persisted in
+            UserSettings to remember enable state and per-plugin preferences.</summary>
+        </member>
+        <member name="P:FiveOS.Plugins.IFiveOSPlugin.Name">
+            <summary>Human-readable display name. Shown in the rail tooltip and
+            in Settings → Addons.</summary>
+        </member>
+        <member name="P:FiveOS.Plugins.IFiveOSPlugin.Description">
+            <summary>One-line description shown under the name in the addons list.</summary>
+        </member>
+        <member name="M:FiveOS.Plugins.IFiveOSPlugin.Initialize(FiveOS.Plugins.IFiveOSHost)">
+            <summary>Called once before <see cref="M:FiveOS.Plugins.IFiveOSPlugin.CreateView"/>. Plugins should
+            stash the host reference and use it later for settings, toasts, etc.
+            Default implementation does nothing — override only if needed.</summary>
+        </member>
+        <member name="M:FiveOS.Plugins.IFiveOSPlugin.CreateView">
+            <summary>Build the WPF view that will be hosted in the main pane when
+            this plugin is the active rail entry. Called once per session — the
+            host caches the returned control.</summary>
+        </member>
+    </members>
+</doc>

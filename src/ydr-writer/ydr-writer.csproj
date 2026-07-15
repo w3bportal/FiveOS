@@ -1,0 +1,67 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <!--
+      CodeWalker.Core targets .NET Framework 4.x. Modern .NET (8) can
+      reference netfx assemblies directly when they only use APIs in the
+      compatibility surface, which CodeWalker.Core mostly does. If we hit
+      runtime BadImageFormat / typeload issues for specific code paths,
+      drop this back to net48 — the WPF shell can still spawn it as a
+      subprocess regardless of TFM.
+    -->
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <AssemblyName>ydr-writer</AssemblyName>
+    <RootNamespace>YdrWriter</RootNamespace>
+    <Version>0.2.0</Version>
+
+    <PublishSingleFile>true</PublishSingleFile>
+    <SelfContained>true</SelfContained>
+    <RuntimeIdentifier>win-x64</RuntimeIdentifier>
+    <IncludeNativeLibrariesForSelfExtract>true</IncludeNativeLibrariesForSelfExtract>
+    <EnableCompressionInSingleFile>true</EnableCompressionInSingleFile>
+
+    <!-- Allow netfx-targeted refs to be loaded into our .NET 8 process. -->
+    <AssemblySearchPaths>$(AssemblySearchPaths);$(MSBuildProjectDirectory)\lib</AssemblySearchPaths>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- The whole reason this project exists. MIT-licensed RAGE binary
+         writer used by CodeWalker itself, so we get pixel-identical .ydr
+         output at the binary level. -->
+    <Reference Include="CodeWalker.Core">
+      <HintPath>lib\CodeWalker.Core.dll</HintPath>
+      <Private>true</Private>
+    </Reference>
+    <Reference Include="SharpDX">
+      <HintPath>lib\SharpDX.dll</HintPath>
+      <Private>true</Private>
+    </Reference>
+    <Reference Include="SharpDX.Mathematics">
+      <HintPath>lib\SharpDX.Mathematics.dll</HintPath>
+      <Private>true</Private>
+    </Reference>
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Mesh importer: glTF/OBJ/FBX/DAE/PLY/STL via Assimp. -->
+    <PackageReference Include="AssimpNet" Version="5.0.0-beta1" />
+    <!-- Quadric-edge-collapse decimation for embedded LOD generation
+         (LodGenerator.cs). Same unofficial .NET 8 build the FiveOS
+         shell uses in its Mesh Optimize tab — keeping both projects on
+         the same package version avoids skew between import-time and
+         post-export decimation behaviour. -->
+    <PackageReference Include="Geometry3Sharp.DotNet8.Unofficial" Version="1.0.0-d8" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- DDS encoder used by TextureBaker. -->
+    <None Include="tools\**\*">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
+    </None>
+  </ItemGroup>
+
+</Project>

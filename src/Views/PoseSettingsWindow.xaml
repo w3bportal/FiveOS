@@ -1,0 +1,371 @@
+<ui:FluentWindow x:Class="FiveOS.Views.PoseSettingsWindow"
+                 xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+                 xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+                 xmlns:ui="http://schemas.lepo.co/wpfui/2022/xaml"
+                 xmlns:vm="clr-namespace:FiveOS.ViewModels"
+                 xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+                 xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+                 mc:Ignorable="d"
+                 d:DataContext="{d:DesignInstance vm:PoseToEmoteViewModel}"
+                 Title="Emote settings"
+                 Width="380" Height="660"
+                 MinWidth="340" MinHeight="360"
+                 ResizeMode="CanResize"
+                 WindowStartupLocation="CenterOwner"
+                 WindowBackdropType="Mica"
+                 ExtendsContentIntoTitleBar="True">
+    <ui:FluentWindow.Resources>
+
+        <!-- ─── Blender-style chevron section header ───
+             Moved here from PoseToEmoteView when the Inspector rail became
+             this dialog. Whole row toggles a single bool (IsChecked); no
+             chunky button chrome — just a small chevron, an uppercase
+             caption, and a hairline divider trailing to the right edge.
+             Mirrors Blender's Properties-editor pattern (▶ collapsed,
+             ▼ expanded). -->
+        <Style x:Key="BlenderSectionHeader" TargetType="ToggleButton">
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="BorderThickness" Value="0" />
+            <Setter Property="Padding" Value="0" />
+            <Setter Property="Cursor" Value="Hand" />
+            <Setter Property="Focusable" Value="False" />
+            <Setter Property="HorizontalContentAlignment" Value="Left" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="ToggleButton">
+                        <Border Background="Transparent"
+                                Padding="0,4,0,4"
+                                SnapsToDevicePixels="True">
+                            <Grid>
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="Auto" />
+                                    <ColumnDefinition Width="Auto" />
+                                    <ColumnDefinition Width="*" />
+                                </Grid.ColumnDefinitions>
+                                <ui:SymbolIcon x:Name="Chevron"
+                                               Grid.Column="0"
+                                               Symbol="ChevronDown12"
+                                               FontSize="10"
+                                               Foreground="{DynamicResource TextFillColorTertiaryBrush}"
+                                               Margin="0,0,6,0"
+                                               VerticalAlignment="Center" />
+                                <TextBlock x:Name="Caption"
+                                           Grid.Column="1"
+                                           Text="{TemplateBinding Content}"
+                                           FontSize="9"
+                                           FontWeight="SemiBold"
+                                           Foreground="{DynamicResource TextFillColorTertiaryBrush}"
+                                           VerticalAlignment="Center"
+                                           Margin="0,0,10,0" />
+                                <Border Grid.Column="2"
+                                        Height="1"
+                                        Background="{DynamicResource ControlElevationBorderBrush}"
+                                        VerticalAlignment="Center" />
+                            </Grid>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsChecked" Value="False">
+                                <Setter TargetName="Chevron" Property="Symbol" Value="ChevronRight12" />
+                            </Trigger>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="Chevron" Property="Foreground" Value="{DynamicResource TextFillColorPrimaryBrush}" />
+                                <Setter TargetName="Caption" Property="Foreground" Value="{DynamicResource TextFillColorSecondaryBrush}" />
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+    </ui:FluentWindow.Resources>
+
+    <Grid>
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+            <RowDefinition Height="Auto" />
+        </Grid.RowDefinitions>
+
+        <ui:TitleBar Grid.Row="0"
+                     Title="Emote settings"
+                     ShowMaximize="False"
+                     ShowMinimize="False" />
+
+        <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto">
+            <StackPanel Margin="18,4,18,12">
+
+                <TextBlock TextWrapping="Wrap"
+                           FontSize="11"
+                           Opacity="0.6"
+                           Margin="0,0,0,10"
+                           Text="Changes apply to the preview live — leave this open while you scrub." />
+
+                <!-- ═══ Body Calibration ═══ -->
+                <ToggleButton x:Name="CalibSection"
+                              Content="BODY CALIBRATION"
+                              IsChecked="True"
+                              Style="{StaticResource BlenderSectionHeader}" />
+                <StackPanel Margin="0,4,0,12"
+                            Visibility="{Binding IsChecked, ElementName=CalibSection, Converter={StaticResource BooleanToVisibility}}">
+                    <TextBlock TextWrapping="Wrap"
+                               FontSize="11"
+                               Opacity="0.65"
+                               Margin="0,0,0,8"
+                               Text="A retarget copies joint angles, so a pose that clears the source's body can end up inside this ped's — arms through the chest or pelvis. These fit the clip to the ped. Applies to imported animations and updates the preview live." />
+
+                    <Grid Margin="0,0,0,10">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+                        <TextBlock Grid.Column="0"
+                                   Text="Enabled"
+                                   FontSize="11"
+                                   VerticalAlignment="Center"
+                                   Foreground="{DynamicResource TextFillColorPrimaryBrush}" />
+                        <ui:ToggleSwitch Grid.Column="1"
+                                         IsChecked="{Binding CalibrationEnabled, Mode=TwoWay}"
+                                         ToolTip="Off = use the raw retarget angles, limbs may pass through the body." />
+                    </Grid>
+
+                    <!-- Clearance -->
+                    <Grid Margin="0,0,0,4">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+                        <TextBlock Grid.Column="0" Text="Body clearance" FontSize="11"
+                                   VerticalAlignment="Center"
+                                   Foreground="{DynamicResource TextFillColorPrimaryBrush}" />
+                        <TextBlock Grid.Column="1" FontFamily="Consolas" FontSize="10"
+                                   Foreground="{DynamicResource TextFillColorSecondaryBrush}"
+                                   VerticalAlignment="Center">
+                            <Run Text="{Binding CalibrationClearance, StringFormat={}{0:F2}, Mode=OneWay}" />
+                        </TextBlock>
+                    </Grid>
+                    <Slider Minimum="0" Maximum="1" SmallChange="0.05" LargeChange="0.1"
+                            TickFrequency="0.25"
+                            Value="{Binding CalibrationClearance, Mode=TwoWay}"
+                            IsEnabled="{Binding CalibrationEnabled}"
+                            Margin="0,2,0,8"
+                            ToolTip="How hard to push a limb back out when a pose buries it in the torso. The arm swings rigidly from the shoulder, so the elbow bend is preserved. 0 = allow clipping." />
+
+                    <!-- Body width -->
+                    <Grid Margin="0,0,0,4">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+                        <TextBlock Grid.Column="0" Text="Body width" FontSize="11"
+                                   VerticalAlignment="Center"
+                                   Foreground="{DynamicResource TextFillColorPrimaryBrush}" />
+                        <TextBlock Grid.Column="1" FontFamily="Consolas" FontSize="10"
+                                   Foreground="{DynamicResource TextFillColorSecondaryBrush}"
+                                   VerticalAlignment="Center">
+                            <Run Text="{Binding CalibrationBodyWidth, StringFormat={}{0:F2}, Mode=OneWay}" />
+                        </TextBlock>
+                    </Grid>
+                    <Slider Minimum="0.8" Maximum="2.6" SmallChange="0.05" LargeChange="0.2"
+                            TickFrequency="0.2"
+                            Value="{Binding CalibrationBodyWidth, Mode=TwoWay}"
+                            IsEnabled="{Binding CalibrationEnabled}"
+                            Margin="0,2,0,8"
+                            ToolTip="How thick the ped actually is, relative to its bones. The skeleton only gives joint centres — the hip JOINTS sit ~18cm apart while the pelvis is nearer 35cm — so this is where the flesh really reaches. Raise it for a bulkier ped; lower it if the arms are being held too far out." />
+
+                    <!-- Arm spread -->
+                    <Grid Margin="0,0,0,4">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+                        <TextBlock Grid.Column="0" Text="Arm spread" FontSize="11"
+                                   VerticalAlignment="Center"
+                                   Foreground="{DynamicResource TextFillColorPrimaryBrush}" />
+                        <TextBlock Grid.Column="1" FontFamily="Consolas" FontSize="10"
+                                   Foreground="{DynamicResource TextFillColorSecondaryBrush}"
+                                   VerticalAlignment="Center">
+                            <Run Text="{Binding CalibrationArmSpread, StringFormat={}{0:F2}, Mode=OneWay}" />
+                        </TextBlock>
+                    </Grid>
+                    <Slider Minimum="-0.15" Maximum="0.30" SmallChange="0.01" LargeChange="0.05"
+                            TickFrequency="0.05"
+                            Value="{Binding CalibrationArmSpread, Mode=TwoWay}"
+                            IsEnabled="{Binding CalibrationEnabled}"
+                            Margin="0,2,0,0"
+                            ToolTip="Opens or closes both arms, as a fraction of shoulder width. A stockier ped often needs a touch of positive spread for a pose to read the way it did on the person." />
+                    <Grid Margin="0,2,0,0">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="*" />
+                        </Grid.ColumnDefinitions>
+                        <TextBlock Grid.Column="0" Text="tucked in" FontSize="9" Opacity="0.5"
+                                   Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
+                        <TextBlock Grid.Column="1" Text="opened out" FontSize="9" Opacity="0.5"
+                                   HorizontalAlignment="Right"
+                                   Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
+                    </Grid>
+                </StackPanel>
+
+                <!-- ═══ Secondary Motion ═══ -->
+                <ToggleButton x:Name="SecondarySection"
+                              Content="SECONDARY MOTION"
+                              IsChecked="True"
+                              Style="{StaticResource BlenderSectionHeader}" />
+                <StackPanel Margin="0,4,0,12"
+                            Visibility="{Binding IsChecked, ElementName=SecondarySection, Converter={StaticResource BooleanToVisibility}}">
+                    <TextBlock TextWrapping="Wrap"
+                               FontSize="11"
+                               Opacity="0.65"
+                               Margin="0,0,0,8"
+                               Text="Damped-spring follow-through on auto-detected secondary bones (head, hands, hair, spine tip, tail). Applies during playback only." />
+
+                    <Grid Margin="0,0,0,10">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+                        <TextBlock Grid.Column="0"
+                                   Text="Enabled"
+                                   FontSize="11"
+                                   VerticalAlignment="Center"
+                                   Foreground="{DynamicResource TextFillColorPrimaryBrush}" />
+                        <ui:ToggleSwitch Grid.Column="1"
+                                         IsChecked="{Binding SecondaryMotionEnabled, Mode=TwoWay}"
+                                         ToolTip="Turn the damped-spring follow-through on / off. Off = bones snap exactly to the keyed rotation each frame." />
+                    </Grid>
+
+                    <Grid Margin="0,0,0,4">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+                        <TextBlock Grid.Column="0"
+                                   Text="Intensity"
+                                   FontSize="11"
+                                   VerticalAlignment="Center"
+                                   Foreground="{DynamicResource TextFillColorPrimaryBrush}" />
+                        <TextBlock Grid.Column="1"
+                                   FontFamily="Consolas"
+                                   FontSize="10"
+                                   Foreground="{DynamicResource TextFillColorSecondaryBrush}"
+                                   VerticalAlignment="Center">
+                            <Run Text="{Binding SecondaryMotionIntensity, StringFormat={}{0:F2}, Mode=OneWay}" />
+                        </TextBlock>
+                    </Grid>
+                    <Slider Minimum="0"
+                            Maximum="1"
+                            SmallChange="0.05"
+                            LargeChange="0.1"
+                            TickFrequency="0.25"
+                            Value="{Binding SecondaryMotionIntensity, Mode=TwoWay}"
+                            IsEnabled="{Binding SecondaryMotionEnabled}"
+                            Margin="0,2,0,0"
+                            ToolTip="Spring tuning. Left = snappy (tight follow, no overshoot). Right = floaty (visible lag, soft bounce). 0.5 is the default soft natural feel." />
+                    <Grid Margin="0,2,0,0">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="*" />
+                        </Grid.ColumnDefinitions>
+                        <TextBlock Grid.Column="0"
+                                   Text="snappy"
+                                   FontSize="9"
+                                   Opacity="0.5"
+                                   HorizontalAlignment="Left" />
+                        <TextBlock Grid.Column="1"
+                                   Text="floaty"
+                                   FontSize="9"
+                                   Opacity="0.5"
+                                   HorizontalAlignment="Right" />
+                    </Grid>
+                </StackPanel>
+
+                <!-- ═══ Control Rig ═══ -->
+                <ToggleButton x:Name="MarkersSection"
+                              Content="CONTROL RIG"
+                              IsChecked="True"
+                              Style="{StaticResource BlenderSectionHeader}" />
+                <StackPanel Margin="0,4,0,12"
+                            Visibility="{Binding IsChecked, ElementName=MarkersSection, Converter={StaticResource BooleanToVisibility}}">
+                    <TextBlock TextWrapping="Wrap"
+                               FontSize="11"
+                               Opacity="0.65"
+                               Margin="0,0,0,8"
+                               Text="The posing handles on the character — click a joint to rotate it, drag a hand/foot ring to pose the whole limb. Hides itself while an animation plays and comes back when it stops." />
+                    <Grid Margin="0,0,0,6">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+                        <TextBlock Grid.Column="0"
+                                   Text="Show control rig"
+                                   FontSize="11"
+                                   VerticalAlignment="Center"
+                                   Foreground="{DynamicResource TextFillColorPrimaryBrush}" />
+                        <ui:ToggleSwitch Grid.Column="1"
+                                         IsChecked="{Binding ControlRigEnabled, Mode=TwoWay}"
+                                         ToolTip="Show / hide the posing handles. They hide automatically during playback either way." />
+                    </Grid>
+                </StackPanel>
+
+                <!-- ═══ Onion Skin ═══ -->
+                <ToggleButton x:Name="OnionSection"
+                              Content="ONION SKIN"
+                              IsChecked="True"
+                              Style="{StaticResource BlenderSectionHeader}" />
+                <StackPanel Margin="0,4,0,12"
+                            Visibility="{Binding IsChecked, ElementName=OnionSection, Converter={StaticResource BooleanToVisibility}}">
+                    <TextBlock TextWrapping="Wrap"
+                               FontSize="11"
+                               Opacity="0.65"
+                               Margin="0,0,0,8"
+                               Text="Ghost rigs at the previous and next keyframes around the scrubber. Helps see how the current pose relates to its neighbours." />
+                    <Grid Margin="0,0,0,6">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+                        <TextBlock Grid.Column="0"
+                                   Text="Enabled"
+                                   FontSize="11"
+                                   VerticalAlignment="Center"
+                                   Foreground="{DynamicResource TextFillColorPrimaryBrush}" />
+                        <ui:ToggleSwitch Grid.Column="1"
+                                         IsChecked="{Binding OnionSkinEnabled, Mode=TwoWay}"
+                                         ToolTip="Show / hide the prev (orange-red) and next (teal) ghost rigs around the scrubber. Pure visual aid; doesn't affect playback." />
+                    </Grid>
+                    <StackPanel Orientation="Horizontal" Margin="0,2,0,0">
+                        <Border Width="9" Height="9"
+                                CornerRadius="2"
+                                Background="#FF6B47"
+                                VerticalAlignment="Center"
+                                Margin="0,0,5,0" />
+                        <TextBlock Text="prev"
+                                   FontSize="10"
+                                   Opacity="0.7"
+                                   VerticalAlignment="Center"
+                                   Margin="0,0,12,0" />
+                        <Border Width="9" Height="9"
+                                CornerRadius="2"
+                                Background="#55D6BE"
+                                VerticalAlignment="Center"
+                                Margin="0,0,5,0" />
+                        <TextBlock Text="next"
+                                   FontSize="10"
+                                   Opacity="0.7"
+                                   VerticalAlignment="Center" />
+                    </StackPanel>
+                </StackPanel>
+            </StackPanel>
+        </ScrollViewer>
+
+        <Border Grid.Row="2"
+                BorderThickness="0,1,0,0"
+                BorderBrush="{DynamicResource ControlElevationBorderBrush}"
+                Padding="18,10">
+            <ui:Button Content="Close"
+                       Appearance="Secondary"
+                       HorizontalAlignment="Right"
+                       Padding="18,6"
+                       Click="OnClose" />
+        </Border>
+    </Grid>
+</ui:FluentWindow>

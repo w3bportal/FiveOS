@@ -1,0 +1,304 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <!-- Windows 10 2004 (19041) TFM so WinRT projections (Windows.Media.*)
+         are available when optional proprietary features need them. -->
+    <TargetFramework>net8.0-windows10.0.19041.0</TargetFramework>
+    <SupportedOSPlatformVersion>10.0.19041.0</SupportedOSPlatformVersion>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <UseWPF>true</UseWPF>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+
+    <AssemblyName>FiveOS</AssemblyName>
+    <RootNamespace>FiveOS</RootNamespace>
+    <Version>1.0.5</Version>
+    <FileVersion>1.0.5.0</FileVersion>
+    <AssemblyVersion>1.0.5.0</AssemblyVersion>
+    <Authors>FiveOS</Authors>
+    <Company>FiveOS</Company>
+    <Product>FiveOS</Product>
+    <Description>All in One FiveM Modding Tool.</Description>
+    <Copyright>© 2026 FiveOS</Copyright>
+
+    <ApplicationIcon>Assets\Branding\FiveOS.ico</ApplicationIcon>
+
+    <!-- Single-file self-contained publish so FiveOS.exe is the only
+         file users need. Engine\ydr-writer.exe and Assets\Viewer\* aren't
+         normal managed assemblies and won't get bundled into the single
+         file by `dotnet publish` — they're embedded as zip resources by
+         the EmbedRuntimeAssetZips target below and extracted to
+         %LOCALAPPDATA%\FiveOS\runtime\<version>\ on first launch by
+         RuntimeAssets. -->
+    <PublishSingleFile>true</PublishSingleFile>
+    <SelfContained>true</SelfContained>
+    <RuntimeIdentifier>win-x64</RuntimeIdentifier>
+    <IncludeNativeLibrariesForSelfExtract>true</IncludeNativeLibrariesForSelfExtract>
+    <!-- Single-file compression keeps FiveOS.exe smaller. May trip some AV
+         heuristics when unsigned — we accept that trade-off. -->
+    <EnableCompressionInSingleFile>true</EnableCompressionInSingleFile>
+
+    <!-- Magick.NET publishes a long list of CVE advisories on every release
+         (NU1901/NU1902/NU1903). 14.8.1 is the latest at time of writing; the
+         advisories track upstream ImageMagick CVEs that fire on untrusted
+         image input (parser bugs in formats like TIFF/JPEG2000/SVG). FiveOS
+         only invokes Magick.NET on images the user explicitly drops into
+         the converter — never network-fetched, never auto-processed — so
+         the practical risk surface is "did the user drop a malicious image
+         on their own machine," which is the same surface as any image
+         viewer. Re-evaluate when upgrading Magick.NET; if a new advisory
+         covers a path we DO hit (e.g. unattended pipeline), pull the
+         pinned version forward instead of suppressing.
+         Last reviewed: 2026-05-20 (Magick.NET 14.8.1). -->
+    <NoWarn>$(NoWarn);NU1901;NU1902;NU1903</NoWarn>
+
+    <!-- FiveOS Motion (proprietary cloud video→emote): auto-enabled when
+         MotionCloudClient.cs is present locally; stripped from OSS clones. -->
+    <EnableFiveOSMotion Condition="Exists('$(MSBuildProjectDirectory)\Services\MotionCloudClient.cs')">true</EnableFiveOSMotion>
+    <EnableFiveOSMotion Condition="'$(EnableFiveOSMotion)' == ''">false</EnableFiveOSMotion>
+    <DefineConstants Condition="'$(EnableFiveOSMotion)' == 'true'">$(DefineConstants);FIVEOS_MOTION</DefineConstants>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- CodeWalker.Core is the RAGE resource library used to read/write
+         YTD files for the Mapping Optimize tab. We re-use the DLL that
+         ships with the ydr-writer subproject so there's a single
+         vendored copy. SharpDX is a transitive dep of CodeWalker. -->
+    <Reference Include="CodeWalker.Core">
+      <HintPath>ydr-writer\lib\CodeWalker.Core.dll</HintPath>
+      <Private>true</Private>
+    </Reference>
+    <Reference Include="SharpDX">
+      <HintPath>ydr-writer\lib\SharpDX.dll</HintPath>
+      <Private>true</Private>
+    </Reference>
+    <Reference Include="SharpDX.Mathematics">
+      <HintPath>ydr-writer\lib\SharpDX.Mathematics.dll</HintPath>
+      <Private>true</Private>
+    </Reference>
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Plugin SDK. Stays as a separate DLL beside the host so plugin
+         authors can reference just this 5 KB assembly instead of the
+         128 MB single-file FiveOS.exe. -->
+    <ProjectReference Include="FiveOS.Plugins.Sdk\FiveOS.Plugins.Sdk.csproj" />
+  </ItemGroup>
+
+  <!-- After publish, copy the SDK DLL + a README into a `sdk/` subfolder
+       beside the published exe. Plugin authors download and reference
+       FiveOS.Plugins.Sdk.dll from there. -->
+  <Target Name="CopyPluginSdk" AfterTargets="Publish">
+    <ItemGroup>
+      <_SdkBuild Include="$(OutDir)FiveOS.Plugins.Sdk.dll" />
+      <_SdkBuild Include="$(OutDir)FiveOS.Plugins.Sdk.xml" Condition="Exists('$(OutDir)FiveOS.Plugins.Sdk.xml')" />
+    </ItemGroup>
+    <Copy SourceFiles="@(_SdkBuild)" DestinationFolder="$(PublishDir)sdk\" SkipUnchangedFiles="true" />
+  </Target>
+
+  <ItemGroup>
+    <!-- MVVM helpers -->
+    <PackageReference Include="CommunityToolkit.Mvvm" Version="8.3.2" />
+    <PackageReference Include="SharpCompress" Version="0.49.1" />
+
+    <!-- Fluent (Win11) look. Uses system theme by default. -->
+    <PackageReference Include="WPF-UI" Version="3.0.5" />
+
+    <!-- WebView2 hosts a three.js viewer for the 3D preview - same
+         renderer that worked in the original web UI. WPF's native 3D
+         can't match three.js's PBR + sRGB handling without porting
+         CodeWalker's HLSL shaders, which is a separate v1.1 task. -->
+    <PackageReference Include="Microsoft.Web.WebView2" Version="1.0.2792.45" />
+
+    <!-- Image I/O for the Texture Optimize tab (BC1/BC3 DDS encoding,
+         trim/scale/border, mip chain). -->
+    <PackageReference Include="Magick.NET-Q8-AnyCPU" Version="14.8.1" />
+
+    <!-- Mesh I/O for the Mesh Optimize tab (.obj/.glb/.gltf/.fbx/.dae/.ply/
+         .stl). Same package the ydr-writer subproject uses, so Assimp's
+         native DLL is already familiar to the build. -->
+    <PackageReference Include="AssimpNet" Version="5.0.0-beta1" />
+
+    <!-- Pure-C# QEM decimation + triangle remesh (Reducer / Remesher).
+         Unofficial .NET 8 build of gradientspace/geometry3Sharp — MIT.
+         Used by the Mesh Optimize tab for quadric edge-collapse decimation,
+         entirely in-process (no Python sidecar). -->
+    <PackageReference Include="Geometry3Sharp.DotNet8.Unofficial" Version="1.0.0-d8" />
+
+    <!-- Discord Rich Presence (Lachee, MIT). Used by DiscordPresenceService
+         to surface what the user is doing (active tab, loaded model) on
+         their Discord profile. Off-by-default toggle in Settings → About. -->
+    <PackageReference Include="DiscordRichPresence" Version="1.3.0.28" />
+
+    <!-- Sentry (MIT) — pipes the three existing unhandled-exception hooks
+         (Dispatcher / TaskScheduler / AppDomain) up to a dashboard so
+         crashes don't just sit in %AppData%\FiveOS\crashes.log waiting
+         for a user to remember to send them. Init is a no-op unless the
+         FIVEOS_SENTRY_DSN env-var is set, so distributed builds and dev
+         runs stay completely silent. -->
+    <PackageReference Include="Sentry" Version="6.6.0" />
+
+    <!-- FuzzySharp (MIT) — Levenshtein / partial-ratio matcher used by
+         the PoseToEmoteView bone outliner search so typing "spineRoot"
+         still surfaces "SK_Spine_Root". Replaces a strict
+         ToLower().Contains() match. -->
+    <PackageReference Include="FuzzySharp" Version="2.0.2" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- ydr-writer/ is a sibling .NET project; its sources must not be
+         globbed into the FiveOS compile. The prebuilt ydr-writer.exe
+         ships from Engine/ instead. -->
+    <Compile Remove="ydr-writer\**" />
+    <None Remove="ydr-writer\**" />
+    <Page Remove="ydr-writer\**" />
+    <Resource Remove="ydr-writer\**" />
+    <ApplicationDefinition Remove="ydr-writer\**" />
+    <EmbeddedResource Remove="ydr-writer\**" />
+
+    <!-- Thumbnails addon: kept on-disk locally (see .gitignore) but NOT built
+         into the shipped app. Remove-of-a-missing-file is a harmless no-op, so
+         this is also safe on a clone that doesn't have the files. -->
+    <Compile Remove="ViewModels\ThumbnailViewModel.cs" />
+    <Compile Remove="Views\ThumbnailView.xaml.cs" />
+    <Page Remove="Views\ThumbnailView.xaml" />
+
+    <!-- FiveOS.Plugins.Sdk/ is referenced as a separate project; exclude its
+         sources from the parent compile so we don't double-compile (which
+         produces duplicate AssemblyInfo attributes from its obj/). -->
+    <Compile Remove="FiveOS.Plugins.Sdk\**" />
+    <None Remove="FiveOS.Plugins.Sdk\**" />
+    <Page Remove="FiveOS.Plugins.Sdk\**" />
+    <Resource Remove="FiveOS.Plugins.Sdk\**" />
+    <ApplicationDefinition Remove="FiveOS.Plugins.Sdk\**" />
+    <EmbeddedResource Remove="FiveOS.Plugins.Sdk\**" />
+
+    <!-- FiveOS Motion (proprietary): harmless no-op when files are absent. -->
+    <Compile Remove="Services\MotionCloudClient.cs" Condition="'$(EnableFiveOSMotion)' != 'true'" />
+    <Compile Remove="Services\VideoTranscoder.cs" Condition="'$(EnableFiveOSMotion)' != 'true'" />
+    <Compile Remove="Services\VideoProbe.cs" Condition="'$(EnableFiveOSMotion)' != 'true'" />
+    <Compile Remove="Services\MotionUserSettings.cs" Condition="'$(EnableFiveOSMotion)' != 'true'" />
+    <Compile Remove="Views\PoseToEmoteView.Motion.cs" Condition="'$(EnableFiveOSMotion)' != 'true'" />
+    <Compile Remove="ViewModels\PoseToEmoteViewModel.Motion.cs" Condition="'$(EnableFiveOSMotion)' != 'true'" />
+    <Compile Remove="Views\Motion\MotionHubPanel.xaml.cs" Condition="'$(EnableFiveOSMotion)' != 'true'" />
+    <Page Remove="Views\Motion\MotionHubPanel.xaml" Condition="'$(EnableFiveOSMotion)' != 'true'" />
+    <Resource Remove="Assets\Motion\framing-guide.png" Condition="'$(EnableFiveOSMotion)' != 'true'" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Bundled fallback for the Credits dialog. CreditsWindow first tries
+         to fetch the canonical copy from raw.githubusercontent.com so the
+         list can be updated without a release; this embedded copy is what
+         renders when the user is offline or GitHub is unreachable. -->
+    <EmbeddedResource Include="Assets\credits.json">
+      <LogicalName>FiveOS.credits.json</LogicalName>
+    </EmbeddedResource>
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- UI string tables, embedded so the single-file exe ships them
+         without an extra Assets/ side-directory. LocalizationService
+         loads them by manifest-resource name FiveOS.Locales.<code>.json. -->
+    <EmbeddedResource Include="Assets\Locales\en.json">    <LogicalName>FiveOS.Locales.en.json</LogicalName>    </EmbeddedResource>
+    <EmbeddedResource Include="Assets\Locales\pt-BR.json"> <LogicalName>FiveOS.Locales.pt-BR.json</LogicalName> </EmbeddedResource>
+    <EmbeddedResource Include="Assets\Locales\de.json">    <LogicalName>FiveOS.Locales.de.json</LogicalName>    </EmbeddedResource>
+    <EmbeddedResource Include="Assets\Locales\fr.json">    <LogicalName>FiveOS.Locales.fr.json</LogicalName>    </EmbeddedResource>
+    <EmbeddedResource Include="Assets\Locales\es.json">    <LogicalName>FiveOS.Locales.es.json</LogicalName>    </EmbeddedResource>
+    <EmbeddedResource Include="Assets\Locales\tr.json">    <LogicalName>FiveOS.Locales.tr.json</LogicalName>    </EmbeddedResource>
+    <EmbeddedResource Include="Assets\Locales\pl.json">    <LogicalName>FiveOS.Locales.pl.json</LogicalName>    </EmbeddedResource>
+    <EmbeddedResource Include="Assets\Locales\nl.json">    <LogicalName>FiveOS.Locales.nl.json</LogicalName>    </EmbeddedResource>
+    <EmbeddedResource Include="Assets\Locales\it.json">    <LogicalName>FiveOS.Locales.it.json</LogicalName>    </EmbeddedResource>
+    <EmbeddedResource Include="Assets\Locales\ru.json">    <LogicalName>FiveOS.Locales.ru.json</LogicalName>    </EmbeddedResource>
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Branding assets are embedded as WPF resources so Window.Icon and
+         Image.Source can reference them via pack:// URIs. -->
+    <Resource Include="Assets\Branding\FiveOS.ico" />
+    <Resource Include="Assets\Branding\FiveOS.png" />
+    <Resource Include="Assets\Motion\framing-guide.png" Condition="'$(EnableFiveOSMotion)' == 'true'" />
+    <!-- Loose copies for dev (F5 from VS). Viewer/Engine also ship via the
+         embedded zip (see EmbedRuntimeAssetZips). -->
+    <None Include="Assets\**\*" Exclude="Assets\Branding\**\*;Assets\Motion\**\*;Assets\credits.json;Assets\Locales\**\*">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <CopyToPublishDirectory>Never</CopyToPublishDirectory>
+    </None>
+    <None Include="Engine\**\*" Exclude="Engine\SketchUp*.dll;Engine\skp2gltf.exe">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <CopyToPublishDirectory>Never</CopyToPublishDirectory>
+    </None>
+  </ItemGroup>
+
+  <!-- Zip Assets/Viewer/ + Engine/ into intermediate output and embed
+       the archives into the assembly. RuntimeAssets extracts them to
+       %LOCALAPPDATA%\FiveOS\runtime\<version>\ on first launch.
+       SketchUp SDK leftovers stay excluded.
+       Condition: the WPF markup-compile temp project (*_wpftmp) copies this
+       project file and re-runs the target CONCURRENTLY with the main build —
+       one deletes the staging dir while the other zips it (intermittent
+       MSB3941/MSB3943/CS1566). The temp project spawns during
+       MarkupCompilePass1, by which point the main build's BeforeBuild has
+       already produced both zips in the shared IntermediateOutputPath, so it
+       can safely skip the work. -->
+  <Target Name="EmbedRuntimeAssetZips" BeforeTargets="BeforeBuild;BeforeCompile;MarkupCompilePass1"
+          Condition="!$(MSBuildProjectName.EndsWith('_wpftmp'))">
+    <PropertyGroup>
+      <_EmbedStaging>$([System.IO.Path]::GetFullPath('$(IntermediateOutputPath)Embedded'))</_EmbedStaging>
+      <_ViewerStage>$(_EmbedStaging)\viewer-src</_ViewerStage>
+      <_EngineStage>$(_EmbedStaging)\engine-src</_EngineStage>
+    </PropertyGroup>
+    <RemoveDir Directories="$(_ViewerStage);$(_EngineStage)" Condition="Exists('$(_ViewerStage)') Or Exists('$(_EngineStage)')" />
+    <MakeDir Directories="$(_EmbedStaging);$(_ViewerStage);$(_EngineStage)" />
+
+    <ItemGroup>
+      <_ViewerEmbed Include="$(MSBuildProjectDirectory)\Assets\Viewer\**\*" />
+      <_EngineEmbed Include="$(MSBuildProjectDirectory)\Engine\**\*"
+                    Exclude="$(MSBuildProjectDirectory)\Engine\SketchUp*.dll;$(MSBuildProjectDirectory)\Engine\skp2gltf.exe;$(MSBuildProjectDirectory)\Engine\**\*.pdb" />
+    </ItemGroup>
+
+    <Copy SourceFiles="@(_ViewerEmbed)"
+          DestinationFiles="@(_ViewerEmbed->'$(_ViewerStage)\%(RecursiveDir)%(Filename)%(Extension)')" />
+    <Copy SourceFiles="@(_EngineEmbed)"
+          DestinationFiles="@(_EngineEmbed->'$(_EngineStage)\%(RecursiveDir)%(Filename)%(Extension)')" />
+
+    <ZipDirectory SourceDirectory="$(_ViewerStage)" DestinationFile="$(_EmbedStaging)\viewer.zip" Overwrite="true" />
+    <ZipDirectory SourceDirectory="$(_EngineStage)" DestinationFile="$(_EmbedStaging)\engine.zip" Overwrite="true" />
+  </Target>
+
+  <ItemGroup>
+    <EmbeddedResource Include="$(IntermediateOutputPath)Embedded\viewer.zip" Visible="false">
+      <LogicalName>FiveOS.viewer.zip</LogicalName>
+    </EmbeddedResource>
+    <EmbeddedResource Include="$(IntermediateOutputPath)Embedded\engine.zip" Visible="false">
+      <LogicalName>FiveOS.engine.zip</LogicalName>
+    </EmbeddedResource>
+  </ItemGroup>
+
+  <!-- ── Authenticode signing of the published single-file exe ──────────
+       Unsigned exes trip SmartScreen ("Unknown publisher") and heuristic
+       AV false positives (e.g. Bkav on VirusTotal). Signing is the real,
+       permanent fix. This target is INERT by default; enable it with:
+
+         dotnet publish -c Release /p:SignExe=true
+
+       Recommended identity: Azure Artifact Signing (formerly Trusted
+       Signing, ~$10/mo). Set SigningDlib + SigningMetadata to your
+       Azure.CodeSigning dlib + metadata.json (see src/SIGNING.md). To use
+       a PFX/cert-store certificate instead, override the Exec below.     -->
+  <PropertyGroup>
+    <SignExe Condition="'$(SignExe)'==''">false</SignExe>
+    <SignToolPath Condition="'$(SignToolPath)'==''">signtool.exe</SignToolPath>
+    <TimestampUrl Condition="'$(TimestampUrl)'==''">http://timestamp.acs.microsoft.com</TimestampUrl>
+  </PropertyGroup>
+
+  <Target Name="SignPublishedExe" AfterTargets="Publish" Condition="'$(SignExe)'=='true'">
+    <Error Condition="'$(SigningDlib)'=='' Or '$(SigningMetadata)'==''"
+           Text="SignExe=true but SigningDlib/SigningMetadata are unset. Point them at your Azure Artifact Signing dlib + metadata.json — see src/SIGNING.md. (For a PFX cert, override the Exec in the SignPublishedExe target.)" />
+    <Message Importance="high" Text="Signing $(PublishDir)FiveOS.exe ..." />
+    <Exec Command="&quot;$(SignToolPath)&quot; sign /v /fd SHA256 /tr &quot;$(TimestampUrl)&quot; /td SHA256 /dlib &quot;$(SigningDlib)&quot; /dmdf &quot;$(SigningMetadata)&quot; &quot;$(PublishDir)FiveOS.exe&quot;" />
+    <Message Importance="high" Text="Verifying signature ..." />
+    <Exec Command="&quot;$(SignToolPath)&quot; verify /pa /v &quot;$(PublishDir)FiveOS.exe&quot;" />
+  </Target>
+
+</Project>

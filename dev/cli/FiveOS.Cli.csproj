@@ -1,0 +1,90 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    FiveOS.Cli — headless command-line front end over the FiveOS service layer.
+
+    MILESTONE 1 (this file) is a Windows-only spike: it link-includes the
+    WPF-free `src/Services/**` sources directly (single source of truth — these
+    are <Compile Include> references to the ORIGINAL files, not copies) and
+    reuses the existing win-x64 engine (ydr-writer.exe + tools/texconv.exe)
+    shipped beside the exe. This proves the whole optimize/convert/pack service
+    layer runs with NO WPF, no viewer, no GUI.
+
+    MILESTONE 2 replaces the <Compile Include> below with a ProjectReference to
+    a new portable `FiveOS.Core` (net8.0) library — at which point this project
+    retargets to net8.0 and publishes linux-x64 too. See the CLI plan.
+  -->
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <!-- M1 spike stays net8.0-windows because the vendored refs were validated
+         there and we reuse the win-x64 engine. M2 drops -windows. -->
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <AssemblyName>fiveos</AssemblyName>
+    <RootNamespace>FiveOS.Cli</RootNamespace>
+    <Version>0.1.0</Version>
+    <InvariantGlobalization>true</InvariantGlobalization>
+
+    <!-- The link-included service files were authored under the WPF project's
+         analyzer settings; silence its nullable-flow warnings here so the spike
+         build stays clean. Magick.NET publishes CVE advisories (NU190x) that
+         fire only on untrusted image input — same rationale as the WPF csproj. -->
+    <NoWarn>$(NoWarn);NU1901;NU1902;NU1903;CS8600;CS8601;CS8602;CS8603;CS8604;CS8618;CS8620;CS8625</NoWarn>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- Same vendored RAGE stack the ydr-writer/WPF projects use. -->
+    <Reference Include="CodeWalker.Core">
+      <HintPath>..\..\src\ydr-writer\lib\CodeWalker.Core.dll</HintPath>
+      <Private>true</Private>
+    </Reference>
+    <Reference Include="SharpDX">
+      <HintPath>..\..\src\ydr-writer\lib\SharpDX.dll</HintPath>
+      <Private>true</Private>
+    </Reference>
+    <Reference Include="SharpDX.Mathematics">
+      <HintPath>..\..\src\ydr-writer\lib\SharpDX.Mathematics.dll</HintPath>
+      <Private>true</Private>
+    </Reference>
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- The domain packages the service layer pulls in (grepped from
+         src/Services/**). WPF-only packages (WPF-UI, WebView2, WebView3D,
+         DiscordRichPresence, FuzzySharp) are deliberately absent. -->
+    <PackageReference Include="Magick.NET-Q8-AnyCPU" Version="14.8.1" />
+    <PackageReference Include="AssimpNet" Version="5.0.0-beta1" />
+    <PackageReference Include="Geometry3Sharp.DotNet8.Unofficial" Version="1.0.0-d8" />
+    <PackageReference Include="SharpCompress" Version="0.49.1" />
+    <PackageReference Include="CommunityToolkit.Mvvm" Version="8.3.2" />
+    <PackageReference Include="Sentry" Version="6.6.0" />
+    <!-- SecretStore.cs uses Windows DPAPI (ProtectedData); the WPF app gets it
+         from the Windows Desktop framework, a plain net8.0-windows console does
+         not. M2 replaces this with the ISecretProtector seam for Linux. -->
+    <PackageReference Include="System.Security.Cryptography.ProtectedData" Version="8.0.0" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Link-include the WPF-free service layer. The five excluded files are
+         the only ones that touch WPF/UI types (System.Windows Rect/Point,
+         BitmapImage, cmd.exe self-update, Discord Rich Presence) and are not
+         needed headless. -->
+    <Compile Include="..\..\src\Services\**\*.cs"
+             Exclude="..\..\src\Services\TimelineEditorModels.cs;..\..\src\Services\TimelineController.cs;..\..\src\Services\CrashLog.cs;..\..\src\Services\UpdateChecker.cs;..\..\src\Services\DiscordPresenceService.cs" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Ship the Windows engine (ydr-writer.exe + tools/texconv.exe) into an
+         Engine/ folder beside the exe. RuntimeAssets' loose-folder fallback and
+         YtdOptimizer's texconv locator both resolve from there, so no embedded
+         zips / WPF assembly are needed. -->
+    <None Include="..\..\src\Engine\**\*" Exclude="..\..\src\Engine\**\*.pdb">
+      <Link>Engine\%(RecursiveDir)%(Filename)%(Extension)</Link>
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
+    </None>
+  </ItemGroup>
+
+</Project>
