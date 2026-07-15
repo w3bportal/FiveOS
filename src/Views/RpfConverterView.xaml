@@ -1,0 +1,464 @@
+<UserControl x:Class="FiveOS.Views.RpfConverterView"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:ui="http://schemas.lepo.co/wpfui/2022/xaml"
+             xmlns:vm="clr-namespace:FiveOS.ViewModels"
+             xmlns:ctrl="clr-namespace:FiveOS.Views.Controls"
+             xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+             xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+             mc:Ignorable="d"
+             AllowDrop="True"
+             Drop="OnDrop"
+             DragOver="OnDragOver"
+             DragEnter="OnDragEnter"
+             DragLeave="OnDragLeave"
+             d:DataContext="{d:DesignInstance vm:RpfConverterViewModel}">
+
+    <UserControl.Resources>
+        <Style x:Key="SectionHeader" TargetType="TextBlock">
+            <Setter Property="FontSize" Value="11" />
+            <Setter Property="FontWeight" Value="SemiBold" />
+            <Setter Property="Opacity" Value="0.55" />
+            <Setter Property="Margin" Value="0,0,0,8" />
+        </Style>
+        <Style x:Key="FieldLabel" TargetType="TextBlock">
+            <Setter Property="FontSize" Value="11" />
+            <Setter Property="Opacity" Value="0.7" />
+            <Setter Property="Margin" Value="0,0,0,4" />
+        </Style>
+    </UserControl.Resources>
+
+    <Grid>
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+            <RowDefinition Height="Auto" />
+        </Grid.RowDefinitions>
+
+        <!-- ───────── Header ───────── -->
+        <Border Grid.Row="0"
+                Background="{DynamicResource ControlFillColorDefaultBrush}"
+                BorderThickness="0,0,0,1"
+                BorderBrush="{DynamicResource ControlElevationBorderBrush}"
+                Padding="20,16">
+            <StackPanel Orientation="Horizontal">
+                <Border CornerRadius="6"
+                        Background="{DynamicResource SubtleFillColorTertiaryBrush}"
+                        BorderThickness="1"
+                        BorderBrush="{DynamicResource ControlElevationBorderBrush}"
+                        Padding="8" Margin="0,0,12,0" VerticalAlignment="Center">
+                    <ui:SymbolIcon Symbol="Archive24" FontSize="20" />
+                </Border>
+                <StackPanel VerticalAlignment="Center">
+                    <TextBlock Text="RPF"
+                               FontSize="15" FontWeight="SemiBold" />
+                    <TextBlock Text="Pack a loose FiveM resource folder into a single OPEN .rpf archive (opens in OpenIV / CodeWalker)."
+                               FontSize="11" Opacity="0.6" Margin="0,2,0,0" />
+                </StackPanel>
+            </StackPanel>
+        </Border>
+
+        <!-- ───────── Body ───────── -->
+        <Grid Grid.Row="1">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="300" MinWidth="200" MaxWidth="400" />
+                <ColumnDefinition Width="*" MinWidth="200" />
+            </Grid.ColumnDefinitions>
+
+            <!-- Options sidebar -->
+            <Border Grid.Column="0"
+                    Background="{DynamicResource ControlFillColorDefaultBrush}"
+                    BorderThickness="0,0,1,0"
+                    BorderBrush="{DynamicResource ControlElevationBorderBrush}">
+                <ScrollViewer VerticalScrollBarVisibility="Auto">
+                    <StackPanel Margin="20,16">
+
+                        <!-- Output type -->
+                        <TextBlock Text="OUTPUT TYPE" Style="{StaticResource SectionHeader}" />
+                        <ComboBox SelectedIndex="{Binding OutputModeIndex, Mode=TwoWay}"
+                                  HorizontalAlignment="Stretch"
+                                  ToolTip="Raw: plain .rpf. Singleplayer ped dlc.rpf / OpenIV mods folder: add a NEW standalone ped (GTA V singleplayer). Add-on: stream your model as a NEW named asset with its own .ytyp — spawnable by name, replaces nothing. Replace → server resource: swap a vanilla asset for everyone on YOUR FiveM server (reliable). Replace → client-side: swap it locally on any server (only you see it; Pure-Mode/anti-cheat caveats).">
+                            <ComboBoxItem Content="Raw packed .rpf" />
+                            <ComboBoxItem Content="Singleplayer ped dlc.rpf" />
+                            <ComboBoxItem Content="Singleplayer ped — OpenIV mods folder" />
+                            <ComboBoxItem Content="Add-on asset → server resource (FiveM, new)" />
+                            <ComboBoxItem Content="Replace asset → server resource (FiveM)" />
+                            <ComboBoxItem Content="Replace asset → client-side (FiveM, local)" />
+                        </ComboBox>
+
+                        <!-- Target asset (replace modes only) -->
+                        <StackPanel Visibility="{Binding IsReplaceMode, Converter={StaticResource BooleanToVisibility}}">
+                            <TextBlock Text="ASSET TO REPLACE" Style="{StaticResource SectionHeader}" Margin="0,20,0,8" />
+                            <ui:TextBox Text="{Binding TargetAssetName, UpdateSourceTrigger=PropertyChanged}"
+                                        PlaceholderText="e.g. prop_phone_ing"
+                                        ToolTip="The EXACT vanilla asset name (file stem, no extension) your model should override. Your dropped model is renamed to this. Find it in OpenIV/CodeWalker." />
+                            <TextBlock FontSize="11" Opacity="0.55" TextWrapping="Wrap" Margin="0,4,0,0"
+                                       Text="Your dropped model (.ydr) + texture (.ytd) are renamed to this exact name so RAGE loads them in place of the original. v1 supports props (.ydr) + textures (.ytd)." />
+                        </StackPanel>
+
+                        <!-- New asset name (add-on mode only, optional) -->
+                        <StackPanel Visibility="{Binding IsAddonMode, Converter={StaticResource BooleanToVisibility}}">
+                            <TextBlock Text="NEW ASSET NAME (OPTIONAL)" Style="{StaticResource SectionHeader}" Margin="0,20,0,8" />
+                            <ui:TextBox Text="{Binding NewAssetName, UpdateSourceTrigger=PropertyChanged}"
+                                        PlaceholderText="defaults to the model's filename"
+                                        ToolTip="Rename the model to this archetype name (lowercase, a-z 0-9 _). Leave empty to keep the .ydr's own name. Only applies when the folder holds ONE model." />
+                            <TextBlock FontSize="11" Opacity="0.55" TextWrapping="Wrap" Margin="0,4,0,0"
+                                       Text="The asset keeps (or takes) its OWN name — nothing vanilla is touched. v1 supports props (.ydr) + textures (.ytd)." />
+                        </StackPanel>
+
+                        <!-- Source folder -->
+                        <TextBlock Text="SOURCE RESOURCE FOLDER" Style="{StaticResource SectionHeader}" Margin="0,20,0,8" />
+                        <Border CornerRadius="6"
+                                Background="{DynamicResource SubtleFillColorTertiaryBrush}"
+                                BorderThickness="1"
+                                BorderBrush="{DynamicResource ControlElevationBorderBrush}"
+                                Padding="10,8">
+                            <TextBlock Text="{Binding InputDisplay}"
+                                       FontSize="11" FontFamily="Consolas"
+                                       TextWrapping="Wrap" Opacity="0.85" />
+                        </Border>
+                        <ui:Button Content="Browse…"
+                                   Appearance="Secondary"
+                                   HorizontalAlignment="Stretch"
+                                   Margin="0,8,0,0"
+                                   Click="OnBrowseInput"
+                                   ToolTip="Pick the FiveM resource folder to pack (the one with stream/ and fxmanifest.lua).">
+                            <ui:Button.Icon>
+                                <ui:SymbolIcon Symbol="FolderOpen24" />
+                            </ui:Button.Icon>
+                        </ui:Button>
+
+                        <!-- Output -->
+                        <TextBlock Text="{Binding OutputLabel}" Style="{StaticResource SectionHeader}" Margin="0,20,0,8" />
+                        <Border CornerRadius="6"
+                                Background="{DynamicResource SubtleFillColorTertiaryBrush}"
+                                BorderThickness="1"
+                                BorderBrush="{DynamicResource ControlElevationBorderBrush}"
+                                Padding="10,8">
+                            <TextBlock Text="{Binding OutputPath}"
+                                       FontSize="11" FontFamily="Consolas"
+                                       TextWrapping="Wrap" Opacity="0.85" />
+                        </Border>
+                        <ui:Button Content="Save as…"
+                                   Appearance="Secondary"
+                                   HorizontalAlignment="Stretch"
+                                   Margin="0,8,0,0"
+                                   Click="OnBrowseOutput"
+                                   ToolTip="Choose where to write the .rpf. Defaults to a file next to the source folder.">
+                            <ui:Button.Icon>
+                                <ui:SymbolIcon Symbol="Save24" />
+                            </ui:Button.Icon>
+                        </ui:Button>
+
+                        <!-- Options (raw packer only) -->
+                        <StackPanel Visibility="{Binding IsRawMode, Converter={StaticResource BooleanToVisibility}}">
+                            <TextBlock Text="OPTIONS" Style="{StaticResource SectionHeader}" Margin="0,20,0,8" />
+                            <ui:ToggleSwitch IsChecked="{Binding FlattenStreamFolder}"
+                                             Content="Flatten stream/ folder"
+                                             ToolTip="Drop the leading stream\ so assets land at the archive root — the usual layout when opening an .rpf in OpenIV." />
+                            <ui:ToggleSwitch IsChecked="{Binding IncludeAllFiles}"
+                                             Content="Include all files"
+                                             Margin="0,8,0,0"
+                                             ToolTip="Off: only RAGE assets (stream files + .meta/.xml) are packed; lua/js/manifest/images/readmes are skipped. On: pack everything except VCS/OS cruft." />
+                        </StackPanel>
+
+                        <!-- Singleplayer-DLC info note -->
+                        <Border Visibility="{Binding IsSpMode, Converter={StaticResource BooleanToVisibility}}"
+                                CornerRadius="6"
+                                Background="{DynamicResource SubtleFillColorTertiaryBrush}"
+                                BorderThickness="1"
+                                BorderBrush="{DynamicResource ControlElevationBorderBrush}"
+                                Padding="10,8" Margin="0,20,0,0">
+                            <StackPanel>
+                                <TextBlock Text="SINGLEPLAYER PED DLC" FontSize="9" FontWeight="SemiBold" Opacity="0.6" Margin="0,0,0,4" />
+                                <TextBlock TextWrapping="Wrap" FontSize="11" Opacity="0.7"
+                                           Text="Builds an OpenIV-ready dlc.rpf (content.xml / setup2.xml + nested model archive) for standalone add-on peds. Freemode/EUP component clothing is detected and flagged for manual review instead of producing a broken pack." />
+                            </StackPanel>
+                        </Border>
+
+                        <!-- OpenIV mods-folder (SP) info note -->
+                        <Border Visibility="{Binding IsOpenIvModsMode, Converter={StaticResource BooleanToVisibility}}"
+                                CornerRadius="6"
+                                Background="{DynamicResource SubtleFillColorTertiaryBrush}"
+                                BorderThickness="1"
+                                BorderBrush="{DynamicResource ControlElevationBorderBrush}"
+                                Padding="10,8" Margin="0,20,0,0">
+                            <StackPanel>
+                                <TextBlock Text="OPENIV MODS FOLDER (SINGLEPLAYER)" FontSize="9" FontWeight="SemiBold" Opacity="0.6" Margin="0,0,0,4" />
+                                <TextBlock TextWrapping="Wrap" FontSize="11" Opacity="0.7"
+                                           Text="Lays the add-on ped dlc.rpf out as mods\update\x64\dlcpacks\&lt;name&gt; for GTA V's OpenIV mods folder (singleplayer). NOTE: FiveM's client loader does NOT read this layout — for FiveM use the Replace modes. You still add the dlclist.xml line in mods\update\update.rpf (see the README)." />
+                            </StackPanel>
+                        </Border>
+
+                        <!-- Add-on → server resource note -->
+                        <Border Visibility="{Binding IsAddonMode, Converter={StaticResource BooleanToVisibility}}"
+                                CornerRadius="6"
+                                Background="{DynamicResource SubtleFillColorTertiaryBrush}"
+                                BorderThickness="1"
+                                BorderBrush="{DynamicResource ControlElevationBorderBrush}"
+                                Padding="10,8" Margin="0,20,0,0">
+                            <StackPanel>
+                                <TextBlock Text="ADD-ON → SERVER RESOURCE (NEW ASSET)" FontSize="9" FontWeight="SemiBold" Opacity="0.6" Margin="0,0,0,4" />
+                                <TextBlock TextWrapping="Wrap" FontSize="11" Opacity="0.7"
+                                           Text="Builds a FiveM resource that streams your model as a NEW named asset with its own .ytyp archetype — spawn it by name via CreateObject, .ymap placement, or housing/furniture scripts. Nothing vanilla is replaced. Drop it in resources/ and ensure it." />
+                            </StackPanel>
+                        </Border>
+
+                        <!-- Replace → server resource note -->
+                        <Border Visibility="{Binding IsReplaceServer, Converter={StaticResource BooleanToVisibility}}"
+                                CornerRadius="6"
+                                Background="{DynamicResource SubtleFillColorTertiaryBrush}"
+                                BorderThickness="1"
+                                BorderBrush="{DynamicResource ControlElevationBorderBrush}"
+                                Padding="10,8" Margin="0,20,0,0">
+                            <StackPanel>
+                                <TextBlock Text="REPLACE → SERVER RESOURCE (RELIABLE)" FontSize="9" FontWeight="SemiBold" Opacity="0.6" Margin="0,0,0,4" />
+                                <TextBlock TextWrapping="Wrap" FontSize="11" Opacity="0.7"
+                                           Text="Builds a FiveM resource that streams your model named exactly as the vanilla asset, so it overrides it for EVERYONE on your server. Reliable, never bans — but it lives on your server (not 'any' server). Drop it in resources/ and ensure it." />
+                            </StackPanel>
+                        </Border>
+
+                        <!-- Replace → client-side warning note -->
+                        <Border Visibility="{Binding IsReplaceClient, Converter={StaticResource BooleanToVisibility}}"
+                                CornerRadius="6"
+                                Background="{DynamicResource SubtleFillColorTertiaryBrush}"
+                                BorderThickness="1"
+                                BorderBrush="#E0A33A"
+                                Padding="10,8" Margin="0,20,0,0">
+                            <StackPanel>
+                                <StackPanel Orientation="Horizontal" Margin="0,0,0,4">
+                                    <ui:SymbolIcon Symbol="Warning24" FontSize="13" Foreground="#E0A33A" VerticalAlignment="Center" Margin="0,0,6,0" />
+                                    <TextBlock Text="REPLACE → CLIENT-SIDE (LOCAL ONLY)" FontSize="9" FontWeight="SemiBold" Opacity="0.8" VerticalAlignment="Center" />
+                                </StackPanel>
+                                <TextBlock TextWrapping="Wrap" FontSize="11" Opacity="0.75"
+                                           Text="Builds a mods\&lt;name&gt;.rpf (assembly.xml overlay) to copy into FiveM.app — only YOU see it, server unaffected. Caveats: blocked by Pure-Mode servers; anti-cheat can KICK/BAN you for modified client files; and this can't be verified in-game by the builder. Use on your own / permitting servers." />
+                            </StackPanel>
+                        </Border>
+
+                        <TextBlock Margin="0,16,0,0" FontSize="11" Opacity="0.55" TextWrapping="Wrap"
+                                   Text="Output is written OPEN (unencrypted) — the standard for mods. Existing game archives are never touched." />
+                    </StackPanel>
+                </ScrollViewer>
+            </Border>
+
+            <!-- Results -->
+            <Grid Grid.Column="1" Margin="16,12,16,12">
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="*" />
+                </Grid.RowDefinitions>
+
+                <!-- Manual-review / warnings (SP DLC path) -->
+                <Border Grid.Row="0"
+                        Visibility="{Binding HasReviewNotes, Converter={StaticResource BooleanToVisibility}}"
+                        CornerRadius="8" BorderThickness="1" Margin="0,0,0,10"
+                        BorderBrush="#E0A33A"
+                        Background="{DynamicResource SubtleFillColorTertiaryBrush}"
+                        Padding="12,10">
+                    <StackPanel>
+                        <StackPanel Orientation="Horizontal" Margin="0,0,0,6">
+                            <ui:SymbolIcon Symbol="Warning24" FontSize="14" Foreground="#E0A33A"
+                                           VerticalAlignment="Center" Margin="0,0,6,0" />
+                            <TextBlock Text="NEEDS MANUAL REVIEW" FontSize="10" FontWeight="SemiBold"
+                                       Opacity="0.8" VerticalAlignment="Center" />
+                        </StackPanel>
+                        <ItemsControl ItemsSource="{Binding ReviewNotes}">
+                            <ItemsControl.ItemTemplate>
+                                <DataTemplate>
+                                    <TextBlock Text="{Binding}" FontSize="11" Opacity="0.85"
+                                               TextWrapping="Wrap" Margin="0,1" />
+                                </DataTemplate>
+                            </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+                    </StackPanel>
+                </Border>
+
+                <Border Grid.Row="1"
+                        CornerRadius="8"
+                        BorderThickness="1"
+                        BorderBrush="{DynamicResource ControlElevationBorderBrush}">
+                    <Grid>
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="*" />
+                        </Grid.RowDefinitions>
+
+                        <Border Grid.Row="0"
+                                Background="{DynamicResource ControlFillColorDefaultBrush}"
+                                BorderThickness="0,0,0,1"
+                                BorderBrush="{DynamicResource ControlElevationBorderBrush}"
+                                CornerRadius="8,8,0,0"
+                                Padding="14,10">
+                            <TextBlock Text="PACK CONTENTS"
+                                       FontSize="11" FontWeight="SemiBold" Opacity="0.7" />
+                        </Border>
+
+                        <!-- Empty state = a real drop target (answers "where do I drop it?") -->
+                        <Border Grid.Row="1"
+                                Visibility="{Binding HasRows, Converter={StaticResource InverseBooleanToVisibility}}"
+                                Margin="16"
+                                Background="Transparent"
+                                BorderBrush="{DynamicResource AccentControlElevationBorderBrush}"
+                                BorderThickness="2"
+                                CornerRadius="10">
+                            <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center" MaxWidth="400">
+                                <ui:SymbolIcon Symbol="ArrowUpload24" FontSize="52" Opacity="0.55"
+                                               HorizontalAlignment="Center" Margin="0,0,0,14" />
+                                <TextBlock Text="Drop a FiveM resource folder here"
+                                           FontSize="18" FontWeight="SemiBold"
+                                           HorizontalAlignment="Center" Margin="0,0,0,4" />
+                                <TextBlock Text="…or use Browse on the left. Every file packed — and every one skipped — will be listed here."
+                                           FontSize="13" Opacity="0.65"
+                                           HorizontalAlignment="Center"
+                                           TextWrapping="Wrap" TextAlignment="Center" />
+                            </StackPanel>
+                        </Border>
+
+                        <!-- Rows -->
+                        <ListBox Grid.Row="1"
+                                 Visibility="{Binding HasRows, Converter={StaticResource BooleanToVisibility}}"
+                                 ItemsSource="{Binding Rows}"
+                                 BorderThickness="0"
+                                 Background="Transparent"
+                                 ScrollViewer.HorizontalScrollBarVisibility="Disabled">
+                            <ListBox.ItemTemplate>
+                                <DataTemplate>
+                                    <Grid Margin="4,3">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="Auto" />
+                                            <ColumnDefinition Width="Auto" />
+                                            <ColumnDefinition Width="*" />
+                                            <ColumnDefinition Width="Auto" />
+                                            <ColumnDefinition Width="Auto" />
+                                        </Grid.ColumnDefinitions>
+
+                                        <!-- Status icon -->
+                                        <ui:SymbolIcon Grid.Column="0" FontSize="13" Margin="0,0,8,0" VerticalAlignment="Center">
+                                            <ui:SymbolIcon.Style>
+                                                <Style TargetType="ui:SymbolIcon">
+                                                    <Setter Property="Symbol" Value="Checkmark24" />
+                                                    <Setter Property="Foreground" Value="#4FBF6F" />
+                                                    <Style.Triggers>
+                                                        <DataTrigger Binding="{Binding Status}" Value="Skipped">
+                                                            <Setter Property="Symbol" Value="Subtract24" />
+                                                            <Setter Property="Foreground" Value="{DynamicResource TextFillColorTertiaryBrush}" />
+                                                        </DataTrigger>
+                                                        <DataTrigger Binding="{Binding Status}" Value="Error">
+                                                            <Setter Property="Symbol" Value="ErrorCircle24" />
+                                                            <Setter Property="Foreground" Value="#E45757" />
+                                                        </DataTrigger>
+                                                    </Style.Triggers>
+                                                </Style>
+                                            </ui:SymbolIcon.Style>
+                                        </ui:SymbolIcon>
+
+                                        <!-- Type badge -->
+                                        <Border Grid.Column="1"
+                                                Background="{DynamicResource AccentFillColorDefaultBrush}"
+                                                CornerRadius="3" Padding="6,1" VerticalAlignment="Center">
+                                            <TextBlock Text="{Binding TypeBadge}" FontSize="10" FontWeight="SemiBold" Foreground="White" />
+                                        </Border>
+
+                                        <!-- Archive path -->
+                                        <TextBlock Grid.Column="2"
+                                                   Text="{Binding ArchivePath}"
+                                                   Margin="10,0,8,0"
+                                                   VerticalAlignment="Center"
+                                                   TextTrimming="CharacterEllipsis"
+                                                   FontFamily="Consolas" FontSize="12"
+                                                   ToolTip="{Binding Detail}" />
+
+                                        <!-- Kind badge (RES / BIN / —) -->
+                                        <Border Grid.Column="3"
+                                                Background="{DynamicResource SubtleFillColorTertiaryBrush}"
+                                                BorderBrush="{DynamicResource ControlElevationBorderBrush}"
+                                                BorderThickness="1"
+                                                CornerRadius="3" Padding="5,1" Margin="0,0,10,0" VerticalAlignment="Center">
+                                            <TextBlock Text="{Binding KindBadge}" FontSize="9" Opacity="0.8" />
+                                        </Border>
+
+                                        <!-- Size / skip reason -->
+                                        <TextBlock Grid.Column="4"
+                                                   VerticalAlignment="Center"
+                                                   FontSize="11" Opacity="0.7"
+                                                   FontFamily="Consolas"
+                                                   MinWidth="70" TextAlignment="Right"
+                                                   Text="{Binding SizeDisplay}" />
+                                    </Grid>
+                                </DataTemplate>
+                            </ListBox.ItemTemplate>
+                        </ListBox>
+                    </Grid>
+                </Border>
+            </Grid>
+
+        </Grid>
+
+        <!-- ───────── Footer ───────── -->
+        <Border Grid.Row="2"
+                BorderThickness="0,1,0,0"
+                BorderBrush="{DynamicResource ControlElevationBorderBrush}"
+                Background="{DynamicResource ControlFillColorDefaultBrush}"
+                Padding="16,12">
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+
+                <ctrl:DotMatrixLoader Grid.Column="0"
+                                      LoaderStyle="BlockDrop"
+                                      DotSize="5" DotSpacing="2"
+                                      Margin="0,0,12,0"
+                                      VerticalAlignment="Center"
+                                      Visibility="{Binding IsProcessing, Converter={StaticResource BooleanToVisibility}}" />
+
+                <StackPanel Grid.Column="1" Margin="0,0,16,0" VerticalAlignment="Center">
+                    <TextBlock Text="{Binding Summary}" FontSize="12" Opacity="0.85"
+                               TextTrimming="CharacterEllipsis" ToolTip="{Binding Summary}" />
+                    <ProgressBar IsIndeterminate="True" Height="3" Margin="0,4,0,0"
+                                 Visibility="{Binding IsProcessing, Converter={StaticResource BooleanToVisibility}}" />
+                </StackPanel>
+
+                <ui:Button Grid.Column="2" Content="Open output"
+                           Appearance="Secondary" Margin="0,0,8,0"
+                           IsEnabled="{Binding HasOutput}"
+                           Click="OnOpenOutput"
+                           ToolTip="Open the produced .rpf / pack folder in Explorer.">
+                    <ui:Button.Icon>
+                        <ui:SymbolIcon Symbol="FolderOpen24" />
+                    </ui:Button.Icon>
+                </ui:Button>
+
+                <ui:Button Grid.Column="3"
+                           Content="{Binding ConvertButtonText}"
+                           Appearance="Primary"
+                           Padding="32,12"
+                           FontSize="13" FontWeight="SemiBold"
+                           IsEnabled="{Binding CanConvert}"
+                           Click="OnConvert"
+                           ToolTip="Pack the source folder into the output, per the selected output type.">
+                    <ui:Button.Icon>
+                        <ui:SymbolIcon Symbol="Archive24" />
+                    </ui:Button.Icon>
+                </ui:Button>
+            </Grid>
+        </Border>
+
+        <!-- Drag-over overlay: shows across the whole tab while a valid drag is
+             in progress so the user gets clear "release to load" feedback. -->
+        <Border x:Name="DropOverlay" Grid.RowSpan="3"
+                Visibility="Collapsed" IsHitTestVisible="False"
+                Background="#B0202020"
+                BorderBrush="{DynamicResource AccentControlElevationBorderBrush}"
+                BorderThickness="3" CornerRadius="8" Margin="6">
+            <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center">
+                <ui:SymbolIcon Symbol="ArrowUpload24" FontSize="60" HorizontalAlignment="Center" Margin="0,0,0,12" />
+                <TextBlock Text="Drop the resource folder to load it"
+                           FontSize="20" FontWeight="SemiBold" HorizontalAlignment="Center" Foreground="White" />
+            </StackPanel>
+        </Border>
+    </Grid>
+</UserControl>
