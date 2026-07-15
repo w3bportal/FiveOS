@@ -1,0 +1,292 @@
+<UserControl x:Class="FiveOS.Views.CarcolsFixerView"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:ui="http://schemas.lepo.co/wpfui/2022/xaml"
+             xmlns:vm="clr-namespace:FiveOS.ViewModels"
+             xmlns:ctrl="clr-namespace:FiveOS.Views.Controls"
+             xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+             xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+             mc:Ignorable="d"
+             d:DataContext="{d:DesignInstance vm:CarcolsFixerViewModel}">
+
+    <UserControl.Resources>
+        <Style x:Key="SectionHeader" TargetType="TextBlock">
+            <Setter Property="FontSize" Value="11" />
+            <Setter Property="FontWeight" Value="SemiBold" />
+            <Setter Property="Opacity" Value="0.55" />
+            <Setter Property="Margin" Value="0,0,0,8" />
+        </Style>
+    </UserControl.Resources>
+
+    <Grid>
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+            <RowDefinition Height="Auto" />
+        </Grid.RowDefinitions>
+
+        <!-- (No header row — this view is hosted inside the Vehicles tab,
+             whose shared header shows the Carcols title/subtitle when this
+             mode is active. Row 0 stays Auto and collapses to nothing.) -->
+
+        <!-- ───────── Body ───────── -->
+        <Grid Grid.Row="1">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="300" MinWidth="200" MaxWidth="400" />
+                <ColumnDefinition Width="*" MinWidth="200" />
+            </Grid.ColumnDefinitions>
+
+            <!-- Options sidebar -->
+            <Border Grid.Column="0"
+                    Background="{DynamicResource ControlFillColorDefaultBrush}"
+                    BorderThickness="0,0,1,0"
+                    BorderBrush="{DynamicResource ControlElevationBorderBrush}">
+                <ScrollViewer VerticalScrollBarVisibility="Auto">
+                    <StackPanel Margin="20,16">
+
+                        <!-- Resources folder -->
+                        <TextBlock Text="RESOURCES FOLDER" Style="{StaticResource SectionHeader}" />
+                        <Border CornerRadius="6"
+                                Background="{DynamicResource SubtleFillColorTertiaryBrush}"
+                                BorderThickness="1"
+                                BorderBrush="{DynamicResource ControlElevationBorderBrush}"
+                                Padding="10,8">
+                            <TextBlock Text="{Binding FolderDisplay}"
+                                       FontSize="11" FontFamily="Consolas"
+                                       TextWrapping="Wrap" Opacity="0.85" />
+                        </Border>
+                        <ui:Button Content="Browse…"
+                                   Appearance="Secondary"
+                                   HorizontalAlignment="Stretch"
+                                   Margin="0,8,0,0"
+                                   Click="OnBrowseFolder"
+                                   ToolTip="Point FiveOS at your server's /resources folder (or any folder of vehicle resources) to scan every carcols.meta and carvariations.meta inside it.">
+                            <ui:Button.Icon>
+                                <ui:SymbolIcon Symbol="FolderOpen24" />
+                            </ui:Button.Icon>
+                        </ui:Button>
+
+                        <!-- Safety -->
+                        <TextBlock Text="SAFETY" Style="{StaticResource SectionHeader}" Margin="0,20,0,8" />
+                        <ui:ToggleSwitch IsChecked="{Binding BackupOriginals}"
+                                         Content="Back up originals first"
+                                         ToolTip="Copy every meta this fix touches to a timestamped folder under Downloads\FiveOS_Carcols_Backup_… before overwriting it in place." />
+
+                        <!-- What this does -->
+                        <TextBlock Text="WHAT GETS FIXED" Style="{StaticResource SectionHeader}" Margin="0,20,0,8" />
+                        <TextBlock FontSize="11" Opacity="0.7" TextWrapping="Wrap"
+                                   Text="• Modkit IDs used by more than one resource (wrong tuning parts appear on the wrong car)&#10;• Duplicate kit names like 0_default_modkit (the engine binds every car to whichever loaded last)&#10;• Siren IDs shared between vehicles (lights/sounds from another car)&#10;• Light-settings IDs shared between vehicles (wrong headlight profiles)" />
+
+                        <TextBlock Margin="0,16,0,0" FontSize="11" Opacity="0.55" TextWrapping="Wrap"
+                                   Text="Scan is read-only and shows every planned change first. Fix All rewrites the clashing IDs to unused high-range values and updates the matching carvariations references in the same resource. Restart the affected resources afterwards." />
+                    </StackPanel>
+                </ScrollViewer>
+            </Border>
+
+            <!-- Results -->
+            <Grid Grid.Column="1" Margin="16,12,16,12">
+                <Border CornerRadius="8"
+                        BorderThickness="1"
+                        BorderBrush="{DynamicResource ControlElevationBorderBrush}">
+                    <Grid>
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="*" />
+                        </Grid.RowDefinitions>
+
+                        <Border Grid.Row="0"
+                                Background="{DynamicResource ControlFillColorDefaultBrush}"
+                                BorderThickness="0,0,0,1"
+                                BorderBrush="{DynamicResource ControlElevationBorderBrush}"
+                                CornerRadius="8,8,0,0"
+                                Padding="14,10">
+                            <TextBlock FontSize="11" FontWeight="SemiBold" Opacity="0.7">
+                                <Run Text="CONFLICTS · " /><Run Text="{Binding Rows.Count, Mode=OneWay}" /><Run Text=" found · " /><Run Text="{Binding FixableCount, Mode=OneWay}" /><Run Text=" fixable" />
+                            </TextBlock>
+                        </Border>
+
+                        <!-- Empty state -->
+                        <TextBlock Grid.Row="1"
+                                   Visibility="{Binding HasRows, Converter={StaticResource InverseBooleanToVisibility}}"
+                                   Text="Conflicts will appear here. Pick your resources folder and click Scan — nothing is written until you press Fix All."
+                                   FontSize="13" Opacity="0.5"
+                                   HorizontalAlignment="Center" VerticalAlignment="Center"
+                                   TextWrapping="Wrap" TextAlignment="Center" MaxWidth="380" />
+
+                        <!-- Rows -->
+                        <ListBox Grid.Row="1"
+                                 Visibility="{Binding HasRows, Converter={StaticResource BooleanToVisibility}}"
+                                 ItemsSource="{Binding Rows}"
+                                 BorderThickness="0"
+                                 Background="Transparent"
+                                 ScrollViewer.HorizontalScrollBarVisibility="Disabled">
+                            <ListBox.ItemTemplate>
+                                <DataTemplate>
+                                    <Grid Margin="4,3" ToolTip="{Binding ConflictTooltip}">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="Auto" />
+                                            <ColumnDefinition Width="*" />
+                                            <ColumnDefinition Width="Auto" />
+                                            <ColumnDefinition Width="Auto" />
+                                            <ColumnDefinition Width="Auto" />
+                                        </Grid.ColumnDefinitions>
+
+                                        <!-- Kind badge -->
+                                        <Border Grid.Column="0"
+                                                Background="{DynamicResource AccentFillColorDefaultBrush}"
+                                                CornerRadius="3" Padding="6,1" VerticalAlignment="Center"
+                                                MinWidth="52">
+                                            <TextBlock Text="{Binding KindBadge}" FontSize="10" FontWeight="SemiBold"
+                                                       Foreground="White" HorizontalAlignment="Center" />
+                                        </Border>
+
+                                        <TextBlock Grid.Column="1"
+                                                   Text="{Binding EntryDisplay}"
+                                                   Margin="10,0,8,0"
+                                                   VerticalAlignment="Center"
+                                                   TextTrimming="CharacterEllipsis"
+                                                   FontFamily="Consolas" FontSize="12" />
+
+                                        <TextBlock Grid.Column="2"
+                                                   Text="{Binding ChangeDisplay}"
+                                                   FontFamily="Consolas" FontSize="11"
+                                                   Opacity="0.75" VerticalAlignment="Center"
+                                                   Margin="0,0,10,0"
+                                                   TextTrimming="CharacterEllipsis" MaxWidth="260" />
+
+                                        <TextBlock Grid.Column="3"
+                                                   Text="{Binding RefsDisplay}"
+                                                   FontSize="10" Opacity="0.55"
+                                                   VerticalAlignment="Center"
+                                                   Margin="0,0,10,0" />
+
+                                        <!-- Status icon + text -->
+                                        <StackPanel Grid.Column="4" Orientation="Horizontal" VerticalAlignment="Center" MinWidth="110">
+                                            <ui:SymbolIcon FontSize="12" Margin="0,0,5,0" VerticalAlignment="Center">
+                                                <ui:SymbolIcon.Style>
+                                                    <Style TargetType="ui:SymbolIcon">
+                                                        <Setter Property="Symbol" Value="Subtract24" />
+                                                        <Setter Property="Foreground" Value="{DynamicResource TextFillColorTertiaryBrush}" />
+                                                        <Style.Triggers>
+                                                            <DataTrigger Binding="{Binding Status}" Value="Planned">
+                                                                <Setter Property="Symbol" Value="ArrowRight24" />
+                                                                <Setter Property="Foreground" Value="{DynamicResource TextFillColorSecondaryBrush}" />
+                                                            </DataTrigger>
+                                                            <DataTrigger Binding="{Binding Status}" Value="Fixed">
+                                                                <Setter Property="Symbol" Value="Check24" />
+                                                                <Setter Property="Foreground" Value="#4FBF6F" />
+                                                            </DataTrigger>
+                                                            <DataTrigger Binding="{Binding Status}" Value="Error">
+                                                                <Setter Property="Symbol" Value="ErrorCircle24" />
+                                                                <Setter Property="Foreground" Value="#E45757" />
+                                                            </DataTrigger>
+                                                            <DataTrigger Binding="{Binding Status}" Value="Unfixable">
+                                                                <Setter Property="Symbol" Value="Warning24" />
+                                                                <Setter Property="Foreground" Value="#E0A33A" />
+                                                            </DataTrigger>
+                                                        </Style.Triggers>
+                                                    </Style>
+                                                </ui:SymbolIcon.Style>
+                                            </ui:SymbolIcon>
+                                            <TextBlock Text="{Binding StatusText}"
+                                                       FontSize="11" Opacity="0.75"
+                                                       VerticalAlignment="Center"
+                                                       TextTrimming="CharacterEllipsis" />
+                                        </StackPanel>
+                                    </Grid>
+                                </DataTemplate>
+                            </ListBox.ItemTemplate>
+                        </ListBox>
+                    </Grid>
+                </Border>
+            </Grid>
+        </Grid>
+
+        <!-- ───────── Footer ───────── -->
+        <Border Grid.Row="2"
+                BorderThickness="0,1,0,0"
+                BorderBrush="{DynamicResource ControlElevationBorderBrush}"
+                Background="{DynamicResource ControlFillColorDefaultBrush}"
+                Padding="16,12">
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+
+                <ctrl:DotMatrixLoader Grid.Column="0"
+                                      LoaderStyle="BlockDrop"
+                                      DotSize="5" DotSpacing="2"
+                                      Margin="0,0,12,0"
+                                      VerticalAlignment="Center"
+                                      Visibility="{Binding IsProcessing, Converter={StaticResource BooleanToVisibility}}" />
+
+                <StackPanel Grid.Column="1" Margin="0,0,16,0" VerticalAlignment="Center">
+                    <TextBox Text="{Binding Summary, Mode=OneWay}"
+                             IsReadOnly="True" IsTabStop="False"
+                             BorderThickness="0" Background="Transparent" Padding="0"
+                             FontSize="12" Opacity="0.85"
+                             TextWrapping="Wrap"
+                             VerticalScrollBarVisibility="Disabled"
+                             HorizontalScrollBarVisibility="Disabled" />
+                    <ProgressBar Value="{Binding Progress}" Maximum="1" Height="3" Margin="0,4,0,0"
+                                 Visibility="{Binding IsProcessing, Converter={StaticResource BooleanToVisibility}}" />
+                </StackPanel>
+
+                <ui:Button Grid.Column="2"
+                           Content="Open backup"
+                           Appearance="Secondary"
+                           Margin="0,0,10,0"
+                           Padding="14,8"
+                           VerticalAlignment="Center"
+                           Click="OnOpenBackup"
+                           Visibility="{Binding HasBackup, Converter={StaticResource BooleanToVisibility}}"
+                           ToolTip="Open the timestamped folder in Downloads where this run backed up your original metas.">
+                    <ui:Button.Icon>
+                        <ui:SymbolIcon Symbol="FolderOpen24" />
+                    </ui:Button.Icon>
+                </ui:Button>
+
+                <StackPanel Grid.Column="3" Orientation="Horizontal">
+                    <ui:Button Content="CANCEL"
+                               Appearance="Danger"
+                               Padding="24,12"
+                               FontSize="13" FontWeight="SemiBold"
+                               Margin="0,0,8,0"
+                               Visibility="{Binding IsProcessing, Converter={StaticResource BooleanToVisibility}}"
+                               Click="OnCancel"
+                               ToolTip="Stop the current scan or fix run.">
+                        <ui:Button.Icon>
+                            <ui:SymbolIcon Symbol="Dismiss24" />
+                        </ui:Button.Icon>
+                    </ui:Button>
+                    <ui:Button Content="SCAN"
+                               Appearance="Secondary"
+                               Padding="24,12"
+                               FontSize="13" FontWeight="SemiBold"
+                               Margin="0,0,8,0"
+                               IsEnabled="{Binding CanScan}"
+                               Click="OnScan"
+                               ToolTip="Read every carcols.meta / carvariations.meta under the folder and list the ID conflicts. Read-only — nothing is written.">
+                        <ui:Button.Icon>
+                            <ui:SymbolIcon Symbol="Search24" />
+                        </ui:Button.Icon>
+                    </ui:Button>
+                    <ui:Button Content="FIX ALL"
+                               Appearance="Primary"
+                               Padding="32,12"
+                               FontSize="13" FontWeight="SemiBold"
+                               IsEnabled="{Binding CanFix}"
+                               Click="OnFix"
+                               ToolTip="Apply every planned remap shown above. Overwrites the metas in place (with backups if enabled).">
+                        <ui:Button.Icon>
+                            <ui:SymbolIcon Symbol="Wrench24" />
+                        </ui:Button.Icon>
+                    </ui:Button>
+                </StackPanel>
+            </Grid>
+        </Border>
+    </Grid>
+</UserControl>

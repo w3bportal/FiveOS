@@ -1,0 +1,2412 @@
+﻿<UserControl x:Class="FiveOS.Views.PoseToEmoteView"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:ui="http://schemas.lepo.co/wpfui/2022/xaml"
+             xmlns:wv2="clr-namespace:Microsoft.Web.WebView2.Wpf;assembly=Microsoft.Web.WebView2.Wpf"
+             xmlns:vm="clr-namespace:FiveOS.ViewModels"
+             xmlns:ctrl="clr-namespace:FiveOS.Views.Controls"
+             xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+             xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+             mc:Ignorable="d"
+             d:DataContext="{d:DesignInstance vm:PoseToEmoteViewModel}">
+    <UserControl.Resources>
+
+        <!-- ─── Eye-toggle (visibility per body region) ───
+             Bound to PoseBoneGroup.IsVisible; flips the SymbolIcon and
+             dispatches a setPoseBoneVisibility call back to the viewer
+             through OnGroupVisibilityToggled. -->
+        <Style x:Key="EyeToggle" TargetType="ToggleButton">
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="BorderThickness" Value="0" />
+            <Setter Property="Padding" Value="4,2" />
+            <Setter Property="Cursor" Value="Hand" />
+            <Setter Property="Focusable" Value="False" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="ToggleButton">
+                        <Border x:Name="Bd"
+                                Background="{TemplateBinding Background}"
+                                Padding="{TemplateBinding Padding}"
+                                CornerRadius="3">
+                            <ui:SymbolIcon x:Name="Icon"
+                                           Symbol="Eye24"
+                                           FontSize="13"
+                                           Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsChecked" Value="False">
+                                <Setter TargetName="Icon" Property="Symbol" Value="EyeOff24" />
+                                <Setter TargetName="Icon" Property="Foreground" Value="{DynamicResource TextFillColorDisabledBrush}" />
+                            </Trigger>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="Bd" Property="Background" Value="{DynamicResource SubtleFillColorTertiaryBrush}" />
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <!-- Lock toggle for timeline track rows -->
+        <Style x:Key="LockToggle" TargetType="ToggleButton">
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="BorderThickness" Value="0" />
+            <Setter Property="Padding" Value="4,2" />
+            <Setter Property="Cursor" Value="Hand" />
+            <Setter Property="Focusable" Value="False" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="ToggleButton">
+                        <Border x:Name="Bd"
+                                Background="{TemplateBinding Background}"
+                                Padding="{TemplateBinding Padding}"
+                                CornerRadius="3">
+                            <ui:SymbolIcon x:Name="Icon"
+                                           Symbol="LockOpen24"
+                                           FontSize="13"
+                                           Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsChecked" Value="True">
+                                <Setter TargetName="Icon" Property="Symbol" Value="LockClosed24" />
+                                <Setter TargetName="Icon" Property="Foreground" Value="#FFAA33" />
+                            </Trigger>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="Bd" Property="Background" Value="{DynamicResource SubtleFillColorTertiaryBrush}" />
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <!-- Mute toggle: IsChecked=True means muted → EyeOff (opposite of EyeToggle). -->
+        <Style x:Key="MuteEyeToggle" TargetType="ToggleButton">
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="BorderThickness" Value="0" />
+            <Setter Property="Padding" Value="4,2" />
+            <Setter Property="Cursor" Value="Hand" />
+            <Setter Property="Focusable" Value="False" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="ToggleButton">
+                        <Border x:Name="Bd"
+                                Background="{TemplateBinding Background}"
+                                Padding="{TemplateBinding Padding}"
+                                CornerRadius="3">
+                            <ui:SymbolIcon x:Name="Icon"
+                                           Symbol="Eye24"
+                                           FontSize="13"
+                                           Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsChecked" Value="True">
+                                <Setter TargetName="Icon" Property="Symbol" Value="EyeOff24" />
+                                <Setter TargetName="Icon" Property="Foreground" Value="{DynamicResource TextFillColorDisabledBrush}" />
+                            </Trigger>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="Bd" Property="Background" Value="{DynamicResource SubtleFillColorTertiaryBrush}" />
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <Style x:Key="EmoteCard" TargetType="Border">
+            <Setter Property="Background" Value="{DynamicResource ControlFillColorSecondaryBrush}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource ControlElevationBorderBrush}" />
+            <Setter Property="BorderThickness" Value="1" />
+            <Setter Property="CornerRadius" Value="6" />
+            <Setter Property="Padding" Value="10" />
+            <Setter Property="Margin" Value="0,0,0,10" />
+        </Style>
+
+        <Style x:Key="EmoteCardTitle" TargetType="TextBlock">
+            <Setter Property="FontSize" Value="12" />
+            <Setter Property="FontWeight" Value="SemiBold" />
+            <Setter Property="Foreground" Value="{DynamicResource TextFillColorPrimaryBrush}" />
+            <Setter Property="Margin" Value="0,0,0,8" />
+        </Style>
+
+        <Style x:Key="EmoteChipText" TargetType="TextBlock">
+            <Setter Property="FontSize" Value="10" />
+            <Setter Property="Foreground" Value="{DynamicResource TextFillColorSecondaryBrush}" />
+            <Setter Property="Margin" Value="0,0,0,4" />
+        </Style>
+
+        <!-- ─── Outliner tree (Blender-style) ───
+             Three tightly-stacked row types share the same background
+             and height profile so the tree reads as one continuous
+             list of rows, indented like Blender's outliner:
+               * Rig row — chevron, person icon, rig name. Clicking
+                 selects the whole model (move/rot/scale gizmo on its
+                 root). The selected rig gets an orange left-edge bar
+                 and a tint so the active "object-mode" target is
+                 unmistakable.
+               * Group row — chevron, folder icon, region name, count
+                 chip, eye toggle. Indented under its parent rig.
+                 Click anywhere on the row toggles expand; the eye
+                 toggle lives in a sibling layer so its own click
+                 doesn't bubble through.
+               * Bone row — indented further, tiny circle marker,
+                 mono name, orange "edited" dot on the right edge.
+             No row backgrounds by default — only hover and selected
+             paint a fill, so the tree feels light and Blender-like. -->
+        <DataTemplate DataType="{x:Type vm:PoseRig}" x:Key="PoseRigTemplate">
+            <StackPanel>
+                <Button Click="OnRigRowClick"
+                        Tag="{Binding}"
+                        Cursor="Hand"
+                        Focusable="False"
+                        HorizontalContentAlignment="Stretch">
+                    <Button.Template>
+                        <ControlTemplate TargetType="Button">
+                            <Border x:Name="RigRow"
+                                    Background="Transparent"
+                                    BorderThickness="2,0,0,0"
+                                    BorderBrush="Transparent"
+                                    Padding="4,4,8,4"
+                                    SnapsToDevicePixels="True">
+                                <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                                    <ui:SymbolIcon x:Name="RigChevron"
+                                                   Symbol="ChevronRight12"
+                                                   FontSize="11"
+                                                   Foreground="{DynamicResource TextFillColorTertiaryBrush}"
+                                                   Margin="0,0,4,0"
+                                                   VerticalAlignment="Center" />
+                                    <ui:SymbolIcon Symbol="PersonStar24"
+                                                   FontSize="13"
+                                                   Foreground="{DynamicResource TextFillColorPrimaryBrush}"
+                                                   Margin="0,0,6,0"
+                                                   VerticalAlignment="Center" />
+                                    <TextBlock Text="{Binding Name}"
+                                               FontSize="11"
+                                               FontWeight="Bold"
+                                               Foreground="{DynamicResource TextFillColorPrimaryBrush}"
+                                               VerticalAlignment="Center" />
+                                </StackPanel>
+                            </Border>
+                            <ControlTemplate.Triggers>
+                                <Trigger Property="IsMouseOver" Value="True">
+                                    <Setter TargetName="RigRow" Property="Background" Value="{DynamicResource SubtleFillColorTertiaryBrush}" />
+                                </Trigger>
+                                <DataTrigger Binding="{Binding IsExpanded}" Value="True">
+                                    <Setter TargetName="RigChevron" Property="Symbol" Value="ChevronDown12" />
+                                </DataTrigger>
+                                <DataTrigger Binding="{Binding IsModelSelected}" Value="True">
+                                    <Setter TargetName="RigRow" Property="Background" Value="#33FF7A2D" />
+                                    <Setter TargetName="RigRow" Property="BorderBrush" Value="#FF7A2D" />
+                                </DataTrigger>
+                            </ControlTemplate.Triggers>
+                        </ControlTemplate>
+                    </Button.Template>
+                </Button>
+                <!-- Nested bone groups, indented ~14 px so the group
+                     headers visibly hang under the rig row.
+                     DynamicResource (not StaticResource) on the
+                     template ref: BoneGroupTemplate is defined LATER
+                     in this resource dictionary, and StaticResource
+                     looks up at parse time — crashed the app at
+                     window construction with "Cannot find resource
+                     named 'BoneGroupTemplate'". DynamicResource
+                     resolves at apply time, after the whole
+                     dictionary has loaded. -->
+                <ItemsControl ItemsSource="{Binding BoneGroups}"
+                              ItemTemplate="{DynamicResource BoneGroupTemplate}"
+                              Margin="14,0,0,0"
+                              Visibility="{Binding IsExpanded, Converter={StaticResource BooleanToVisibility}}" />
+            </StackPanel>
+        </DataTemplate>
+
+        <DataTemplate DataType="{x:Type vm:PoseBoneGroup}" x:Key="BoneGroupTemplate">
+            <StackPanel Visibility="{Binding IsFilteredOut, Converter={StaticResource InverseBooleanToVisibility}}">
+                <Grid>
+                    <!-- Full-width clickable group row. Padding-right
+                         reserves space for the floating count + eye
+                         overlay so the region name never collides with
+                         them at narrow sidebar widths. -->
+                    <Button Click="OnGroupRowClick"
+                            Tag="{Binding}"
+                            Cursor="Hand"
+                            Focusable="False"
+                            HorizontalContentAlignment="Stretch">
+                        <Button.Template>
+                            <ControlTemplate TargetType="Button">
+                                <Border x:Name="Row"
+                                        Background="Transparent"
+                                        BorderThickness="2,0,0,0"
+                                        BorderBrush="Transparent"
+                                        Padding="6,3,58,3"
+                                        SnapsToDevicePixels="True">
+                                    <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                                        <ui:SymbolIcon x:Name="Chevron"
+                                                       Symbol="ChevronRight12"
+                                                       FontSize="11"
+                                                       Foreground="{DynamicResource TextFillColorTertiaryBrush}"
+                                                       Margin="0,0,4,0"
+                                                       VerticalAlignment="Center" />
+                                        <ui:SymbolIcon x:Name="FolderIcon"
+                                                       Symbol="Folder20"
+                                                       FontSize="13"
+                                                       Foreground="{DynamicResource TextFillColorSecondaryBrush}"
+                                                       Margin="0,0,6,0"
+                                                       VerticalAlignment="Center" />
+                                        <TextBlock Text="{Binding Name}"
+                                                   FontSize="11"
+                                                   FontWeight="SemiBold"
+                                                   Foreground="{DynamicResource TextFillColorPrimaryBrush}"
+                                                   VerticalAlignment="Center" />
+                                    </StackPanel>
+                                </Border>
+                                <ControlTemplate.Triggers>
+                                    <Trigger Property="IsMouseOver" Value="True">
+                                        <Setter TargetName="Row" Property="Background" Value="{DynamicResource SubtleFillColorTertiaryBrush}" />
+                                    </Trigger>
+                                    <DataTrigger Binding="{Binding IsExpanded}" Value="True">
+                                        <Setter TargetName="Chevron" Property="Symbol" Value="ChevronDown12" />
+                                        <Setter TargetName="FolderIcon" Property="Symbol" Value="FolderOpen20" />
+                                    </DataTrigger>
+                                </ControlTemplate.Triggers>
+                            </ControlTemplate>
+                        </Button.Template>
+                    </Button>
+                    <!-- Right-edge overlay: bone count + eye toggle.
+                         Lives in the same Grid cell as the row Button;
+                         WPF hit-tests this layer first so clicks on the
+                         eye don't bleed through to the row's expand
+                         click. -->
+                    <StackPanel Orientation="Horizontal"
+                                HorizontalAlignment="Right"
+                                VerticalAlignment="Center"
+                                Margin="0,0,6,0">
+                        <TextBlock Text="{Binding CountLabel}"
+                                   FontSize="10"
+                                   Foreground="{DynamicResource TextFillColorTertiaryBrush}"
+                                   VerticalAlignment="Center"
+                                   Margin="0,0,8,0" />
+                        <ToggleButton Style="{StaticResource EyeToggle}"
+                                      IsChecked="{Binding IsVisible, Mode=TwoWay}"
+                                      Click="OnGroupVisibilityToggled"
+                                      Tag="{Binding}"
+                                      ToolTip="Show / hide joint markers for this region in the viewport" />
+                    </StackPanel>
+                </Grid>
+
+                <!-- Children: bone rows. Indented ~28px from the group
+                     row so the hierarchy reads visually like Blender's
+                     outliner. Collapsed when IsExpanded is false. -->
+                <ItemsControl ItemsSource="{Binding Bones}"
+                              Visibility="{Binding IsExpanded, Converter={StaticResource BooleanToVisibility}}">
+                    <ItemsControl.ItemTemplate>
+                        <DataTemplate DataType="{x:Type vm:PoseBoneEntry}">
+                            <Button Click="OnBoneRowClick"
+                                    Tag="{Binding}"
+                                    HorizontalContentAlignment="Stretch"
+                                    Cursor="Hand"
+                                    Focusable="False"
+                                    Visibility="{Binding IsHidden, Converter={StaticResource InverseBooleanToVisibility}}">
+                                <Button.Template>
+                                    <ControlTemplate TargetType="Button">
+                                        <Border x:Name="Row"
+                                                Background="Transparent"
+                                                BorderThickness="2,0,0,0"
+                                                BorderBrush="Transparent"
+                                                Padding="28,2,10,2"
+                                                SnapsToDevicePixels="True">
+                                            <Grid ToolTip="{Binding DriveTooltip}">
+                                                <Grid.ColumnDefinitions>
+                                                    <ColumnDefinition Width="Auto" />
+                                                    <ColumnDefinition Width="*" />
+                                                    <ColumnDefinition Width="Auto" />
+                                                </Grid.ColumnDefinitions>
+                                                <!-- Status dot: green = driven by clip,
+                                                     grey = at rest (when a clip map is
+                                                     active), otherwise neutral. -->
+                                                <Ellipse Grid.Column="0"
+                                                         Width="5" Height="5"
+                                                         Margin="0,0,8,0"
+                                                         VerticalAlignment="Center">
+                                                    <Ellipse.Style>
+                                                        <Style TargetType="Ellipse">
+                                                            <Setter Property="Fill" Value="{DynamicResource TextFillColorTertiaryBrush}" />
+                                                            <Style.Triggers>
+                                                                <DataTrigger Binding="{Binding IsDriven}" Value="True">
+                                                                    <Setter Property="Fill" Value="#39D353" />
+                                                                </DataTrigger>
+                                                                <MultiDataTrigger>
+                                                                    <MultiDataTrigger.Conditions>
+                                                                        <Condition Binding="{Binding IsDriven}" Value="False" />
+                                                                        <Condition Binding="{Binding HasDriveMap}" Value="True" />
+                                                                    </MultiDataTrigger.Conditions>
+                                                                    <Setter Property="Fill" Value="#666666" />
+                                                                </MultiDataTrigger>
+                                                            </Style.Triggers>
+                                                        </Style>
+                                                    </Ellipse.Style>
+                                                </Ellipse>
+                                                <TextBlock Grid.Column="1"
+                                                           Text="{Binding Name}"
+                                                           FontFamily="Consolas"
+                                                           FontSize="11"
+                                                           Foreground="{DynamicResource TextFillColorPrimaryBrush}"
+                                                           TextTrimming="CharacterEllipsis"
+                                                           VerticalAlignment="Center" />
+                                                <Ellipse Grid.Column="2"
+                                                         Width="5" Height="5"
+                                                         Fill="#FFAA33"
+                                                         Margin="6,0,0,0"
+                                                         VerticalAlignment="Center"
+                                                         Visibility="{Binding IsModified, Converter={StaticResource BooleanToVisibility}}"
+                                                         ToolTip="Modified this session" />
+                                            </Grid>
+                                        </Border>
+                                        <ControlTemplate.Triggers>
+                                            <Trigger Property="IsMouseOver" Value="True">
+                                                <Setter TargetName="Row" Property="Background" Value="{DynamicResource SubtleFillColorTertiaryBrush}" />
+                                            </Trigger>
+                                            <DataTrigger Binding="{Binding IsSelected}" Value="True">
+                                                <Setter TargetName="Row" Property="Background" Value="{DynamicResource SubtleFillColorSecondaryBrush}" />
+                                                <Setter TargetName="Row" Property="BorderBrush" Value="{DynamicResource SystemAccentColorBrush}" />
+                                            </DataTrigger>
+                                        </ControlTemplate.Triggers>
+                                    </ControlTemplate>
+                                </Button.Template>
+                            </Button>
+                        </DataTemplate>
+                    </ItemsControl.ItemTemplate>
+                </ItemsControl>
+            </StackPanel>
+        </DataTemplate>
+
+    </UserControl.Resources>
+
+    <Grid>
+        <Grid.RowDefinitions>
+            <!-- Top toolbar: import / save / history actions, moved out
+                 of the sidebar so the sidebar stays poses + export only. -->
+            <RowDefinition Height="Auto" />
+            <!-- Workspace (drag the splitter below to resize). -->
+            <RowDefinition Height="*" MinHeight="120" />
+            <!-- Horizontal splitter between workspace + timeline. -->
+            <RowDefinition Height="4" />
+            <!-- Timeline pane — proportional so a short window doesn't
+                 clip the viewport; drag the splitter to grow/shrink. -->
+            <RowDefinition Height="0.28*" MinHeight="120" />
+        </Grid.RowDefinitions>
+
+        <!-- ─── Top toolbar ─── imports, save pose, undo/redo/mirror, settings. -->
+        <Border Grid.Row="0"
+                Background="{DynamicResource ControlFillColorDefaultBrush}"
+                BorderThickness="0,0,0,1"
+                BorderBrush="{DynamicResource ControlElevationBorderBrush}"
+                Visibility="{Binding HasRig, Converter={StaticResource BooleanToVisibility}}">
+            <!-- Horizontal scroll so toolbar actions never clip on a narrow window. -->
+            <ScrollViewer HorizontalScrollBarVisibility="Auto"
+                          VerticalScrollBarVisibility="Disabled"
+                          Padding="0">
+            <DockPanel Margin="10,6" LastChildFill="False" MinWidth="640">
+                <!-- Motion account / credits UI now lives in the Motion hub panel. -->
+                <ComboBox DockPanel.Dock="Right"
+                          SelectedIndex="{Binding MovementIndex, Mode=TwoWay}"
+                          MinWidth="190"
+                          VerticalAlignment="Center"
+                          ToolTip="How the emote coexists with player movement. Imported / library clips default to root motion so the ped travels. Static poses export as in-place.">
+                    <ComboBoxItem Content="In place (full body)" ToolTip="Whole body plays; player locked in place. Use for static poses / dances that shouldn't travel. (flag 1 looping, 2 one-shot)" />
+                    <ComboBoxItem Content="Upper body (can move)" ToolTip="Only the upper body animates; legs keep walking/idling, so the player can move. Waves, salutes, gestures. This is dpemotes' 'EmoteMoving'. (flag 49 looping, 50 one-shot)" />
+                    <ComboBoxItem Content="Root motion (ped travels)" ToolTip="Full body + mover extraction — the ped physically walks along the clip's SKEL_ROOT path. Default for imported animations. Needs fxresource export for FiveM." />
+                </ComboBox>
+                <StackPanel Orientation="Horizontal" DockPanel.Dock="Left">
+                <!-- Primary actions — ONE home: the toolbar (sidebar retired 2026-07-16). -->
+                <ui:Button Click="OnImportAnimation"
+                           Appearance="Primary"
+                           Padding="10,5"
+                           ToolTip="Import an animated clip — .glb / .gltf / .fbx / .blend / .dae / .bvh, Sims 4 .package, physics-mocap .json, or a GTA .ycd.">
+                    <StackPanel Orientation="Horizontal">
+                        <ui:SymbolIcon Symbol="ArrowDownload24" FontSize="13" Margin="0,0,6,0" />
+                        <TextBlock Text="Import" FontSize="11" FontWeight="SemiBold" />
+                    </StackPanel>
+                </ui:Button>
+                <ui:Button x:Name="VideoToEmoteToolbarBtn"
+                           Click="OnVideoToEmote"
+                           Appearance="Secondary"
+                           Padding="10,5"
+                           Margin="6,0,0,0"
+                           Visibility="{Binding MotionFeatureEnabled, Converter={StaticResource BooleanToVisibility}}"
+                           ToolTip="Video → Emote (Motion)">
+                    <StackPanel Orientation="Horizontal">
+                        <ui:SymbolIcon Symbol="Video24" FontSize="13" Margin="0,0,6,0" VerticalAlignment="Center" />
+                        <TextBlock Text="Video" FontSize="11" VerticalAlignment="Center" />
+                    </StackPanel>
+                </ui:Button>
+                <ui:Button Click="OnSaveCurrentPose"
+                           Appearance="Secondary"
+                           Padding="10,5"
+                           Margin="6,0,0,0"
+                           ToolTip="Save the current pose to your library for quick reuse later.">
+                    <StackPanel Orientation="Horizontal">
+                        <ui:SymbolIcon Symbol="BookmarkAdd24" FontSize="13" Margin="0,0,6,0" />
+                        <TextBlock Text="Save Pose" FontSize="11" />
+                    </StackPanel>
+                </ui:Button>
+                <ui:Button Click="OnExportPose"
+                           Appearance="Primary"
+                           Padding="10,5"
+                           Margin="6,0,0,0"
+                           ToolTip="Export the pose (or full keyframed clip) as a FiveM-ready package.">
+                    <StackPanel Orientation="Horizontal">
+                        <ui:SymbolIcon Symbol="Save24" FontSize="13" Margin="0,0,6,0" />
+                        <TextBlock Text="Export" FontSize="11" FontWeight="SemiBold" />
+                    </StackPanel>
+                </ui:Button>
+                <Border Width="1" Margin="10,2" Background="{DynamicResource ControlElevationBorderBrush}" />
+                <ui:Button Click="OnUndoPose"
+                           Appearance="Secondary"
+                           Padding="10,5"
+                           IsEnabled="{Binding CanUndo}"
+                           ToolTip="Undo the most recent pose edit (Ctrl+Z).">
+                    <StackPanel Orientation="Horizontal">
+                        <ui:SymbolIcon Symbol="ArrowUndo24" FontSize="13" Margin="0,0,6,0" />
+                        <TextBlock Text="Undo" FontSize="11" />
+                    </StackPanel>
+                </ui:Button>
+                <ui:Button Click="OnRedoPose"
+                           Appearance="Secondary"
+                           Padding="10,5"
+                           Margin="6,0,0,0"
+                           IsEnabled="{Binding CanRedo}"
+                           ToolTip="Redo the most recently undone pose edit (Ctrl+Y).">
+                    <StackPanel Orientation="Horizontal">
+                        <ui:SymbolIcon Symbol="ArrowRedo24" FontSize="13" Margin="0,0,6,0" />
+                        <TextBlock Text="Redo" FontSize="11" />
+                    </StackPanel>
+                </ui:Button>
+                <ui:Button Click="OnMirrorPose"
+                           Appearance="Secondary"
+                           Padding="10,5"
+                           Margin="6,0,0,0"
+                           ToolTip="Mirror the pose left ↔ right. Works on rigs with _L_/_R_ or Left/Right bone naming.">
+                    <StackPanel Orientation="Horizontal">
+                        <ui:SymbolIcon Symbol="FlipHorizontal24" FontSize="13" Margin="0,0,6,0" />
+                        <TextBlock Text="Mirror" FontSize="11" />
+                    </StackPanel>
+                </ui:Button>
+                <ui:Button Click="OnResetPose"
+                           Appearance="Secondary"
+                           Padding="10,5"
+                           Margin="6,0,0,0"
+                           ToolTip="Reset every bone to its T-pose / bind pose. Clears the current pose; keyframes on the timeline are preserved.">
+                    <StackPanel Orientation="Horizontal">
+                        <ui:SymbolIcon Symbol="ArrowReset24" FontSize="13" Margin="0,0,6,0" />
+                        <TextBlock Text="Revert" FontSize="11" />
+                    </StackPanel>
+                </ui:Button>
+                <Border Width="1"
+                        Margin="10,2"
+                        Background="{DynamicResource ControlElevationBorderBrush}" />
+                <!-- Settings live HERE as direct toolbar toggles (the old
+                     Emote-settings dialog is retired). Slider-based ones
+                     open a small popup under their button. -->
+                <ToggleButton IsChecked="{Binding ControlRigEnabled, Mode=TwoWay}"
+                              Padding="10,5"
+                              ToolTip="Show / hide the control rig (posing handles). It hides automatically while an animation plays either way.">
+                    <StackPanel Orientation="Horizontal">
+                        <ui:SymbolIcon Symbol="Accessibility24" FontSize="13" Margin="0,0,6,0" />
+                        <TextBlock Text="Rig" FontSize="11" />
+                    </StackPanel>
+                </ToggleButton>
+                <ToggleButton IsChecked="{Binding PoseIkMode, Mode=TwoWay}"
+                              Padding="10,5"
+                              Margin="6,0,0,0"
+                              ToolTip="Posing mode. FK (off): click a limb to rotate it — wrist, spine, fingers. IK (on): drag a hand or foot and the shoulder, chest and the other side follow along (full-body IK). Click to switch.">
+                    <StackPanel Orientation="Horizontal">
+                        <ui:SymbolIcon Symbol="ArrowSync24" FontSize="13" Margin="0,0,6,0" />
+                        <TextBlock Text="{Binding PoseModeLabel}" FontSize="11" MinWidth="15" />
+                    </StackPanel>
+                </ToggleButton>
+                <ToggleButton IsChecked="{Binding OnionSkinEnabled, Mode=TwoWay}"
+                              Padding="10,5"
+                              Margin="6,0,0,0"
+                              ToolTip="Onion skin — ghost rigs at the previous (orange) and next (teal) keyframes around the scrubber.">
+                    <StackPanel Orientation="Horizontal">
+                        <ui:SymbolIcon Symbol="Layer24" FontSize="13" Margin="0,0,6,0" />
+                        <TextBlock Text="Ghosts" FontSize="11" />
+                    </StackPanel>
+                </ToggleButton>
+                <ToggleButton x:Name="BodyFitFlyoutBtn"
+                              Padding="10,5"
+                              Margin="6,0,0,0"
+                              ToolTip="Body calibration — fits imported animations to this ped so limbs don't clip the torso. Click to open the sliders.">
+                    <StackPanel Orientation="Horizontal">
+                        <ui:SymbolIcon Symbol="Person24" FontSize="13" Margin="0,0,6,0" />
+                        <TextBlock Text="Body Fit" FontSize="11" />
+                        <ui:SymbolIcon Symbol="ChevronDown12" FontSize="9" Margin="5,1,0,0" Opacity="0.6" />
+                    </StackPanel>
+                </ToggleButton>
+                <Popup IsOpen="{Binding IsChecked, ElementName=BodyFitFlyoutBtn, Mode=TwoWay}"
+                       PlacementTarget="{Binding ElementName=BodyFitFlyoutBtn}"
+                       Placement="Bottom"
+                       AllowsTransparency="True"
+                       PopupAnimation="Fade">
+                    <Border Background="{DynamicResource ApplicationBackgroundBrush}"
+                            BorderBrush="{DynamicResource ControlElevationBorderBrush}"
+                            BorderThickness="1"
+                            CornerRadius="8"
+                            Padding="14,12"
+                            Width="280"
+                            Margin="0,4,0,0">
+                        <StackPanel>
+                            <Grid Margin="0,0,0,8">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="Auto" />
+                                </Grid.ColumnDefinitions>
+                                <TextBlock Grid.Column="0" Text="Enabled" FontSize="11" VerticalAlignment="Center" />
+                                <ui:ToggleSwitch Grid.Column="1"
+                                                 IsChecked="{Binding CalibrationEnabled, Mode=TwoWay}"
+                                                 ToolTip="Off = raw retarget angles; limbs may pass through the body." />
+                            </Grid>
+                            <Grid Margin="0,0,0,2">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="Auto" />
+                                </Grid.ColumnDefinitions>
+                                <TextBlock Grid.Column="0" Text="Body clearance" FontSize="11" VerticalAlignment="Center" />
+                                <TextBlock Grid.Column="1" FontFamily="Consolas" FontSize="10" VerticalAlignment="Center"
+                                           Foreground="{DynamicResource TextFillColorSecondaryBrush}">
+                                    <Run Text="{Binding CalibrationClearance, StringFormat={}{0:F2}, Mode=OneWay}" />
+                                </TextBlock>
+                            </Grid>
+                            <Slider Minimum="0" Maximum="1" SmallChange="0.05" LargeChange="0.1"
+                                    TickFrequency="0.25"
+                                    Value="{Binding CalibrationClearance, Mode=TwoWay}"
+                                    IsEnabled="{Binding CalibrationEnabled}"
+                                    Margin="0,2,0,8"
+                                    ToolTip="How hard to push a limb back out when a pose buries it in the torso. 0 = allow clipping." />
+                            <Grid Margin="0,0,0,2">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="Auto" />
+                                </Grid.ColumnDefinitions>
+                                <TextBlock Grid.Column="0" Text="Body width" FontSize="11" VerticalAlignment="Center" />
+                                <TextBlock Grid.Column="1" FontFamily="Consolas" FontSize="10" VerticalAlignment="Center"
+                                           Foreground="{DynamicResource TextFillColorSecondaryBrush}">
+                                    <Run Text="{Binding CalibrationBodyWidth, StringFormat={}{0:F2}, Mode=OneWay}" />
+                                </TextBlock>
+                            </Grid>
+                            <Slider Minimum="0.8" Maximum="2.6" SmallChange="0.05" LargeChange="0.2"
+                                    TickFrequency="0.2"
+                                    Value="{Binding CalibrationBodyWidth, Mode=TwoWay}"
+                                    IsEnabled="{Binding CalibrationEnabled}"
+                                    Margin="0,2,0,8"
+                                    ToolTip="How thick the ped is relative to its bones. Raise for a bulkier ped; lower if arms are held too far out." />
+                            <Grid Margin="0,0,0,2">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="Auto" />
+                                </Grid.ColumnDefinitions>
+                                <TextBlock Grid.Column="0" Text="Arm spread" FontSize="11" VerticalAlignment="Center" />
+                                <TextBlock Grid.Column="1" FontFamily="Consolas" FontSize="10" VerticalAlignment="Center"
+                                           Foreground="{DynamicResource TextFillColorSecondaryBrush}">
+                                    <Run Text="{Binding CalibrationArmSpread, StringFormat={}{0:F2}, Mode=OneWay}" />
+                                </TextBlock>
+                            </Grid>
+                            <Slider Minimum="-0.15" Maximum="0.30" SmallChange="0.01" LargeChange="0.05"
+                                    TickFrequency="0.05"
+                                    Value="{Binding CalibrationArmSpread, Mode=TwoWay}"
+                                    IsEnabled="{Binding CalibrationEnabled}"
+                                    Margin="0,2,0,0"
+                                    ToolTip="Opens or closes both arms, as a fraction of shoulder width." />
+                            <Grid Margin="0,2,0,0">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="*" />
+                                </Grid.ColumnDefinitions>
+                                <TextBlock Grid.Column="0" Text="tucked in" FontSize="9" Opacity="0.5" />
+                                <TextBlock Grid.Column="1" Text="opened out" FontSize="9" Opacity="0.5" HorizontalAlignment="Right" />
+                            </Grid>
+                        </StackPanel>
+                    </Border>
+                </Popup>
+                <ToggleButton x:Name="MotionFlyoutBtn"
+                              Padding="10,5"
+                              Margin="6,0,0,0"
+                              ToolTip="Secondary motion — damped-spring follow-through on head/hands/hair during playback. Click to open the slider.">
+                    <StackPanel Orientation="Horizontal">
+                        <ui:SymbolIcon Symbol="Flash24" FontSize="13" Margin="0,0,6,0" />
+                        <TextBlock Text="Motion" FontSize="11" />
+                        <ui:SymbolIcon Symbol="ChevronDown12" FontSize="9" Margin="5,1,0,0" Opacity="0.6" />
+                    </StackPanel>
+                </ToggleButton>
+                <Popup IsOpen="{Binding IsChecked, ElementName=MotionFlyoutBtn, Mode=TwoWay}"
+                       PlacementTarget="{Binding ElementName=MotionFlyoutBtn}"
+                       Placement="Bottom"
+                       AllowsTransparency="True"
+                       PopupAnimation="Fade">
+                    <Border Background="{DynamicResource ApplicationBackgroundBrush}"
+                            BorderBrush="{DynamicResource ControlElevationBorderBrush}"
+                            BorderThickness="1"
+                            CornerRadius="8"
+                            Padding="14,12"
+                            Width="260"
+                            Margin="0,4,0,0">
+                        <StackPanel>
+                            <Grid Margin="0,0,0,8">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="Auto" />
+                                </Grid.ColumnDefinitions>
+                                <TextBlock Grid.Column="0" Text="Enabled" FontSize="11" VerticalAlignment="Center" />
+                                <ui:ToggleSwitch Grid.Column="1"
+                                                 IsChecked="{Binding SecondaryMotionEnabled, Mode=TwoWay}"
+                                                 ToolTip="Off = bones snap exactly to the keyed rotation each frame." />
+                            </Grid>
+                            <Grid Margin="0,0,0,2">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="Auto" />
+                                </Grid.ColumnDefinitions>
+                                <TextBlock Grid.Column="0" Text="Intensity" FontSize="11" VerticalAlignment="Center" />
+                                <TextBlock Grid.Column="1" FontFamily="Consolas" FontSize="10" VerticalAlignment="Center"
+                                           Foreground="{DynamicResource TextFillColorSecondaryBrush}">
+                                    <Run Text="{Binding SecondaryMotionIntensity, StringFormat={}{0:F2}, Mode=OneWay}" />
+                                </TextBlock>
+                            </Grid>
+                            <Slider Minimum="0" Maximum="1" SmallChange="0.05" LargeChange="0.1"
+                                    TickFrequency="0.25"
+                                    Value="{Binding SecondaryMotionIntensity, Mode=TwoWay}"
+                                    IsEnabled="{Binding SecondaryMotionEnabled}"
+                                    Margin="0,2,0,0"
+                                    ToolTip="Left = snappy (tight follow, no overshoot). Right = floaty (visible lag, soft bounce)." />
+                            <Grid Margin="0,2,0,0">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="*" />
+                                </Grid.ColumnDefinitions>
+                                <TextBlock Grid.Column="0" Text="snappy" FontSize="9" Opacity="0.5" />
+                                <TextBlock Grid.Column="1" Text="floaty" FontSize="9" Opacity="0.5" HorizontalAlignment="Right" />
+                            </Grid>
+                        </StackPanel>
+                    </Border>
+                </Popup>
+                </StackPanel>
+            </DockPanel>
+            </ScrollViewer>
+        </Border>
+
+        <GridSplitter Grid.Row="2"
+                      HorizontalAlignment="Stretch"
+                      VerticalAlignment="Stretch"
+                      Background="{DynamicResource ControlElevationBorderBrush}"
+                      ShowsPreview="False"
+                      ResizeBehavior="PreviousAndNext"
+                      Visibility="{Binding HasRig, Converter={StaticResource BooleanToVisibility}}"
+                      Cursor="SizeNS" />
+
+        <Grid Grid.Row="1">
+            <Grid.ColumnDefinitions>
+                <!-- Viewport — the star of the page. -->
+                <ColumnDefinition Width="*" MinWidth="160" />
+                <!-- Unified right sidebar: ONE docked panel, two tabs
+                     (Emotes | Outliner). Both content blocks live in this
+                     column and swap by visibility; the 34px tab strip below
+                     rides on top. -->
+                <ColumnDefinition Width="Auto" />
+            </Grid.ColumnDefinitions>
+
+            <!-- ─── Sidebar vertical tab strip (Blender N-panel style) ───
+                 Tabs ride the outer (right) edge, rotated vertical; the active
+                 tab is accent-filled. Clicking swaps which content the single
+                 panel to their left shows. -->
+            <Border Grid.Column="1" HorizontalAlignment="Left" Width="30" Panel.ZIndex="10"
+                    Background="#FF222222" BorderBrush="#FF555555" BorderThickness="0,0,1,0">
+                <StackPanel Orientation="Vertical" VerticalAlignment="Top" Margin="0,6,0,0">
+                    <Button Click="OnSidebarTabOutliner" Cursor="Hand" Focusable="False" Margin="0,0,0,3">
+                        <Button.Template>
+                            <ControlTemplate TargetType="Button">
+                                <Border x:Name="Tb" Background="#FF2E2E2E" CornerRadius="4,0,0,4" Padding="4,14">
+                                    <TextBlock Text="Outliner" FontSize="11" FontWeight="SemiBold" Foreground="#FFC8C8C8"
+                                               HorizontalAlignment="Center">
+                                        <TextBlock.LayoutTransform>
+                                            <RotateTransform Angle="-90" />
+                                        </TextBlock.LayoutTransform>
+                                    </TextBlock>
+                                </Border>
+                                <ControlTemplate.Triggers>
+                                    <Trigger Property="IsMouseOver" Value="True">
+                                        <Setter TargetName="Tb" Property="Background" Value="#FF3A3A3A" />
+                                    </Trigger>
+                                    <DataTrigger Binding="{Binding SidebarShowsOutliner}" Value="True">
+                                        <Setter TargetName="Tb" Property="Background" Value="{DynamicResource AccentFillColorDefaultBrush}" />
+                                    </DataTrigger>
+                                </ControlTemplate.Triggers>
+                            </ControlTemplate>
+                        </Button.Template>
+                    </Button>
+                    <Button Click="OnSidebarTabEmotes" Cursor="Hand" Focusable="False" Margin="0,0,0,3">
+                        <Button.Template>
+                            <ControlTemplate TargetType="Button">
+                                <Border x:Name="Tb" Background="#FF2E2E2E" CornerRadius="4,0,0,4" Padding="4,14">
+                                    <TextBlock Text="Animation Library" FontSize="11" FontWeight="SemiBold" Foreground="#FFC8C8C8"
+                                               HorizontalAlignment="Center">
+                                        <TextBlock.LayoutTransform>
+                                            <RotateTransform Angle="-90" />
+                                        </TextBlock.LayoutTransform>
+                                    </TextBlock>
+                                </Border>
+                                <ControlTemplate.Triggers>
+                                    <Trigger Property="IsMouseOver" Value="True">
+                                        <Setter TargetName="Tb" Property="Background" Value="#FF3A3A3A" />
+                                    </Trigger>
+                                    <DataTrigger Binding="{Binding TabIsEmotes}" Value="True">
+                                        <Setter TargetName="Tb" Property="Background" Value="{DynamicResource AccentFillColorDefaultBrush}" />
+                                    </DataTrigger>
+                                </ControlTemplate.Triggers>
+                            </ControlTemplate>
+                        </Button.Template>
+                    </Button>
+                    <Button x:Name="SidebarMotionTab"
+                            Click="OnSidebarTabMotion"
+                            Cursor="Hand"
+                            Focusable="False"
+                            Visibility="{Binding MotionFeatureEnabled, Converter={StaticResource BooleanToVisibility}}">
+                        <Button.Template>
+                            <ControlTemplate TargetType="Button">
+                                <Border x:Name="Tb" Background="#FF2E2E2E" CornerRadius="4,0,0,4" Padding="4,14">
+                                    <TextBlock Text="Motion" FontSize="11" FontWeight="SemiBold" Foreground="#FFC8C8C8"
+                                               HorizontalAlignment="Center">
+                                        <TextBlock.LayoutTransform>
+                                            <RotateTransform Angle="-90" />
+                                        </TextBlock.LayoutTransform>
+                                    </TextBlock>
+                                </Border>
+                                <ControlTemplate.Triggers>
+                                    <Trigger Property="IsMouseOver" Value="True">
+                                        <Setter TargetName="Tb" Property="Background" Value="#FF3A3A3A" />
+                                    </Trigger>
+                                    <DataTrigger Binding="{Binding TabIsMotion}" Value="True">
+                                        <Setter TargetName="Tb" Property="Background" Value="{DynamicResource AccentFillColorDefaultBrush}" />
+                                    </DataTrigger>
+                                </ControlTemplate.Triggers>
+                            </ControlTemplate>
+                        </Button.Template>
+                    </Button>
+                </StackPanel>
+            </Border>
+
+
+            <!-- ─── Outliner slide-out (Blender N-panel) ───
+                 A tab anchored to the sidebar's right edge plus a
+                 width-bound panel that slides INTO the viewport when
+                 the user clicks the tab. The tab stays put (clamped
+                 to the sidebar's edge); only the panel grows / shrinks
+                 between OutlinerPanelWidth = 0 (closed) and 280 (open).
+                 The viewport column is `*` so the freed width snaps
+                 back to the viewport when the panel folds away. -->
+            <Grid Grid.Column="1" Margin="30,0,0,0"
+                  Visibility="{Binding SidebarShowsOutliner, Converter={StaticResource BooleanToVisibility}}">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="0" />    <!-- collapse tab retired (tabbed sidebar) -->
+                    <ColumnDefinition Width="Auto" /> <!-- Panel -->
+                </Grid.ColumnDefinitions>
+
+                <!-- Tab — sits flush against the sidebar's right
+                     border; vertical "OUTLINER" caption + chevron
+                     that flips direction so the user can see which
+                     way the next click expands. -->
+                <Button Grid.Column="0"
+                        Visibility="Collapsed"
+                        Click="OnOutlinerToggleClick"
+                        Cursor="Hand"
+                        Focusable="False"
+                        ToolTip="Show / hide the outliner panel.">
+                    <Button.Template>
+                        <ControlTemplate TargetType="Button">
+                            <Border x:Name="Tab"
+                                    Background="{DynamicResource ControlFillColorSecondaryBrush}"
+                                    BorderThickness="0,0,1,0"
+                                    BorderBrush="{DynamicResource ControlElevationBorderBrush}"
+                                    SnapsToDevicePixels="True">
+                                <StackPanel Orientation="Vertical"
+                                            HorizontalAlignment="Center"
+                                            VerticalAlignment="Center">
+                                    <ui:SymbolIcon x:Name="Chevron"
+                                                   Symbol="ChevronRight12"
+                                                   FontSize="14"
+                                                   Foreground="{DynamicResource TextFillColorSecondaryBrush}"
+                                                   Margin="0,0,0,8" />
+                                    <TextBlock Text="OUTLINER"
+                                               FontSize="10"
+                                               FontWeight="SemiBold"
+                                               Foreground="{DynamicResource TextFillColorTertiaryBrush}"
+                                               VerticalAlignment="Center">
+                                        <TextBlock.LayoutTransform>
+                                            <RotateTransform Angle="-90" />
+                                        </TextBlock.LayoutTransform>
+                                    </TextBlock>
+                                </StackPanel>
+                            </Border>
+                            <ControlTemplate.Triggers>
+                                <Trigger Property="IsMouseOver" Value="True">
+                                    <Setter TargetName="Tab" Property="Background" Value="{DynamicResource SubtleFillColorSecondaryBrush}" />
+                                    <Setter TargetName="Chevron" Property="Foreground" Value="{DynamicResource TextFillColorPrimaryBrush}" />
+                                </Trigger>
+                                <DataTrigger Binding="{Binding IsOutlinerOpen}" Value="True">
+                                    <Setter TargetName="Chevron" Property="Symbol" Value="ChevronLeft12" />
+                                    <Setter TargetName="Tab" Property="Background" Value="{DynamicResource SubtleFillColorSecondaryBrush}" />
+                                </DataTrigger>
+                            </ControlTemplate.Triggers>
+                        </ControlTemplate>
+                    </Button.Template>
+                </Button>
+
+                <!-- Outliner panel — width binding lets the parent
+                     Auto column shrink to just the tab when closed.
+                     ClipToBounds keeps content from bleeding into the
+                     viewport while the panel is mid-collapse. -->
+                <Border Grid.Column="1"
+                        Width="360"
+                        ClipToBounds="True"
+                        Background="{DynamicResource ControlFillColorDefaultBrush}"
+                        BorderThickness="0,0,1,0"
+                        BorderBrush="{DynamicResource ControlElevationBorderBrush}">
+                    <Grid>
+                        <!-- Empty state (no rig loaded) -->
+                        <StackPanel HorizontalAlignment="Center"
+                                    VerticalAlignment="Center"
+                                    Margin="20"
+                                    Visibility="{Binding HasRig, Converter={StaticResource InverseBooleanToVisibility}}">
+                            <ui:SymbolIcon Symbol="PersonStar24"
+                                           FontSize="36"
+                                           Opacity="0.35"
+                                           HorizontalAlignment="Center"
+                                           Margin="0,0,0,8" />
+                            <TextBlock Text="Load a rigged model to see its skeleton."
+                                       FontSize="11"
+                                       Opacity="0.55"
+                                       TextWrapping="Wrap"
+                                       TextAlignment="Center"
+                                       MaxWidth="220" />
+                        </StackPanel>
+
+                        <Grid Visibility="{Binding HasRig, Converter={StaticResource BooleanToVisibility}}">
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="*" />
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="200" />
+                                <RowDefinition Height="180" />
+                            </Grid.RowDefinitions>
+                            <!-- Outliner header strip -->
+                            <Border Grid.Row="0"
+                                    Background="{DynamicResource ControlFillColorSecondaryBrush}"
+                                    BorderThickness="0,0,0,1"
+                                    BorderBrush="{DynamicResource ControlElevationBorderBrush}"
+                                    Padding="10,4">
+                                <Grid>
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="Auto" />
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="Auto" />
+                                    </Grid.ColumnDefinitions>
+                                    <ui:SymbolIcon Grid.Column="0"
+                                                   Symbol="Stream24"
+                                                   FontSize="13"
+                                                   Foreground="{DynamicResource TextFillColorSecondaryBrush}"
+                                                   Margin="0,0,6,0"
+                                                   VerticalAlignment="Center" />
+                                    <TextBlock Grid.Column="1"
+                                               Text="Outliner"
+                                               FontSize="10"
+                                               FontWeight="SemiBold"
+                                               Foreground="{DynamicResource TextFillColorSecondaryBrush}"
+                                               VerticalAlignment="Center" />
+                                    <TextBlock Grid.Column="2"
+                                               VerticalAlignment="Center"
+                                               ToolTip="Green = driven by the loaded clip · Grey = at rest · Orange = edited this session">
+                                        <Run Text="{Binding BoneCountLabel, Mode=OneWay}" FontSize="10" Foreground="{DynamicResource TextFillColorTertiaryBrush}" />
+                                    </TextBlock>
+                                </Grid>
+                            </Border>
+                            <!-- Search box -->
+                            <Border Grid.Row="1"
+                                    Background="{DynamicResource ControlFillColorDefaultBrush}"
+                                    BorderThickness="0,0,0,1"
+                                    BorderBrush="{DynamicResource ControlElevationBorderBrush}"
+                                    Padding="6,5">
+                                <ui:TextBox x:Name="OutlinerSearchBox"
+                                            Text="{Binding OutlinerFilter, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                                            PlaceholderText="Search bones…"
+                                            FontSize="11"
+                                            TextChanged="OnOutlinerFilterChanged"
+                                            ToolTip="Filter by bone name. Hover a row for clip drive source (← Mixamo/CC name) when a clip is loaded.">
+                                    <ui:TextBox.Icon>
+                                        <ui:SymbolIcon Symbol="Search24" />
+                                    </ui:TextBox.Icon>
+                                </ui:TextBox>
+                            </Border>
+                            <ScrollViewer Grid.Row="2"
+                                          VerticalScrollBarVisibility="Auto"
+                                          HorizontalScrollBarVisibility="Disabled"
+                                          Background="{DynamicResource ControlFillColorDefaultBrush}">
+                                <ItemsControl x:Name="BoneGroupsTree"
+                                              ItemsSource="{Binding Rigs}"
+                                              ItemTemplate="{StaticResource PoseRigTemplate}" />
+                            </ScrollViewer>
+                            <!-- ─── Clips library header + Bake action ───
+                                 Sits beneath the bone tree, fixed-height
+                                 list so the bones still get the elastic
+                                 share of the panel. Bake button is gated
+                                 on having at least 2 keyframes — single-
+                                 frame clips have nothing to animate
+                                 through and the JS baker would throw. -->
+                            <Border Grid.Row="3"
+                                    Background="{DynamicResource ControlFillColorSecondaryBrush}"
+                                    BorderThickness="0,1,0,1"
+                                    BorderBrush="{DynamicResource ControlElevationBorderBrush}"
+                                    Padding="10,4">
+                                <Grid>
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="Auto" />
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="Auto" />
+                                        <ColumnDefinition Width="Auto" />
+                                    </Grid.ColumnDefinitions>
+                                    <ui:SymbolIcon Grid.Column="0"
+                                                   Symbol="VideoClipMultiple24"
+                                                   FontSize="13"
+                                                   Foreground="{DynamicResource TextFillColorSecondaryBrush}"
+                                                   Margin="0,0,6,0"
+                                                   VerticalAlignment="Center" />
+                                    <TextBlock Grid.Column="1"
+                                               Text="Clips"
+                                               FontSize="10"
+                                               FontWeight="SemiBold"
+                                               Foreground="{DynamicResource TextFillColorSecondaryBrush}"
+                                               VerticalAlignment="Center" />
+                                    <TextBlock Grid.Column="2"
+                                               Text="{Binding ClipLibraryCountLabel}"
+                                               FontSize="10"
+                                               Foreground="{DynamicResource TextFillColorTertiaryBrush}"
+                                               Margin="0,0,8,0"
+                                               VerticalAlignment="Center" />
+                                    <ui:Button Grid.Column="3"
+                                               Click="OnBakeAsClipClick"
+                                               IsEnabled="{Binding IsAnimatedExport}"
+                                               ToolTip="Bake the current keyframe sequence into a reusable clip."
+                                               Padding="6,2"
+                                               FontSize="10">
+                                        <StackPanel Orientation="Horizontal">
+                                            <ui:SymbolIcon Symbol="Add24" FontSize="11" Margin="0,0,4,0" />
+                                            <TextBlock Text="Bake" />
+                                        </StackPanel>
+                                    </ui:Button>
+                                </Grid>
+                            </Border>
+                            <!-- Clip list (or empty-state hint) -->
+                            <Grid Grid.Row="4"
+                                  Background="{DynamicResource ControlFillColorDefaultBrush}">
+                                <TextBlock Visibility="{Binding HasClipLibrary, Converter={StaticResource InverseBooleanToVisibility}}"
+                                           HorizontalAlignment="Center"
+                                           VerticalAlignment="Center"
+                                           FontSize="10"
+                                           TextAlignment="Center"
+                                           TextWrapping="Wrap"
+                                           MaxWidth="220"
+                                           Margin="16"
+                                           Foreground="{DynamicResource TextFillColorTertiaryBrush}"
+                                           Text="Bake a 2+ keyframe pose or import an animated model to populate the clip library." />
+                                <ListBox Visibility="{Binding HasClipLibrary, Converter={StaticResource BooleanToVisibility}}"
+                                         ItemsSource="{Binding ClipLibrary}"
+                                         Background="Transparent"
+                                         BorderThickness="0"
+                                         ScrollViewer.HorizontalScrollBarVisibility="Disabled">
+                                    <ListBox.ItemTemplate>
+                                        <DataTemplate>
+                                            <Grid Margin="0,1">
+                                                <Grid.ColumnDefinitions>
+                                                    <ColumnDefinition Width="Auto" />
+                                                    <ColumnDefinition Width="*" />
+                                                    <ColumnDefinition Width="Auto" />
+                                                    <ColumnDefinition Width="Auto" />
+                                                </Grid.ColumnDefinitions>
+                                                <ui:SymbolIcon Grid.Column="0"
+                                                               Symbol="VideoClip24"
+                                                               FontSize="13"
+                                                               Margin="2,0,8,0"
+                                                               VerticalAlignment="Center"
+                                                               Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
+                                                <StackPanel Grid.Column="1" VerticalAlignment="Center">
+                                                    <TextBlock Text="{Binding Name}"
+                                                               FontSize="11"
+                                                               TextTrimming="CharacterEllipsis" />
+                                                    <TextBlock FontSize="9"
+                                                               Foreground="{DynamicResource TextFillColorTertiaryBrush}">
+                                                        <Run Text="{Binding KindLabel, Mode=OneWay}" />
+                                                        <Run Text="·" />
+                                                        <Run Text="{Binding DurationLabel, Mode=OneWay}" />
+                                                    </TextBlock>
+                                                </StackPanel>
+                                                <ui:Button Grid.Column="2"
+                                                           Appearance="Transparent"
+                                                           Padding="2"
+                                                           Margin="0,0,2,0"
+                                                           Click="OnAddClipToTimelineClick"
+                                                           Tag="{Binding Id}"
+                                                           ToolTip="Add to timeline at the playhead">
+                                                    <ui:SymbolIcon Symbol="Add24" FontSize="11" />
+                                                </ui:Button>
+                                                <ui:Button Grid.Column="3"
+                                                           Appearance="Transparent"
+                                                           Padding="2"
+                                                           Click="OnDeleteClipClick"
+                                                           Tag="{Binding Id}"
+                                                           ToolTip="Remove from library">
+                                                    <ui:SymbolIcon Symbol="Dismiss24" FontSize="11" />
+                                                </ui:Button>
+                                            </Grid>
+                                        </DataTemplate>
+                                    </ListBox.ItemTemplate>
+                                </ListBox>
+                            </Grid>
+                            <!-- Saved poses — moved from the retired sidebar. -->
+                    <Grid Grid.Row="5"
+                          Margin="10,8,10,8"
+                          Visibility="{Binding HasRig, Converter={StaticResource BooleanToVisibility}}">
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="*" />
+                        </Grid.RowDefinitions>
+                        <TextBlock Grid.Row="0"
+                                   Text="SAVED POSES"
+                                   FontSize="10"
+                                   FontWeight="SemiBold"
+                                   Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
+                        <ScrollViewer Grid.Row="1"
+                                      VerticalScrollBarVisibility="Auto"
+                                      Margin="0,6,0,0">
+                            <StackPanel>
+                                <TextBlock TextWrapping="Wrap"
+                                           FontSize="11"
+                                           Opacity="0.45"
+                                           FontStyle="Italic"
+                                           Text="Nothing saved yet — pose the ped, then Save Pose."
+                                           Visibility="{Binding HasCustomPoses, Converter={StaticResource InverseBooleanToVisibility}}" />
+                                <ItemsControl ItemsSource="{Binding CustomPoses}"
+                                              Visibility="{Binding HasCustomPoses, Converter={StaticResource BooleanToVisibility}}">
+                                    <ItemsControl.ItemTemplate>
+                                        <DataTemplate>
+                                            <Border Background="{DynamicResource ControlFillColorSecondaryBrush}"
+                                                    BorderBrush="{DynamicResource ControlElevationBorderBrush}"
+                                                    BorderThickness="1"
+                                                    CornerRadius="4"
+                                                    Padding="0"
+                                                    Margin="0,0,0,4">
+                                                <Grid>
+                                                    <Grid.ColumnDefinitions>
+                                                        <ColumnDefinition Width="*" />
+                                                        <ColumnDefinition Width="Auto" />
+                                                    </Grid.ColumnDefinitions>
+                                                    <Button Grid.Column="0"
+                                                            Background="Transparent"
+                                                            BorderThickness="0"
+                                                            Click="OnApplyCustomPose"
+                                                            Tag="{Binding Slug}"
+                                                            Cursor="Hand"
+                                                            HorizontalContentAlignment="Stretch"
+                                                            Padding="9,6"
+                                                            ToolTip="Apply this saved pose to the rig.">
+                                                        <StackPanel Orientation="Horizontal">
+                                                            <ui:SymbolIcon Symbol="PersonStar24"
+                                                                           FontSize="13"
+                                                                           Foreground="#FF6B47"
+                                                                           Margin="0,0,7,0"
+                                                                           VerticalAlignment="Center" />
+                                                            <StackPanel VerticalAlignment="Center">
+                                                                <TextBlock Text="{Binding DisplayName}"
+                                                                           FontSize="11"
+                                                                           FontWeight="SemiBold"
+                                                                           TextTrimming="CharacterEllipsis" />
+                                                                <TextBlock Text="{Binding Subtitle}"
+                                                                           FontSize="10"
+                                                                           Foreground="{DynamicResource TextFillColorSecondaryBrush}"
+                                                                           TextTrimming="CharacterEllipsis" />
+                                                            </StackPanel>
+                                                        </StackPanel>
+                                                    </Button>
+                                                    <Button Grid.Column="1"
+                                                            Background="Transparent"
+                                                            BorderThickness="0"
+                                                            Click="OnDeleteCustomPose"
+                                                            Tag="{Binding Slug}"
+                                                            Cursor="Hand"
+                                                            Padding="7,6"
+                                                            ToolTip="Delete this saved pose.">
+                                                        <ui:SymbolIcon Symbol="Dismiss24"
+                                                                       FontSize="11"
+                                                                       Opacity="0.6" />
+                                                    </Button>
+                                                </Grid>
+                                            </Border>
+                                        </DataTemplate>
+                                    </ItemsControl.ItemTemplate>
+                                </ItemsControl>
+                            </StackPanel>
+                        </ScrollViewer>
+                    </Grid>
+                        </Grid>
+                    </Grid>
+                </Border>
+            </Grid>
+
+            <!-- ─── Viewport ─── -->
+            <Grid Grid.Column="0">
+                <wv2:WebView2 x:Name="Viewport" />
+                <Border Background="#FF1E1E1E"
+                        Visibility="{Binding HasModel, Converter={StaticResource InverseBooleanToVisibility}}">
+                    <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center" MaxWidth="380">
+                        <Border Width="80" Height="80"
+                                CornerRadius="40"
+                                Background="{DynamicResource ControlFillColorSecondaryBrush}"
+                                BorderThickness="1"
+                                BorderBrush="{DynamicResource ControlElevationBorderBrush}"
+                                HorizontalAlignment="Center"
+                                Margin="0,0,0,16">
+                            <ui:SymbolIcon Symbol="PersonStar24" FontSize="36"
+                                           HorizontalAlignment="Center" VerticalAlignment="Center" />
+                        </Border>
+                        <TextBlock Text="Pose -> Emote"
+                                   FontSize="20"
+                                   FontWeight="SemiBold"
+                                   HorizontalAlignment="Center"
+                                   Margin="0,0,0,6" />
+                        <TextBlock TextWrapping="Wrap"
+                                   TextAlignment="Center"
+                                   FontSize="12"
+                                   Opacity="0.65"
+                                   Text="Drop a rigged .glb / .fbx (player or ped with bones), pose the joints with the gizmo, then export to JSON. .ycd export is coming in a future build." />
+                    </StackPanel>
+                </Border>
+            </Grid>
+
+            <!-- ─── Emotes / Animation Library (sidebar tab) ─── -->
+            <Grid Grid.Column="1" Margin="30,0,0,0"
+                  Visibility="{Binding SidebarShowsPanel, Converter={StaticResource BooleanToVisibility}}">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="0" /> <!-- drag grip retired -->
+                    <ColumnDefinition Width="0" /> <!-- collapse tab retired -->
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+
+                <!-- Drag grip — resize the open panel -->
+                <Thumb Grid.Column="0"
+                       Width="6"
+                       Cursor="SizeWE"
+                       DragDelta="OnAnimLibraryResize"
+                       ToolTip="Drag to resize the Animation Library"
+                       Visibility="Collapsed">
+                    <Thumb.Template>
+                        <ControlTemplate TargetType="Thumb">
+                            <Border x:Name="Grip"
+                                    Background="#FF3A3A3A"
+                                    BorderBrush="#FF5A5A5A"
+                                    BorderThickness="1,0,0,0"
+                                    SnapsToDevicePixels="True">
+                                <Rectangle Width="2" Height="28"
+                                           Fill="#FF8A8A8A"
+                                           HorizontalAlignment="Center"
+                                           VerticalAlignment="Center"
+                                           RadiusX="1" RadiusY="1" />
+                            </Border>
+                            <ControlTemplate.Triggers>
+                                <Trigger Property="IsMouseOver" Value="True">
+                                    <Setter TargetName="Grip" Property="Background" Value="#FF4A4A4A" />
+                                </Trigger>
+                                <Trigger Property="IsDragging" Value="True">
+                                    <Setter TargetName="Grip" Property="Background" Value="{DynamicResource AccentFillColorDefaultBrush}" />
+                                </Trigger>
+                            </ControlTemplate.Triggers>
+                        </ControlTemplate>
+                    </Thumb.Template>
+                </Thumb>
+
+                <Button Grid.Column="1"
+                        Visibility="Collapsed"
+                        Click="OnAnimLibraryToggleClick"
+                        Cursor="Hand"
+                        Focusable="False"
+                        ToolTip="Show / hide the Animation Library.">
+                    <Button.Template>
+                        <ControlTemplate TargetType="Button">
+                            <Border x:Name="Tab"
+                                    Background="#FF2A2A2A"
+                                    BorderThickness="1,0,0,0"
+                                    BorderBrush="#FF555555"
+                                    SnapsToDevicePixels="True">
+                                <StackPanel Orientation="Vertical"
+                                            HorizontalAlignment="Center"
+                                            VerticalAlignment="Center">
+                                    <ui:SymbolIcon x:Name="Chevron"
+                                                   Symbol="ChevronLeft12"
+                                                   FontSize="14"
+                                                   Foreground="#FFD0D0D0"
+                                                   Margin="0,0,0,8" />
+                                    <TextBlock Text="LIBRARY"
+                                               FontSize="10"
+                                               FontWeight="SemiBold"
+                                               Foreground="#FFB0B0B0"
+                                               VerticalAlignment="Center">
+                                        <TextBlock.LayoutTransform>
+                                            <RotateTransform Angle="-90" />
+                                        </TextBlock.LayoutTransform>
+                                    </TextBlock>
+                                </StackPanel>
+                            </Border>
+                            <ControlTemplate.Triggers>
+                                <Trigger Property="IsMouseOver" Value="True">
+                                    <Setter TargetName="Tab" Property="Background" Value="#FF3A3A3A" />
+                                </Trigger>
+                                <DataTrigger Binding="{Binding IsAnimLibraryOpen}" Value="False">
+                                    <Setter TargetName="Chevron" Property="Symbol" Value="ChevronRight12" />
+                                </DataTrigger>
+                            </ControlTemplate.Triggers>
+                        </ControlTemplate>
+                    </Button.Template>
+                </Button>
+
+                <Border Grid.Column="2"
+                        Width="360"
+                        Background="#FF1E1E1E"
+                        BorderThickness="1,0,0,0"
+                        BorderBrush="#FF555555"
+                        ClipToBounds="True">
+                    <Grid>
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="*" MinHeight="100" />
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="130" />
+                            <RowDefinition Height="Auto" />
+                        </Grid.RowDefinitions>
+
+                        <!-- Header + Library / Motion mode -->
+                        <Border Grid.Row="0"
+                                Background="#FF2A2A2A"
+                                BorderBrush="#FF555555"
+                                BorderThickness="0,0,0,1"
+                                Padding="12,10">
+                            <StackPanel>
+                                <Grid>
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="Auto" />
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="Auto" />
+                                        <ColumnDefinition Width="Auto" />
+                                    </Grid.ColumnDefinitions>
+                                    <ui:SymbolIcon Grid.Column="0"
+                                                   Symbol="VideoClipMultiple24"
+                                                   FontSize="15"
+                                                   Foreground="#FFE0E0E0"
+                                                   VerticalAlignment="Center"
+                                                   Margin="0,0,8,0" />
+                                    <TextBlock Grid.Column="1"
+                                               Text="{Binding EmotePanelHeader}"
+                                               FontSize="13"
+                                               FontWeight="SemiBold"
+                                               Foreground="#FFF0F0F0"
+                                               VerticalAlignment="Center" />
+                                    <Border Grid.Column="2"
+                                            Background="#FF3A3A3A"
+                                            BorderBrush="#FF666666"
+                                            BorderThickness="1"
+                                            CornerRadius="4"
+                                            Padding="7,2"
+                                            VerticalAlignment="Center"
+                                            Margin="0,0,6,0"
+                                            Visibility="{Binding IsAnimLibraryMode, Converter={StaticResource BooleanToVisibility}}">
+                                        <TextBlock Text="{Binding AnimLibraryCountLabel}"
+                                                   FontSize="10"
+                                                   FontWeight="SemiBold"
+                                                   Foreground="#FFD8D8D8" />
+                                    </Border>
+                                    <ui:Button Grid.Column="3"
+                                               Appearance="Secondary"
+                                               Padding="6,4"
+                                               VerticalAlignment="Center"
+                                               Click="OnAnimLibrarySettingsClick"
+                                               Visibility="{Binding IsAnimLibraryMode, Converter={StaticResource BooleanToVisibility}}"
+                                               ToolTip="Library settings">
+                                        <ui:Button.ContextMenu>
+                                            <ContextMenu>
+                                                <MenuItem Header="Show skeleton"
+                                                          IsCheckable="True"
+                                                          IsChecked="{Binding ControlRigEnabled, Mode=TwoWay}" />
+                                                <MenuItem Header="Working only"
+                                                          IsCheckable="True"
+                                                          IsChecked="{Binding AnimLibraryWorkingOnly, Mode=TwoWay}"
+                                                          ToolTip="Hide clips that can't resolve to a playable animation." />
+                                                <Separator />
+                                                <MenuItem Header="{Binding AnimLibraryScanLabel}"
+                                                          Click="OnAnimLibraryScanWorking"
+                                                          IsEnabled="{Binding AnimLibraryCanScan}"
+                                                          ToolTip="Scan dictionaries for playable clips. Can take a few minutes." />
+                                                <MenuItem Header="Change GTA V folder…"
+                                                          Click="OnAnimLibrarySetGtaFolder" />
+                                            </ContextMenu>
+                                        </ui:Button.ContextMenu>
+                                        <ui:SymbolIcon Symbol="Settings24" FontSize="14" />
+                                    </ui:Button>
+                                </Grid>
+                            </StackPanel>
+                        </Border>
+
+                        <!-- Search + category -->
+                        <Border Grid.Row="1"
+                                Background="#FF242424"
+                                BorderBrush="#FF555555"
+                                BorderThickness="0,0,0,1"
+                                Padding="10,8">
+                            <StackPanel>
+                                <ui:TextBox Text="{Binding AnimLibrarySearch, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                                            PlaceholderText="Search game animations…"
+                                            FontSize="11"
+                                            TextChanged="OnAnimLibrarySearchChanged">
+                                    <ui:TextBox.Icon>
+                                        <ui:SymbolIcon Symbol="Search24" />
+                                    </ui:TextBox.Icon>
+                                </ui:TextBox>
+                                <ComboBox Margin="0,8,0,0"
+                                          ItemsSource="{Binding AnimLibraryCategories}"
+                                          SelectedItem="{Binding AnimLibraryCategory, Mode=TwoWay}"
+                                          FontSize="12"
+                                          MinHeight="34"
+                                          Padding="10,6"
+                                          VerticalContentAlignment="Center"
+                                          HorizontalContentAlignment="Left"
+                                          ToolTip="Filter dictionaries by type (Movement, Ambient, Vehicle…)">
+                                    <ComboBox.ItemContainerStyle>
+                                        <Style TargetType="ComboBoxItem">
+                                            <Setter Property="Padding" Value="10,6" />
+                                            <Setter Property="MinHeight" Value="28" />
+                                            <Setter Property="VerticalContentAlignment" Value="Center" />
+                                        </Style>
+                                    </ComboBox.ItemContainerStyle>
+                                </ComboBox>
+                            </StackPanel>
+                        </Border>
+
+                        <!-- Dictionaries -->
+                        <Border Grid.Row="2"
+                                Background="#FF1A1A1A"
+                                BorderBrush="#FF444444"
+                                BorderThickness="0,0,0,1"
+                                Padding="8">
+                            <Grid>
+                                <StackPanel VerticalAlignment="Center"
+                                            Margin="8"
+                                            Visibility="{Binding AnimLibraryLoading, Converter={StaticResource BooleanToVisibility}}">
+                                    <ProgressBar IsIndeterminate="True" Height="3" Margin="0,0,0,10" />
+                                    <TextBlock Text="{Binding AnimLibraryStatus}"
+                                               FontSize="11"
+                                               TextWrapping="Wrap"
+                                               TextAlignment="Center"
+                                               Foreground="#FFC0C0C0" />
+                                </StackPanel>
+
+                                <StackPanel VerticalAlignment="Center"
+                                            Margin="8"
+                                            Visibility="{Binding AnimLibraryNeedsGta, Converter={StaticResource BooleanToVisibility}}">
+                                    <TextBlock Text="{Binding AnimLibraryStatus}"
+                                               FontSize="11"
+                                               TextWrapping="Wrap"
+                                               TextAlignment="Center"
+                                               Foreground="#FFD0D0D0"
+                                               Margin="0,0,0,12" />
+                                    <ui:Button Content="Set GTA V folder…"
+                                               Appearance="Primary"
+                                               HorizontalAlignment="Center"
+                                               Click="OnAnimLibrarySetGtaFolder"
+                                               ToolTip="Pick the folder that contains GTA5.exe — same setting Vehicles uses." />
+                                    <TextBlock Text="{Binding AnimLibraryGtaFolderLabel}"
+                                               FontSize="10"
+                                               Foreground="#FF9A9A9A"
+                                               TextAlignment="Center"
+                                               Margin="0,8,0,0"
+                                               TextWrapping="Wrap" />
+                                </StackPanel>
+
+                                <Grid Visibility="{Binding AnimLibraryIsReady, Converter={StaticResource BooleanToVisibility}}">
+                                    <Grid.RowDefinitions>
+                                        <RowDefinition Height="*" />
+                                        <RowDefinition Height="Auto" />
+                                    </Grid.RowDefinitions>
+                                    <Border Grid.Row="0"
+                                            Background="#FF222222"
+                                            BorderBrush="#FF555555"
+                                            BorderThickness="1"
+                                            CornerRadius="4">
+                                        <ListBox x:Name="AnimLibraryDictList"
+                                                 ItemsSource="{Binding AnimLibraryFiltered}"
+                                                 SelectedItem="{Binding SelectedAnimDict, Mode=TwoWay}"
+                                                 SelectionChanged="OnAnimLibraryDictSelected"
+                                                 Background="Transparent"
+                                                 BorderThickness="0"
+                                                 Padding="2"
+                                                 ScrollViewer.HorizontalScrollBarVisibility="Disabled"
+                                                 VirtualizingPanel.IsVirtualizing="True"
+                                                 VirtualizingPanel.VirtualizationMode="Recycling">
+                                            <ListBox.ItemsPanel>
+                                                <ItemsPanelTemplate>
+                                                    <VirtualizingStackPanel />
+                                                </ItemsPanelTemplate>
+                                            </ListBox.ItemsPanel>
+                                            <ListBox.ItemContainerStyle>
+                                                <Style TargetType="ListBoxItem">
+                                                    <Setter Property="Padding" Value="8,5" />
+                                                    <Setter Property="Margin" Value="1" />
+                                                    <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+                                                    <Setter Property="Foreground" Value="#FFE8E8E8" />
+                                                    <Setter Property="Template">
+                                                        <Setter.Value>
+                                                            <ControlTemplate TargetType="ListBoxItem">
+                                                                <Border x:Name="Bd"
+                                                                        Background="Transparent"
+                                                                        CornerRadius="3"
+                                                                        Padding="{TemplateBinding Padding}"
+                                                                        SnapsToDevicePixels="True">
+                                                                    <ContentPresenter />
+                                                                </Border>
+                                                                <ControlTemplate.Triggers>
+                                                                    <Trigger Property="IsMouseOver" Value="True">
+                                                                        <Setter TargetName="Bd" Property="Background" Value="#FF333333" />
+                                                                    </Trigger>
+                                                                    <Trigger Property="IsSelected" Value="True">
+                                                                        <Setter TargetName="Bd" Property="Background" Value="{DynamicResource AccentFillColorDefaultBrush}" />
+                                                                        <Setter Property="Foreground" Value="#FFFFFFFF" />
+                                                                    </Trigger>
+                                                                </ControlTemplate.Triggers>
+                                                            </ControlTemplate>
+                                                        </Setter.Value>
+                                                    </Setter>
+                                                </Style>
+                                            </ListBox.ItemContainerStyle>
+                                            <ListBox.ItemTemplate>
+                                                <DataTemplate>
+                                                    <Grid>
+                                                        <Grid.ColumnDefinitions>
+                                                            <ColumnDefinition Width="*" />
+                                                            <ColumnDefinition Width="Auto" />
+                                                        </Grid.ColumnDefinitions>
+                                                        <TextBlock Grid.Column="0"
+                                                                   Text="{Binding FileName}"
+                                                                   FontFamily="Consolas"
+                                                                   FontSize="11"
+                                                                   Foreground="{Binding Foreground, RelativeSource={RelativeSource AncestorType=ListBoxItem}}"
+                                                                   TextTrimming="CharacterEllipsis"
+                                                                   ToolTip="{Binding Path}" />
+                                                        <TextBlock Grid.Column="1"
+                                                                   Text="{Binding Category}"
+                                                                   FontSize="9"
+                                                                   Foreground="#FF9A9A9A"
+                                                                   Margin="8,0,0,0"
+                                                                   VerticalAlignment="Center"
+                                                                   Opacity="0.85" />
+                                                    </Grid>
+                                                </DataTemplate>
+                                            </ListBox.ItemTemplate>
+                                        </ListBox>
+                                    </Border>
+                                    <ui:Button Grid.Row="1"
+                                               Content="Load more…"
+                                               Appearance="Secondary"
+                                               HorizontalAlignment="Stretch"
+                                               Margin="0,8,0,0"
+                                               Padding="0,7"
+                                               FontSize="11"
+                                               Click="OnAnimLibraryLoadMore"
+                                               Visibility="{Binding HasAnimLibraryMore, Converter={StaticResource BooleanToVisibility}}"
+                                               ToolTip="Show the next 5,000 dictionaries (search still covers the full index)." />
+                                </Grid>
+                            </Grid>
+                        </Border>
+
+                        <!-- Clips header -->
+                        <Border Grid.Row="3"
+                                Background="#FF2A2A2A"
+                                BorderBrush="#FF555555"
+                                BorderThickness="0,0,0,1"
+                                Padding="12,8">
+                            <Grid>
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="Auto" />
+                                </Grid.ColumnDefinitions>
+                                <TextBlock Grid.Column="0"
+                                           Text="Clips"
+                                           FontSize="12"
+                                           FontWeight="SemiBold"
+                                           Foreground="#FFF0F0F0"
+                                           VerticalAlignment="Center" />
+                                <Border Grid.Column="1"
+                                        Background="#FF3A3A3A"
+                                        BorderBrush="#FF666666"
+                                        BorderThickness="1"
+                                        CornerRadius="4"
+                                        Padding="7,2">
+                                    <TextBlock Text="{Binding AnimLibraryClipCountLabel}"
+                                               FontSize="10"
+                                               FontWeight="SemiBold"
+                                               Foreground="#FFD8D8D8" />
+                                </Border>
+                            </Grid>
+                        </Border>
+
+                        <!-- Clips list -->
+                        <Border Grid.Row="4"
+                                Background="#FF1A1A1A"
+                                BorderBrush="#FF444444"
+                                BorderThickness="0,0,0,1"
+                                Padding="8">
+                            <Border Background="#FF222222"
+                                    BorderBrush="#FF555555"
+                                    BorderThickness="1"
+                                    CornerRadius="4">
+                                <ListBox ItemsSource="{Binding AnimLibraryClips}"
+                                         SelectedItem="{Binding SelectedAnimClip, Mode=TwoWay}"
+                                         SelectionChanged="OnAnimLibraryClipSelected"
+                                         Background="Transparent"
+                                         BorderThickness="0"
+                                         Padding="2"
+                                         ScrollViewer.HorizontalScrollBarVisibility="Disabled">
+                                    <ListBox.ItemContainerStyle>
+                                        <Style TargetType="ListBoxItem">
+                                            <Setter Property="Padding" Value="8,5" />
+                                            <Setter Property="Margin" Value="1" />
+                                            <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+                                            <Setter Property="Foreground" Value="#FFE8E8E8" />
+                                            <Setter Property="Template">
+                                                <Setter.Value>
+                                                    <ControlTemplate TargetType="ListBoxItem">
+                                                        <Border x:Name="Bd"
+                                                                Background="Transparent"
+                                                                CornerRadius="3"
+                                                                Padding="{TemplateBinding Padding}">
+                                                            <ContentPresenter />
+                                                        </Border>
+                                                        <ControlTemplate.Triggers>
+                                                            <Trigger Property="IsMouseOver" Value="True">
+                                                                <Setter TargetName="Bd" Property="Background" Value="#FF333333" />
+                                                            </Trigger>
+                                                            <Trigger Property="IsSelected" Value="True">
+                                                                <Setter TargetName="Bd" Property="Background" Value="{DynamicResource AccentFillColorDefaultBrush}" />
+                                                                <Setter Property="Foreground" Value="#FFFFFFFF" />
+                                                            </Trigger>
+                                                        </ControlTemplate.Triggers>
+                                                    </ControlTemplate>
+                                                </Setter.Value>
+                                            </Setter>
+                                        </Style>
+                                    </ListBox.ItemContainerStyle>
+                                    <ListBox.ItemTemplate>
+                                        <DataTemplate>
+                                            <TextBlock Text="{Binding}"
+                                                       FontFamily="Consolas"
+                                                       FontSize="11"
+                                                       Foreground="{Binding Foreground, RelativeSource={RelativeSource AncestorType=ListBoxItem}}"
+                                                       TextTrimming="CharacterEllipsis" />
+                                        </DataTemplate>
+                                    </ListBox.ItemTemplate>
+                                </ListBox>
+                            </Border>
+                        </Border>
+
+                        <!-- Actions — clip loads on select; play via universal controls. -->
+                        <Border Grid.Row="5"
+                                Background="#FF242424"
+                                Padding="12,10">
+                            <StackPanel>
+                                <ui:Button Appearance="Secondary"
+                                           Padding="10,8"
+                                           HorizontalAlignment="Stretch"
+                                           Click="OnAnimLibraryRecordGif"
+                                           IsEnabled="{Binding CanRecordPreviewGif}"
+                                           ToolTip="Record one loop of the preview and save as an animated GIF.">
+                                    <Grid HorizontalAlignment="Stretch">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="*" />
+                                            <ColumnDefinition Width="Auto" />
+                                        </Grid.ColumnDefinitions>
+                                        <StackPanel Grid.Column="0" VerticalAlignment="Center">
+                                            <TextBlock Text="Download"
+                                                       FontSize="12"
+                                                       FontWeight="SemiBold"
+                                                       Foreground="#FFF0F0F0" />
+                                            <TextBlock Text="GIF"
+                                                       FontSize="11"
+                                                       Foreground="#FFB8B8B8"
+                                                       Margin="0,1,0,0" />
+                                        </StackPanel>
+                                        <Border Grid.Column="1"
+                                                VerticalAlignment="Center"
+                                                Background="#FF1A2E28"
+                                                BorderBrush="#FF2F6B5A"
+                                                BorderThickness="1"
+                                                CornerRadius="10"
+                                                Padding="8,4"
+                                                Margin="8,0,0,0">
+                                            <TextBlock Text="Preview loop"
+                                                       FontSize="10"
+                                                       Foreground="#FF7DCFB6" />
+                                        </Border>
+                                    </Grid>
+                                </ui:Button>
+                                <Border Background="#FF1A1A1A"
+                                        BorderBrush="#FF666666"
+                                        BorderThickness="1"
+                                        CornerRadius="4"
+                                        Padding="8,6"
+                                        Margin="0,10,0,0">
+                                    <TextBlock Text="{Binding AnimLibraryCodeString}"
+                                               FontFamily="Consolas"
+                                               FontSize="11"
+                                               Foreground="#FFE8E8E8"
+                                               TextWrapping="Wrap"
+                                               ToolTip="RequestAnimDict / TaskPlayAnim pair" />
+                                </Border>
+                            </StackPanel>
+                        </Border>
+
+                        <!-- Motion hub host (panel compiled in when FIVEOS_MOTION) -->
+                        <ContentControl x:Name="MotionHubHost" Grid.Row="1" Grid.RowSpan="5"
+                                        Background="#FF1E1E1E"
+                                        Visibility="{Binding IsMotionMode, Converter={StaticResource BooleanToVisibility}}" />
+                    </Grid>
+                </Border>
+            </Grid>
+
+        </Grid>
+
+        <!-- ─── Timeline (Cascadeur-style clip editor) ─── -->
+        <Border Grid.Row="3"
+                Background="#FF181818"
+                BorderThickness="0,1,0,0"
+                BorderBrush="#FF454545"
+                Visibility="{Binding HasRig, Converter={StaticResource BooleanToVisibility}}">
+            <Grid>
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="36" />
+                    <RowDefinition Height="*" />
+                    <RowDefinition Height="30" />
+                </Grid.RowDefinitions>
+
+                <!-- ── Toolbar: essentials + overflow menu ── -->
+                <Border Grid.Row="0"
+                        Background="#FF252526"
+                        BorderBrush="#FF454545"
+                        BorderThickness="0,0,0,1">
+                    <Grid Margin="8,0">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+
+                        <!-- Left: mode + edit essentials -->
+                        <StackPanel Grid.Column="0"
+                                    Orientation="Horizontal"
+                                    HorizontalAlignment="Left"
+                                    VerticalAlignment="Center">
+                            <StackPanel.Resources>
+                                <!-- Compact dark numeric field for the Frame/Start/End boxes. -->
+                                <Style x:Key="FrameNumBox" TargetType="TextBox">
+                                    <Setter Property="Background" Value="#FF2B2B2B" />
+                                    <Setter Property="Foreground" Value="#FFECECEC" />
+                                    <Setter Property="CaretBrush" Value="#FFECECEC" />
+                                    <Setter Property="SelectionBrush" Value="#FF3A6EA5" />
+                                    <Setter Property="BorderBrush" Value="#FF4A4A4A" />
+                                    <Setter Property="BorderThickness" Value="1" />
+                                    <Setter Property="FontFamily" Value="Consolas" />
+                                    <Setter Property="FontSize" Value="12" />
+                                    <Setter Property="Height" Value="24" />
+                                    <Setter Property="Padding" Value="4,0" />
+                                    <Setter Property="VerticalContentAlignment" Value="Center" />
+                                    <Setter Property="TextAlignment" Value="Center" />
+                                    <Setter Property="Template">
+                                        <Setter.Value>
+                                            <ControlTemplate TargetType="TextBox">
+                                                <Border x:Name="bd"
+                                                        Background="{TemplateBinding Background}"
+                                                        BorderBrush="{TemplateBinding BorderBrush}"
+                                                        BorderThickness="{TemplateBinding BorderThickness}"
+                                                        CornerRadius="4">
+                                                    <ScrollViewer x:Name="PART_ContentHost"
+                                                                  Margin="{TemplateBinding Padding}"
+                                                                  VerticalAlignment="Center"
+                                                                  Focusable="False"
+                                                                  HorizontalScrollBarVisibility="Hidden"
+                                                                  VerticalScrollBarVisibility="Hidden" />
+                                                </Border>
+                                                <ControlTemplate.Triggers>
+                                                    <Trigger Property="IsMouseOver" Value="True">
+                                                        <Setter TargetName="bd" Property="BorderBrush" Value="#FF5E5E5E" />
+                                                    </Trigger>
+                                                    <Trigger Property="IsKeyboardFocused" Value="True">
+                                                        <Setter TargetName="bd" Property="BorderBrush" Value="#FF60CDFF" />
+                                                    </Trigger>
+                                                </ControlTemplate.Triggers>
+                                            </ControlTemplate>
+                                        </Setter.Value>
+                                    </Setter>
+                                </Style>
+                            </StackPanel.Resources>
+                            <!-- Transport — timeline header, standard 3D layout (was in the sidebar). -->
+                            <ui:Button Click="OnAddKeyframe" Appearance="Secondary" Padding="7,4" Margin="0,0,4,0" ToolTip="Set keyframe (K)">
+                                <ui:SymbolIcon Symbol="Record28" FontSize="12" Foreground="#4A9EFF" />
+                            </ui:Button>
+                            <ui:Button Click="OnTimelinePrevFrame" Appearance="Secondary" Padding="7,4" Margin="0,0,2,0" ToolTip="Previous frame (,)">
+                                <ui:SymbolIcon Symbol="ChevronLeft24" FontSize="12" />
+                            </ui:Button>
+                            <ui:Button Click="OnTimelinePlayPause" Appearance="Primary" Padding="9,4" Margin="0,0,2,0" ToolTip="Play / pause (Space)">
+                                <ui:SymbolIcon x:Name="PlayIcon" Symbol="Play24" FontSize="12" />
+                            </ui:Button>
+                            <ui:Button Click="OnTimelineNextFrame" Appearance="Secondary" Padding="7,4" Margin="0,0,8,0" ToolTip="Next frame (.)">
+                                <ui:SymbolIcon Symbol="ChevronRight24" FontSize="12" />
+                            </ui:Button>
+                            <TextBlock Text="{Binding TimelineTimecodeLabel}"
+                                       FontFamily="Consolas" FontSize="12" Foreground="#60CDFF"
+                                       VerticalAlignment="Center" Margin="0,0,10,0" />
+                            <Border Width="1" Height="18" Background="#FF454545" Margin="0,0,8,0" />
+                            <!-- AE-style transport fields (1:1 reference, 2026-07-17):
+                                 Frame seek + Start/End range + Trim + fps readout. -->
+                            <TextBlock Text="Frame" FontSize="10" Foreground="#9A9A9A" VerticalAlignment="Center" Margin="0,0,4,0" />
+                            <TextBox Style="{StaticResource FrameNumBox}"
+                                     Text="{Binding TimelineCurrentFrame, Mode=OneWay}"
+                                     Width="52" KeyDown="OnFrameBoxCommit" Margin="0,0,8,0"
+                                     ToolTip="Type a frame and press Enter to jump there" />
+                            <!-- Start / End / Trim range fields kept (user request
+                                 2026-07-17). fps readout, delete/duplicate buttons
+                                 and status chips removed; delete/duplicate live in
+                                 the ⋯ menu (Del / Ctrl+D hotkeys unchanged). -->
+                            <TextBlock Text="Start" FontSize="10" Foreground="#D98E2B" VerticalAlignment="Center" Margin="0,0,4,0" />
+                            <TextBox Style="{StaticResource FrameNumBox}"
+                                     Text="{Binding TrimStartFrame, Mode=TwoWay}"
+                                     Width="48" Margin="0,0,6,0" />
+                            <TextBlock Text="End" FontSize="10" Foreground="#D98E2B" VerticalAlignment="Center" Margin="0,0,4,0" />
+                            <TextBox Style="{StaticResource FrameNumBox}"
+                                     Text="{Binding TrimEndFrame, Mode=TwoWay}"
+                                     Width="48" Margin="0,0,4,0" />
+                            <ui:Button Click="OnTrimRangeClick" Appearance="Secondary" Padding="7,3" Margin="0,0,8,0"
+                                       ToolTip="Trim the clip to the Start–End frame range (undoable, rebases to 0)">
+                                <StackPanel Orientation="Horizontal">
+                                    <ui:SymbolIcon Symbol="Cut24" FontSize="12" Margin="0,0,4,0" />
+                                    <TextBlock Text="Trim" FontSize="11" />
+                                </StackPanel>
+                            </ui:Button>
+                        </StackPanel>
+
+                        <!-- Right: Snap, filter, overflow, shortcuts tip -->
+                        <StackPanel Grid.Column="1"
+                                    Orientation="Horizontal"
+                                    HorizontalAlignment="Right"
+                                    VerticalAlignment="Center">
+                            <!-- Status + import report — moved from the retired sidebar. -->
+                            <TextBlock Text="{Binding StatusText}"
+                                       FontSize="10"
+                                       Foreground="#9A9A9A"
+                                       VerticalAlignment="Center"
+                                       MaxWidth="340"
+                                       TextTrimming="CharacterEllipsis"
+                                       Margin="0,0,8,0" />
+                            <TextBlock Text="{Binding SkippedSummary}"
+                                       FontSize="10"
+                                       Foreground="#FFD23F"
+                                       VerticalAlignment="Center"
+                                       Margin="0,0,2,0"
+                                       Visibility="{Binding HasSkippedBones, Converter={StaticResource BooleanToVisibility}}" />
+                            <ui:HyperlinkButton Click="OnShowSkippedReport"
+                                                Content="report"
+                                                FontSize="10"
+                                                Padding="4,0"
+                                                Margin="0,0,8,0"
+                                                Visibility="{Binding HasSkippedBones, Converter={StaticResource BooleanToVisibility}}" />
+                            <!-- Filter collapses behind an icon; Snap + Loop moved to the ⋯ menu. -->
+                            <ToggleButton x:Name="FilterToggle"
+                                          Padding="7,4"
+                                          Margin="0,0,6,0"
+                                          ToolTip="Filter bones">
+                                <ui:SymbolIcon Symbol="Filter24" FontSize="13" />
+                            </ToggleButton>
+                            <ui:TextBox Width="120"
+                                        Height="28"
+                                        Margin="0,0,6,0"
+                                        Visibility="{Binding IsChecked, ElementName=FilterToggle, Converter={StaticResource BooleanToVisibility}}"
+                                        Text="{Binding TimelineTrackFilter, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                                        TextChanged="OnTimelineTrackFilterChanged"
+                                        PlaceholderText="Filter bones…" />
+                            <ui:Button x:Name="TimelineMoreBtn"
+                                       Appearance="Secondary"
+                                       Padding="7,4"
+                                       Margin="0,0,4,0"
+                                       Click="OnTimelineMoreClick"
+                                       ToolTip="More timeline tools">
+                                <ui:Button.ContextMenu>
+                                    <ContextMenu>
+                                        <MenuItem Header="Snap to frames"
+                                                  IsCheckable="True"
+                                                  IsChecked="{Binding PlacementTarget.DataContext.TimelineSnapEnabled, RelativeSource={RelativeSource AncestorType=ContextMenu}, Mode=TwoWay}"
+                                                  Click="OnTimelineSnapClick" />
+                                        <MenuItem Header="Loop playback"
+                                                  IsCheckable="True"
+                                                  IsChecked="{Binding PlacementTarget.DataContext.TimelineLoop, RelativeSource={RelativeSource AncestorType=ContextMenu}, Mode=OneWay}"
+                                                  Click="OnTimelineLoopToggle" />
+                                        <Separator />
+                                        <MenuItem Header="Delete selection (Del)"
+                                                  Click="OnTimelineDeleteSelection" />
+                                        <MenuItem Header="Duplicate selection (Ctrl+D)"
+                                                  Click="OnTimelineDuplicateSelection" />
+                                        <Separator />
+                                        <MenuItem Header="Frame selected keys"
+                                                  Click="OnTimelineFrameSelected" />
+                                        <MenuItem Header="Fit whole animation"
+                                                  Click="OnTimelineFitAll" />
+                                        <Separator />
+                                        <MenuItem Header="Trim start to playhead (I)"
+                                                  Click="OnTimelineSetInClick" />
+                                        <MenuItem Header="Trim end to playhead (O)"
+                                                  Click="OnTimelineSetOutClick" />
+                                        <MenuItem Header="Split at playhead"
+                                                  Click="OnTimelineSplitClick" />
+                                        <Separator />
+                                        <MenuItem Header="Clear all…"
+                                                  Click="OnClearAll"
+                                                  ToolTip="Clear clips, library, keyframes, and pose (Shift+Del). Model stays." />
+                                    </ContextMenu>
+                                </ui:Button.ContextMenu>
+                                <ui:SymbolIcon Symbol="MoreHorizontal24" FontSize="14" />
+                            </ui:Button>
+                            <ui:Button Appearance="Secondary"
+                                       Padding="7,4"
+                                       ToolTipService.ShowDuration="60000">
+                                <ui:Button.ToolTip>
+                                    <ToolTip MaxWidth="360">
+                                        <StackPanel>
+                                            <TextBlock Text="Shortcuts" FontWeight="SemiBold" Margin="0,0,0,6" />
+                                            <TextBlock TextWrapping="Wrap" FontSize="11" LineHeight="16">
+                                                <Run FontFamily="Consolas">Space</Run><Run> play/pause · </Run>
+                                                <Run FontFamily="Consolas">← →</Run><Run> step · </Run>
+                                                <Run FontFamily="Consolas">Shift</Run><Run> +arrows ×10 · </Run>
+                                                <Run FontFamily="Consolas">↑ ↓</Run><Run> prev/next key · </Run>
+                                                <Run FontFamily="Consolas">Home/End</Run><Run> ends · </Run>
+                                                <Run FontFamily="Consolas">/</Run><Run> loop · </Run>
+                                                <Run FontFamily="Consolas">K</Run><Run> capture · </Run>
+                                                <Run FontFamily="Consolas">Del</Run><Run> delete · </Run>
+                                                <Run FontFamily="Consolas">Shift+Del</Run><Run> clear all · </Run>
+                                                <Run FontFamily="Consolas">M</Run><Run> mirror · </Run>
+                                                <Run FontFamily="Consolas">Ctrl+Z/Y</Run><Run> undo/redo · </Run>
+                                                <Run FontFamily="Consolas">Shift+X/Y/Z</Run><Run> axis lock</Run>
+                                            </TextBlock>
+                                        </StackPanel>
+                                    </ToolTip>
+                                </ui:Button.ToolTip>
+                                <ui:SymbolIcon Symbol="QuestionCircle24" FontSize="14" />
+                            </ui:Button>
+                        </StackPanel>
+                    </Grid>
+                </Border>
+
+                <!-- ── Sequencer body ───────────────────────────────── -->
+                <Border Grid.Row="1"
+                        x:Name="TimelineBorder"
+                        Background="#1E1E1E"
+                        SnapsToDevicePixels="True"
+                        SizeChanged="OnTimelineSizeChanged">
+                    <Grid>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="168" />
+                            <ColumnDefinition Width="*" />
+                        </Grid.ColumnDefinitions>
+                        <!-- After-Effects-style LAYERS timeline (user directive
+                             2026-07-16): ONE view, no Sequencer/DopeSheet modes.
+                             Row 0 = layer bars (clips + summary keys) with the
+                             single ruler; Row 1 = the per-bone key lanes. -->
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="*" />
+                        </Grid.RowDefinitions>
+
+                        <!-- Layers gutter -->
+                        <Border Grid.Row="0" Grid.Column="0"
+                                Background="#252525"
+                                BorderBrush="#FF454545"
+                                BorderThickness="0,0,1,0">
+                            <Grid>
+                                <Grid.RowDefinitions>
+                                    <RowDefinition Height="24" />
+                                    <RowDefinition Height="Auto" />
+                                    <RowDefinition Height="Auto" />
+                                </Grid.RowDefinitions>
+
+                                <Border Grid.Row="0"
+                                        Background="#2B2B2B"
+                                        BorderBrush="#FF454545"
+                                        BorderThickness="0,0,0,1"
+                                        Padding="10,0,0,0">
+                                    <TextBlock Text="Layers"
+                                               FontSize="11"
+                                               FontWeight="SemiBold"
+                                               Foreground="#B0B0B0"
+                                               VerticalAlignment="Center" />
+                                </Border>
+
+                                <Border Grid.Row="1"
+                                        Background="#252525"
+                                        BorderBrush="#FF454545"
+                                        BorderThickness="0,0,0,1"
+                                        Height="34"
+                                        Visibility="{Binding ShowClipTrack, Converter={StaticResource BooleanToVisibility}}">
+                                    <Grid>
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="3" />
+                                            <ColumnDefinition Width="*" />
+                                        </Grid.ColumnDefinitions>
+                                        <Border Grid.Column="0" Background="#4A90C4" />
+                                        <StackPanel Grid.Column="1"
+                                                    Orientation="Horizontal"
+                                                    VerticalAlignment="Center"
+                                                    Margin="4,0,4,0">
+                                            <ToggleButton Style="{StaticResource EyeToggle}"
+                                                          IsChecked="{Binding TimelineClipTrackVisible, Mode=TwoWay}"
+                                                          ToolTip="Show or hide the animation clip on the timeline and in playback" />
+                                            <ToggleButton Style="{StaticResource LockToggle}"
+                                                          IsChecked="{Binding TimelineClipTrackLocked, Mode=TwoWay}"
+                                                          ToolTip="Lock clip — prevents trim and move (scrub still works)" />
+                                            <TextBlock Text="{Binding PrimaryTrackLabel}"
+                                                       FontSize="11"
+                                                       Foreground="#E0E0E0"
+                                                       TextTrimming="CharacterEllipsis"
+                                                       VerticalAlignment="Center"
+                                                       Margin="4,0,0,0" />
+                                        </StackPanel>
+                                    </Grid>
+                                </Border>
+
+                                <Border Grid.Row="2"
+                                        Visibility="{Binding ShowTimelineKeyframes, Converter={StaticResource BooleanToVisibility}}">
+                                    <Grid>
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="3" />
+                                            <ColumnDefinition Width="*" />
+                                        </Grid.ColumnDefinitions>
+                                        <Border Grid.Column="0" Background="#5BBFB5" />
+                                        <StackPanel Grid.Column="1"
+                                                    Orientation="Horizontal"
+                                                    VerticalAlignment="Center"
+                                                    Margin="4,0,4,0"
+                                                    Height="34">
+                                            <ToggleButton Style="{StaticResource EyeToggle}"
+                                                          IsChecked="{Binding TimelineKeyframeTrackVisible, Mode=TwoWay}"
+                                                          ToolTip="Show or hide the keyframe lane" />
+                                            <ToggleButton Style="{StaticResource LockToggle}"
+                                                          IsChecked="{Binding TimelineKeyframeTrackLocked, Mode=TwoWay}"
+                                                          ToolTip="Lock keyframes — prevents drag and delete" />
+                                            <TextBlock Text="Keyframes"
+                                                       FontSize="11"
+                                                       Foreground="#E0E0E0"
+                                                       VerticalAlignment="Center"
+                                                       Margin="4,0,0,0" />
+                                        </StackPanel>
+                                    </Grid>
+                                </Border>
+                            </Grid>
+                        </Border>
+
+                        <!-- Ruler + layer bars + playhead -->
+                        <Grid Grid.Row="0" Grid.Column="1">
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="24" />
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="Auto" />
+                            </Grid.RowDefinitions>
+
+                            <Canvas Grid.Row="0"
+                                    x:Name="TimelineRulerCanvas"
+                                    Background="#2B2B2B"
+                                    ClipToBounds="True"
+                                    Focusable="True"
+                                    Cursor="Hand"
+                                    MouseWheel="OnTimelineMouseWheel"
+                                    MouseLeftButtonDown="OnTimelineSeekClick"
+                                    MouseMove="OnTimelineSeekMove"
+                                    MouseLeftButtonUp="OnTimelineSeekUp" />
+
+                            <Canvas Grid.Row="1"
+                                    x:Name="TimelineStripCanvas"
+                                    Background="#1E1E1E"
+                                    ClipToBounds="True"
+                                    Focusable="True"
+                                    Cursor="Hand"
+                                    Height="34"
+                                    Visibility="{Binding ShowClipTrack, Converter={StaticResource BooleanToVisibility}}"
+                                    SizeChanged="OnTimelineSizeChanged"
+                                    MouseWheel="OnTimelineMouseWheel"
+                                    MouseLeftButtonDown="OnTimelineSeekClick"
+                                    MouseMove="OnTimelineSeekMove"
+                                    MouseLeftButtonUp="OnTimelineSeekUp" />
+
+                            <Canvas Grid.Row="2"
+                                    x:Name="TimelineTrackCanvas"
+                                    Background="#1A1A1A"
+                                    ClipToBounds="True"
+                                    Focusable="True"
+                                    Height="34"
+                                    Visibility="{Binding ShowTimelineKeyframes, Converter={StaticResource BooleanToVisibility}}"
+                                    MouseLeftButtonDown="OnTimelineSeekClick"
+                                    MouseMove="OnTimelineSeekMove"
+                                    MouseLeftButtonUp="OnTimelineSeekUp"
+                                    MouseRightButtonUp="OnTimelineTrackRightUp" />
+
+                            <Canvas Grid.Row="0"
+                                    Grid.RowSpan="3"
+                                    x:Name="TimelinePlayheadCanvas"
+                                    IsHitTestVisible="False"
+                                    ClipToBounds="True" />
+                        </Grid>
+
+                        <!-- Bones section: body-part groups + per-bone key lanes,
+                             always visible under the layer bars (AE-style). -->
+                        <Border Grid.Row="1" Grid.Column="0"
+                                Background="#252525"
+                                BorderBrush="#FF454545"
+                                BorderThickness="0,0,1,0">
+                            <Grid>
+                                <Grid.RowDefinitions>
+                                    <!-- "Bones / Empty" header retired — the panel
+                                         is layers-only now (2026-07-17). -->
+                                    <RowDefinition Height="0" />
+                                    <RowDefinition Height="*" />
+                                </Grid.RowDefinitions>
+                                <Border Visibility="Collapsed" />
+                                <!-- ScrollViewer lives INSIDE the ItemsControl template so
+                                     VirtualizingStackPanel can recycle row containers. -->
+                                <ItemsControl Grid.Row="1"
+                                              x:Name="DopeSheetTrackList"
+                                              ItemsSource="{Binding DopeDisplayTracks}"
+                                              VirtualizingPanel.IsVirtualizing="True"
+                                              VirtualizingPanel.VirtualizationMode="Recycling"
+                                              VirtualizingPanel.ScrollUnit="Pixel"
+                                              ScrollViewer.CanContentScroll="True"
+                                              ScrollViewer.HorizontalScrollBarVisibility="Disabled"
+                                              ScrollViewer.VerticalScrollBarVisibility="Auto">
+                                    <ItemsControl.Template>
+                                        <ControlTemplate TargetType="ItemsControl">
+                                            <ScrollViewer x:Name="DopeSheetTrackScroller"
+                                                          Focusable="False"
+                                                          ScrollChanged="OnDopeSheetTrackScroll"
+                                                          CanContentScroll="{TemplateBinding ScrollViewer.CanContentScroll}"
+                                                          HorizontalScrollBarVisibility="{TemplateBinding ScrollViewer.HorizontalScrollBarVisibility}"
+                                                          VerticalScrollBarVisibility="{TemplateBinding ScrollViewer.VerticalScrollBarVisibility}">
+                                                <ItemsPresenter />
+                                            </ScrollViewer>
+                                        </ControlTemplate>
+                                    </ItemsControl.Template>
+                                    <ItemsControl.ItemsPanel>
+                                        <ItemsPanelTemplate>
+                                            <VirtualizingStackPanel />
+                                        </ItemsPanelTemplate>
+                                    </ItemsControl.ItemsPanel>
+                                    <ItemsControl.ItemTemplate>
+                                        <DataTemplate>
+                                            <!-- Flat AE-style row (1:1 reference, 2026-07-17):
+                                                 drag glyph · eye · mono name "· Rot" · hover lock. -->
+                                            <Border Height="22"
+                                                    BorderBrush="#2E2E2E"
+                                                    BorderThickness="0,0,0,1"
+                                                    MouseLeftButtonUp="OnTimelineTrackRowMouseDown"
+                                                    Tag="{Binding}">
+                                                <Border.Style>
+                                                    <Style TargetType="Border">
+                                                        <Setter Property="Background" Value="#232323" />
+                                                        <Style.Triggers>
+                                                            <DataTrigger Binding="{Binding IsGroupHeader}" Value="True">
+                                                                <Setter Property="Background" Value="#2E2E2E" />
+                                                            </DataTrigger>
+                                                            <DataTrigger Binding="{Binding IsSelected}" Value="True">
+                                                                <Setter Property="Background" Value="#334A6A" />
+                                                            </DataTrigger>
+                                                            <Trigger Property="IsMouseOver" Value="True">
+                                                                <Setter Property="Background" Value="#2B2B2B" />
+                                                            </Trigger>
+                                                        </Style.Triggers>
+                                                    </Style>
+                                                </Border.Style>
+                                                <Grid Margin="2,0,4,0">
+                                                    <Grid.ColumnDefinitions>
+                                                        <ColumnDefinition Width="Auto" />
+                                                        <ColumnDefinition Width="Auto" />
+                                                        <ColumnDefinition Width="*" />
+                                                        <ColumnDefinition Width="Auto" />
+                                                    </Grid.ColumnDefinitions>
+                                                    <!-- Layer header: chevron; bone row: drag glyph. -->
+                                                    <ToggleButton Grid.Column="0"
+                                                                  Content="›"
+                                                                  Width="18"
+                                                                  Padding="0"
+                                                                  IsChecked="{Binding IsExpanded, Mode=TwoWay}"
+                                                                  Click="OnTimelineTrackExpandClick"
+                                                                  Tag="{Binding}"
+                                                                  ToolTip="Expand/collapse layer"
+                                                                  Visibility="{Binding IsGroupHeader, Converter={StaticResource BooleanToVisibility}}" />
+                                                    <TextBlock Grid.Column="0"
+                                                               Text="&#x22EE;"
+                                                               FontSize="10"
+                                                               Foreground="#5A5A5A"
+                                                               VerticalAlignment="Center"
+                                                               Margin="2,0,4,0"
+                                                               Visibility="{Binding IsGroupHeader, Converter={StaticResource InverseBooleanToVisibility}}" />
+                                                    <ToggleButton Grid.Column="1"
+                                                                  Style="{StaticResource MuteEyeToggle}"
+                                                                  IsChecked="{Binding IsMuted, Mode=TwoWay}"
+                                                                  Click="OnTimelineTrackStateClick"
+                                                                  Tag="{Binding}"
+                                                                  Opacity="0.6"
+                                                                  ToolTip="Mute/unmute track"
+                                                                  Visibility="{Binding IsGroupHeader, Converter={StaticResource InverseBooleanToVisibility}}" />
+                                                    <StackPanel Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Center" Margin="4,0,4,0">
+                                                        <TextBlock Text="{Binding DisplayName}"
+                                                                   ToolTip="{Binding Name}"
+                                                                   FontFamily="Consolas"
+                                                                   FontSize="10.5"
+                                                                   Foreground="#E0E0E0"
+                                                                   TextTrimming="CharacterEllipsis" />
+                                                        <TextBlock Text="{Binding LaneTypeLabel}"
+                                                                   FontFamily="Consolas"
+                                                                   FontSize="10.5"
+                                                                   Foreground="#7A7A7A"
+                                                                   Margin="6,0,0,0" />
+                                                    </StackPanel>
+                                                    <ToggleButton Grid.Column="3"
+                                                                  IsChecked="{Binding IsLocked, Mode=TwoWay}"
+                                                                  Click="OnTimelineTrackStateClick"
+                                                                  Tag="{Binding}"
+                                                                  ToolTip="Lock/unlock track"
+                                                                  Visibility="{Binding IsGroupHeader, Converter={StaticResource InverseBooleanToVisibility}}">
+                                                        <ToggleButton.Style>
+                                                            <Style TargetType="ToggleButton" BasedOn="{StaticResource LockToggle}">
+                                                                <Setter Property="Opacity" Value="0" />
+                                                                <Style.Triggers>
+                                                                    <DataTrigger Binding="{Binding IsMouseOver, RelativeSource={RelativeSource AncestorType=Border}}" Value="True">
+                                                                        <Setter Property="Opacity" Value="1" />
+                                                                    </DataTrigger>
+                                                                    <DataTrigger Binding="{Binding IsLocked}" Value="True">
+                                                                        <Setter Property="Opacity" Value="1" />
+                                                                    </DataTrigger>
+                                                                </Style.Triggers>
+                                                            </Style>
+                                                        </ToggleButton.Style>
+                                                    </ToggleButton>
+                                                </Grid>
+                                            </Border>
+                                        </DataTemplate>
+                                    </ItemsControl.ItemTemplate>
+                                </ItemsControl>
+                            </Grid>
+                        </Border>
+
+                        <Grid Grid.Row="1" Grid.Column="1">
+                            <Grid.RowDefinitions>
+                                <!-- Dope ruler collapsed to 0 — the layers section
+                                     above owns the single shared time ruler. The
+                                     canvas stays in the tree (code adds render
+                                     layers + identity-checks it for scrubbing). -->
+                                <RowDefinition Height="0" />
+                                <RowDefinition Height="*" />
+                            </Grid.RowDefinitions>
+                            <Canvas x:Name="DopeSheetRulerCanvas"
+                                    Grid.Row="0"
+                                    Background="#2B2B2B"
+                                    ClipToBounds="True"
+                                    MouseWheel="OnTimelineMouseWheel"
+                                    MouseLeftButtonDown="OnTimelineSeekClick"
+                                    MouseMove="OnTimelineSeekMove"
+                                    MouseLeftButtonUp="OnTimelineSeekUp" />
+                            <Canvas x:Name="DopeSheetCanvas"
+                                    Grid.Row="1"
+                                    Background="#1A1A1A"
+                                    ClipToBounds="True"
+                                    Focusable="True"
+                                    MouseWheel="OnTimelineMouseWheel"
+                                    MouseLeftButtonDown="OnDopeSheetMouseDown"
+                                    MouseMove="OnDopeSheetMouseMove"
+                                    MouseLeftButtonUp="OnDopeSheetMouseUp"
+                                    MouseRightButtonUp="OnDopeSheetRightUp" />
+                            <Canvas x:Name="DopeSheetPlayheadCanvas"
+                                    Grid.Row="0"
+                                    Grid.RowSpan="2"
+                                    IsHitTestVisible="False"
+                                    ClipToBounds="True" />
+                        </Grid>
+                    </Grid>
+                </Border>
+
+                <!-- ── Bottom range bar ─────────────────────────────── -->
+                <Border Grid.Row="2"
+                        Background="#232323"
+                        BorderBrush="#FF454545"
+                        BorderThickness="0,1,0,0">
+                    <Grid Margin="10,0">
+                        <TextBlock Text="{Binding TimelineCurrentFrame, StringFormat='Frame {0}'}"
+                                   FontFamily="Consolas"
+                                   FontSize="11"
+                                   Foreground="#888888"
+                                   VerticalAlignment="Center" />
+                        <!-- Zoom navigator (user directive 2026-07-17): at 1× the
+                             thumb fills the track and is inert; zoom in and it
+                             becomes a draggable scrollbar for the visible window. -->
+                        <Border x:Name="TimelineNavBar"
+                                Background="#1A1A1A"
+                                BorderBrush="#3A3A3A"
+                                BorderThickness="1"
+                                CornerRadius="3"
+                                Height="14"
+                                Margin="90,0,200,0"
+                                VerticalAlignment="Center"
+                                MouseLeftButtonDown="OnNavBarMouseDown"
+                                MouseMove="OnNavBarMouseMove"
+                                MouseLeftButtonUp="OnNavBarMouseUp"
+                                SizeChanged="OnTimelineSizeChanged">
+                            <Canvas ClipToBounds="True">
+                                <Border x:Name="TimelineNavThumb"
+                                        Height="10"
+                                        Canvas.Top="1"
+                                        Background="#4A90C4"
+                                        CornerRadius="3"
+                                        Opacity="0.35" />
+                            </Canvas>
+                        </Border>
+                        <StackPanel Orientation="Horizontal"
+                                    HorizontalAlignment="Right"
+                                    VerticalAlignment="Center">
+                            <TextBlock Text="0"
+                                       FontFamily="Consolas"
+                                       FontSize="11"
+                                       Foreground="#888888"
+                                       Margin="0,0,8,0" />
+                            <TextBlock Text="{Binding TimelineTotalFrames}"
+                                       FontFamily="Consolas"
+                                       FontSize="11"
+                                       Foreground="#888888"
+                                       Margin="0,0,12,0" />
+                            <StackPanel Orientation="Horizontal">
+                                <ui:NumberBox Value="{Binding TimelineDuration, Mode=TwoWay}"
+                                              Minimum="0.1"
+                                              Maximum="60"
+                                              SmallChange="0.1"
+                                              LargeChange="1"
+                                              Width="64"
+                                              ClearButtonEnabled="False"
+                                              SpinButtonPlacementMode="Compact"
+                                              FontSize="11"
+                                              Margin="0,0,4,0"
+                                              ToolTip="Duration (seconds)" />
+                                <TextBlock Text="s @"
+                                           FontSize="11"
+                                           Foreground="#666666"
+                                           VerticalAlignment="Center"
+                                           Margin="0,0,4,0" />
+                                <ui:NumberBox Value="{Binding TimelineFps, Mode=TwoWay}"
+                                              Minimum="1"
+                                              Maximum="120"
+                                              SmallChange="1"
+                                              LargeChange="10"
+                                              Width="48"
+                                              ClearButtonEnabled="False"
+                                              SpinButtonPlacementMode="Compact"
+                                              FontSize="11"
+                                              ToolTip="FPS" />
+                            </StackPanel>
+                        </StackPanel>
+                    </Grid>
+                </Border>
+
+            </Grid>
+        </Border>
+
+        <!-- ─── Workspace loading overlay ───
+             Full-bleed splash that sits on top of the sidebar / viewport /
+             timeline while the WebView2 host spins up and the default
+             skeleton imports, so the user never sees the empty WebView
+             flash through. Hidden the moment pose-mode-entered fires (rig
+             ready, joint markers built). Theme brushes only — overlay must
+             read as part of the app chrome, not a separate blue surface. -->
+        <Border x:Name="ViewerLoadingOverlay"
+                Grid.Row="0" Grid.RowSpan="4"
+                Panel.ZIndex="100"
+                Background="{DynamicResource ApplicationBackgroundBrush}"
+                Visibility="{Binding IsViewerLoading, Converter={StaticResource BooleanToVisibility}}">
+            <StackPanel HorizontalAlignment="Center"
+                        VerticalAlignment="Center"
+                        MaxWidth="420">
+                <Image Source="pack://application:,,,/Assets/Branding/FiveOS.png"
+                       Width="112" Height="112"
+                       RenderOptions.BitmapScalingMode="HighQuality"
+                       HorizontalAlignment="Center"
+                       Margin="0,0,0,18" />
+                <TextBlock Text="Pose → Emote"
+                           FontSize="20"
+                           FontWeight="SemiBold"
+                           Foreground="{DynamicResource TextFillColorPrimaryBrush}"
+                           HorizontalAlignment="Center"
+                           Margin="0,0,0,4" />
+                <TextBlock Text="Booting workspace..."
+                           FontSize="12"
+                           Foreground="{DynamicResource TextFillColorSecondaryBrush}"
+                           HorizontalAlignment="Center"
+                           Margin="0,0,0,22" />
+                <ctrl:DotMatrixLoader LoaderStyle="HelixGlow"
+                                      DotSize="8"
+                                      DotSpacing="4"
+                                      DotColor="{DynamicResource TextFillColorPrimaryBrush}"
+                                      HorizontalAlignment="Center"
+                                      Margin="0,0,0,12" />
+                <TextBlock Text="{Binding ViewerLoadingCaption}"
+                           FontSize="11"
+                           Foreground="{DynamicResource TextFillColorTertiaryBrush}"
+                           Opacity="0.9"
+                           HorizontalAlignment="Center"
+                           TextAlignment="Center"
+                           TextWrapping="Wrap" />
+            </StackPanel>
+        </Border>
+
+        <!-- Non-blocking operation HUD: imports and mocap keep the editor usable. -->
+        <Border Grid.Row="2"
+                Panel.ZIndex="50"
+                HorizontalAlignment="Right"
+                VerticalAlignment="Top"
+                Margin="18"
+                MaxWidth="420"
+                Padding="14,10"
+                CornerRadius="6"
+                Background="#E6292929"
+                BorderBrush="#665BBFB5"
+                BorderThickness="1"
+                IsHitTestVisible="False"
+                Visibility="{Binding IsOperationRunning, Converter={StaticResource BooleanToVisibility}}">
+            <StackPanel>
+                <StackPanel Orientation="Horizontal">
+                    <ProgressBar IsIndeterminate="True" Width="52" Height="4" Margin="0,0,10,0" />
+                    <TextBlock Text="Processing animation"
+                               FontWeight="SemiBold"
+                               FontSize="11"
+                               VerticalAlignment="Center" />
+                </StackPanel>
+                <TextBlock Text="{Binding OperationCaption}"
+                           FontSize="10"
+                           Foreground="#C5C5C5"
+                           Margin="0,6,0,0"
+                           TextWrapping="Wrap" />
+            </StackPanel>
+        </Border>
+    </Grid>
+</UserControl>

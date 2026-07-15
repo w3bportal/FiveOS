@@ -1,0 +1,432 @@
+<UserControl x:Class="FiveOS.Views.TxAdminOptimizeView"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:ui="http://schemas.lepo.co/wpfui/2022/xaml"
+             xmlns:vm="clr-namespace:FiveOS.ViewModels"
+             xmlns:ctrl="clr-namespace:FiveOS.Views.Controls"
+             xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+             xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+             mc:Ignorable="d"
+             d:DataContext="{d:DesignInstance vm:TxAdminOptimizeViewModel}">
+
+    <UserControl.Resources>
+        <Style x:Key="SectionHeader" TargetType="TextBlock">
+            <Setter Property="FontSize" Value="11" />
+            <Setter Property="FontWeight" Value="SemiBold" />
+            <Setter Property="Opacity" Value="0.55" />
+            <Setter Property="Margin" Value="0,0,0,8" />
+        </Style>
+        <Style x:Key="FieldLabel" TargetType="TextBlock">
+            <Setter Property="FontSize" Value="11" />
+            <Setter Property="Opacity" Value="0.7" />
+            <Setter Property="Margin" Value="0,0,0,4" />
+        </Style>
+    </UserControl.Resources>
+
+    <Grid AllowDrop="True"
+          Drop="OnDrop"
+          DragOver="OnDragOver"
+          DragEnter="OnDragEnter"
+          DragLeave="OnDragLeave">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+            <RowDefinition Height="Auto" />
+        </Grid.RowDefinitions>
+
+        <!-- ───────── Header ───────── -->
+        <Border Grid.Row="0"
+                Background="{DynamicResource ControlFillColorDefaultBrush}"
+                BorderThickness="0,0,0,1"
+                BorderBrush="{DynamicResource ControlElevationBorderBrush}"
+                Padding="20,16">
+            <StackPanel Orientation="Horizontal">
+                <Border CornerRadius="6"
+                        Background="{DynamicResource SubtleFillColorTertiaryBrush}"
+                        BorderThickness="1"
+                        BorderBrush="{DynamicResource ControlElevationBorderBrush}"
+                        Padding="8" Margin="0,0,12,0" VerticalAlignment="Center">
+                    <ui:SymbolIcon Symbol="Server24" FontSize="20" />
+                </Border>
+                <StackPanel VerticalAlignment="Center">
+                    <TextBlock Text="txAdmin Optimizer"
+                               FontSize="15" FontWeight="SemiBold" />
+                    <TextBlock Text="Paste your server console log — FiveOS finds every oversized asset and shrinks it just enough to clear the warning."
+                               FontSize="11" Opacity="0.6" Margin="0,2,0,0" />
+                </StackPanel>
+            </StackPanel>
+        </Border>
+
+        <!-- ───────── Body ───────── -->
+        <Grid Grid.Row="1">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="300" MinWidth="200" MaxWidth="400" />
+                <ColumnDefinition Width="*" MinWidth="200" />
+            </Grid.ColumnDefinitions>
+
+            <!-- Options sidebar -->
+            <Border Grid.Column="0"
+                    Background="{DynamicResource ControlFillColorDefaultBrush}"
+                    BorderThickness="0,0,1,0"
+                    BorderBrush="{DynamicResource ControlElevationBorderBrush}">
+                <ScrollViewer VerticalScrollBarVisibility="Auto">
+                    <StackPanel Margin="20,16">
+
+                        <!-- Server folder -->
+                        <TextBlock Text="SERVER RESOURCES FOLDER" Style="{StaticResource SectionHeader}" />
+                        <Border CornerRadius="6"
+                                Background="{DynamicResource SubtleFillColorTertiaryBrush}"
+                                BorderThickness="1"
+                                BorderBrush="{DynamicResource ControlElevationBorderBrush}"
+                                Padding="10,8">
+                            <TextBlock Text="{Binding ServerFolderDisplay}"
+                                       FontSize="11" FontFamily="Consolas"
+                                       TextWrapping="Wrap" Opacity="0.85" />
+                        </Border>
+                        <ui:Button Content="Browse…"
+                                   Appearance="Secondary"
+                                   HorizontalAlignment="Stretch"
+                                   Margin="0,8,0,0"
+                                   Click="OnBrowseServer"
+                                   ToolTip="Point FiveOS at your server's /resources folder so it can find each warned asset on disk.">
+                            <ui:Button.Icon>
+                                <ui:SymbolIcon Symbol="FolderOpen24" />
+                            </ui:Button.Icon>
+                        </ui:Button>
+
+                        <!-- Mode -->
+                        <TextBlock Text="MODE" Style="{StaticResource SectionHeader}" Margin="0,20,0,8" />
+                        <ui:ToggleSwitch IsChecked="{Binding AutoMode}"
+                                         Content="Auto — just enough to clear"
+                                         ToolTip="On: escalate the gentlest setting first and stop the moment each asset drops under the warning line. Off: apply your manual settings below as a single fixed pass." />
+
+                        <!-- Auto options -->
+                        <StackPanel Visibility="{Binding AutoMode, Converter={StaticResource BooleanToVisibility}}">
+                            <TextBlock Text="Aggressiveness" Style="{StaticResource FieldLabel}" Margin="0,12,0,4" />
+                            <ComboBox SelectedIndex="{Binding AggressivenessIndex, Mode=TwoWay}"
+                                      HorizontalAlignment="Stretch"
+                                      ToolTip="How far Auto is allowed to push.">
+                                <ComboBoxItem Content="Just-enough (quality-first)" ToolTip="Stop the moment each asset is under 16 MiB; never downscale below 512px. Densest assets that can't clear within that cap are flagged for Manual." />
+                                <ComboBoxItem Content="Fully clear (more aggressive)" ToolTip="Keep escalating (incl. 512→256px / heavier decimation) until every asset is under 16 MiB. More visible quality loss." />
+                                <ComboBoxItem Content="Only the severe &gt;48 MiB tier" ToolTip="Target ≤48 MiB — removes only the red 'Oversized assets WILL cause streaming issues' warnings. Near-lossless; leaves mild &gt;16 MiB ones." />
+                            </ComboBox>
+                        </StackPanel>
+
+                        <!-- Manual options -->
+                        <StackPanel Visibility="{Binding IsManualMode, Converter={StaticResource BooleanToVisibility}}">
+                            <TextBlock Text="Textures (.ytd)" Style="{StaticResource FieldLabel}" Margin="0,12,0,4" />
+                            <ui:ToggleSwitch IsChecked="{Binding ManualDownsize}"
+                                             Content="Downsize 2×"
+                                             ToolTip="Halve every triggered texture once." />
+                            <TextBlock Text="Trigger threshold (W+H)" Style="{StaticResource FieldLabel}" Margin="0,10,0,4" />
+                            <ComboBox SelectedIndex="{Binding ManualThresholdIndex, Mode=TwoWay}"
+                                      HorizontalAlignment="Stretch"
+                                      ToolTip="Only textures whose width+height sum reaches this are touched. Lower = touch smaller textures = more reduction, more quality loss.">
+                                <ComboBoxItem Content="8192 — only 4K+ textures" />
+                                <ComboBoxItem Content="4096 — 2K+ textures" />
+                                <ComboBoxItem Content="2048 — 1K+ textures" />
+                                <ComboBoxItem Content="1024 — 512px+ textures" />
+                                <ComboBoxItem Content="512 — 256px+ textures (aggressive)" />
+                            </ComboBox>
+                            <ui:ToggleSwitch IsChecked="{Binding ManualFormatOpt}"
+                                             Content="Force BC1/BC3 re-encode"
+                                             Margin="0,8,0,0"
+                                             ToolTip="Re-encode to BC1/BC3 regardless of source format. Little gain on already-DXT assets." />
+
+                            <TextBlock Text="Models (.ydr/.ydd/.yft) — geometry kept" Style="{StaticResource FieldLabel}" Margin="0,14,0,4" />
+                            <Slider Minimum="0.3" Maximum="0.95"
+                                    Value="{Binding ManualKeepRatio, Mode=TwoWay}"
+                                    IsMoveToPointEnabled="True"
+                                    ToolTip="Fraction of triangles to keep when a model warns on virtual (geometry) memory." />
+                            <TextBlock Text="{Binding ManualKeepRatioDisplay}" FontSize="11" Opacity="0.6" />
+                        </StackPanel>
+
+                        <!-- Safety -->
+                        <TextBlock Text="SAFETY" Style="{StaticResource SectionHeader}" Margin="0,20,0,8" />
+                        <ui:ToggleSwitch IsChecked="{Binding BackupOriginals}"
+                                         Content="Back up originals first"
+                                         ToolTip="Copy every file to a timestamped folder under Downloads\FiveOS_txAdmin_Backup_… before overwriting it in place." />
+
+                        <TextBlock Margin="0,16,0,0" FontSize="11" Opacity="0.55" TextWrapping="Wrap"
+                                   Text="Optimized files overwrite the originals in your server folder. Restart the affected resources (or the server) afterwards for the changes to take effect." />
+                    </StackPanel>
+                </ScrollViewer>
+            </Border>
+
+            <!-- Main: log input + results -->
+            <Grid Grid.Column="1" Margin="16,12,16,12">
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="*" />
+                </Grid.RowDefinitions>
+
+                <!-- Log input -->
+                <Grid Grid.Row="0" Margin="0,0,0,12">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
+                    </Grid.RowDefinitions>
+                    <Grid Grid.Row="0" Margin="0,0,0,6">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+                        <TextBlock Grid.Column="0" Text="CONSOLE LOG"
+                                   FontSize="11" FontWeight="SemiBold" Opacity="0.55"
+                                   VerticalAlignment="Center" />
+                        <ui:Button Grid.Column="1" Content="Load .log…"
+                                   Appearance="Secondary" Margin="0,0,8,0"
+                                   Click="OnLoadLog"
+                                   ToolTip="Load a console log file you downloaded from txAdmin.">
+                            <ui:Button.Icon><ui:SymbolIcon Symbol="DocumentMultiple24" /></ui:Button.Icon>
+                        </ui:Button>
+                        <ui:Button Grid.Column="2" Content="Parse"
+                                   Appearance="Primary" Margin="0,0,8,0"
+                                   Click="OnParse"
+                                   ToolTip="Scan the pasted text for oversized-asset warnings and resolve each to a file." />
+                        <ui:Button Grid.Column="3" Content="Clear"
+                                   Appearance="Secondary"
+                                   Click="OnClear" />
+                    </Grid>
+                    <Border Grid.Row="1"
+                            CornerRadius="8"
+                            BorderThickness="1"
+                            BorderBrush="{DynamicResource ControlElevationBorderBrush}">
+                        <TextBox Text="{Binding LogText, UpdateSourceTrigger=PropertyChanged}"
+                                 AcceptsReturn="True"
+                                 AcceptsTab="False"
+                                 TextWrapping="NoWrap"
+                                 VerticalScrollBarVisibility="Auto"
+                                 HorizontalScrollBarVisibility="Auto"
+                                 FontFamily="Consolas"
+                                 FontSize="11"
+                                 Height="130"
+                                 BorderThickness="0"
+                                 Background="Transparent"
+                                 Padding="8"
+                                 ToolTip="Paste the console output here (or drag a .log/.txt file onto the tab), including the lines like: Asset my_map/file.ytd uses 49.5 MiB of physical memory." />
+                    </Border>
+                </Grid>
+
+                <!-- Results -->
+                <Border Grid.Row="1"
+                        CornerRadius="8"
+                        BorderThickness="1"
+                        BorderBrush="{DynamicResource ControlElevationBorderBrush}">
+                    <Grid>
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="*" />
+                        </Grid.RowDefinitions>
+
+                        <Border Grid.Row="0"
+                                Background="{DynamicResource ControlFillColorDefaultBrush}"
+                                BorderThickness="0,0,0,1"
+                                BorderBrush="{DynamicResource ControlElevationBorderBrush}"
+                                CornerRadius="8,8,0,0"
+                                Padding="14,10">
+                            <TextBlock FontSize="11" FontWeight="SemiBold" Opacity="0.7">
+                                <Run Text="WARNINGS · " /><Run Text="{Binding RowCount, Mode=OneWay}" /><Run Text=" found · " /><Run Text="{Binding ActionableCount, Mode=OneWay}" /><Run Text=" actionable" />
+                            </TextBlock>
+                        </Border>
+
+                        <!-- Empty state -->
+                        <TextBlock Grid.Row="1"
+                                   Visibility="{Binding HasRows, Converter={StaticResource InverseBooleanToVisibility}}"
+                                   Text="Parsed warnings will appear here. Paste your console log above and click Parse."
+                                   FontSize="13" Opacity="0.5"
+                                   HorizontalAlignment="Center" VerticalAlignment="Center"
+                                   TextWrapping="Wrap" TextAlignment="Center" MaxWidth="360" />
+
+                        <!-- Rows -->
+                        <ListBox Grid.Row="1"
+                                 Visibility="{Binding HasRows, Converter={StaticResource BooleanToVisibility}}"
+                                 ItemsSource="{Binding Rows}"
+                                 BorderThickness="0"
+                                 Background="Transparent"
+                                 ScrollViewer.HorizontalScrollBarVisibility="Disabled">
+                            <ListBox.ItemTemplate>
+                                <DataTemplate>
+                                    <Grid Margin="4,3">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="Auto" />
+                                            <ColumnDefinition Width="Auto" />
+                                            <ColumnDefinition Width="*" />
+                                            <ColumnDefinition Width="Auto" />
+                                            <ColumnDefinition Width="Auto" />
+                                        </Grid.ColumnDefinitions>
+
+                                        <!-- Type badge -->
+                                        <Border Grid.Column="0"
+                                                Background="{DynamicResource AccentFillColorDefaultBrush}"
+                                                CornerRadius="3" Padding="6,1" VerticalAlignment="Center">
+                                            <TextBlock Text="{Binding TypeBadge}" FontSize="10" FontWeight="SemiBold" Foreground="White" />
+                                        </Border>
+                                        <!-- Mem badge -->
+                                        <Border Grid.Column="1"
+                                                Background="{DynamicResource SubtleFillColorTertiaryBrush}"
+                                                BorderBrush="{DynamicResource ControlElevationBorderBrush}"
+                                                BorderThickness="1"
+                                                CornerRadius="3" Padding="5,1" Margin="6,0,0,0" VerticalAlignment="Center">
+                                            <TextBlock Text="{Binding MemBadge}" FontSize="9" Opacity="0.8" />
+                                        </Border>
+
+                                        <TextBlock Grid.Column="2"
+                                                   Text="{Binding AssetRefDisplay}"
+                                                   Margin="10,0,8,0"
+                                                   VerticalAlignment="Center"
+                                                   TextTrimming="CharacterEllipsis"
+                                                   FontFamily="Consolas" FontSize="12"
+                                                   ToolTip="{Binding ResolvedPath}" />
+
+                                        <TextBlock Grid.Column="3"
+                                                   Text="{Binding SizeDisplay}"
+                                                   FontFamily="Consolas" FontSize="11"
+                                                   Opacity="0.7" VerticalAlignment="Center"
+                                                   Margin="0,0,12,0" />
+
+                                        <!-- Status icon + text -->
+                                        <StackPanel Grid.Column="4" Orientation="Horizontal" VerticalAlignment="Center" MinWidth="150">
+                                            <ui:SymbolIcon FontSize="12" Margin="0,0,5,0" VerticalAlignment="Center">
+                                                <ui:SymbolIcon.Style>
+                                                    <Style TargetType="ui:SymbolIcon">
+                                                        <Setter Property="Symbol" Value="Subtract24" />
+                                                        <Setter Property="Visibility" Value="Collapsed" />
+                                                        <Style.Triggers>
+                                                            <DataTrigger Binding="{Binding RowStatus}" Value="Running">
+                                                                <Setter Property="Symbol" Value="ArrowSync24" />
+                                                                <Setter Property="Foreground" Value="{DynamicResource TextFillColorSecondaryBrush}" />
+                                                                <Setter Property="Visibility" Value="Visible" />
+                                                            </DataTrigger>
+                                                            <DataTrigger Binding="{Binding RowStatus}" Value="Ok">
+                                                                <Setter Property="Symbol" Value="Check24" />
+                                                                <Setter Property="Foreground" Value="#4FBF6F" />
+                                                                <Setter Property="Visibility" Value="Visible" />
+                                                            </DataTrigger>
+                                                            <DataTrigger Binding="{Binding RowStatus}" Value="Warn">
+                                                                <Setter Property="Symbol" Value="Warning24" />
+                                                                <Setter Property="Foreground" Value="#E0A33A" />
+                                                                <Setter Property="Visibility" Value="Visible" />
+                                                            </DataTrigger>
+                                                            <DataTrigger Binding="{Binding RowStatus}" Value="Error">
+                                                                <Setter Property="Symbol" Value="ErrorCircle24" />
+                                                                <Setter Property="Foreground" Value="#E45757" />
+                                                                <Setter Property="Visibility" Value="Visible" />
+                                                            </DataTrigger>
+                                                            <DataTrigger Binding="{Binding RowStatus}" Value="Skipped">
+                                                                <Setter Property="Symbol" Value="Subtract24" />
+                                                                <Setter Property="Foreground" Value="{DynamicResource TextFillColorTertiaryBrush}" />
+                                                                <Setter Property="Visibility" Value="Visible" />
+                                                            </DataTrigger>
+                                                        </Style.Triggers>
+                                                    </Style>
+                                                </ui:SymbolIcon.Style>
+                                            </ui:SymbolIcon>
+                                            <TextBlock Text="{Binding Status}"
+                                                       FontSize="11" Opacity="0.75"
+                                                       VerticalAlignment="Center"
+                                                       TextTrimming="CharacterEllipsis" />
+                                        </StackPanel>
+                                    </Grid>
+                                </DataTemplate>
+                            </ListBox.ItemTemplate>
+                        </ListBox>
+                    </Grid>
+                </Border>
+            </Grid>
+        </Grid>
+
+        <!-- ───────── Footer ───────── -->
+        <Border Grid.Row="2"
+                BorderThickness="0,1,0,0"
+                BorderBrush="{DynamicResource ControlElevationBorderBrush}"
+                Background="{DynamicResource ControlFillColorDefaultBrush}"
+                Padding="16,12">
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+
+                <ctrl:DotMatrixLoader Grid.Column="0"
+                                      LoaderStyle="BlockDrop"
+                                      DotSize="5" DotSpacing="2"
+                                      Margin="0,0,12,0"
+                                      VerticalAlignment="Center"
+                                      Visibility="{Binding IsProcessing, Converter={StaticResource BooleanToVisibility}}" />
+
+                <StackPanel Grid.Column="1" Margin="0,0,16,0" VerticalAlignment="Center">
+                    <!-- Read-only TextBox instead of a TextBlock so the result
+                         line (sizes, counts) is selectable / copyable. -->
+                    <TextBox Text="{Binding Summary, Mode=OneWay}"
+                             IsReadOnly="True" IsTabStop="False"
+                             BorderThickness="0" Background="Transparent" Padding="0"
+                             FontSize="12" Opacity="0.85"
+                             TextWrapping="Wrap"
+                             VerticalScrollBarVisibility="Disabled"
+                             HorizontalScrollBarVisibility="Disabled" />
+                    <ProgressBar Value="{Binding Progress}" Maximum="1" Height="3" Margin="0,4,0,0"
+                                 Visibility="{Binding IsProcessing, Converter={StaticResource BooleanToVisibility}}" />
+                </StackPanel>
+
+                <ui:Button Grid.Column="2"
+                           Content="Open backup"
+                           Appearance="Secondary"
+                           Margin="0,0,10,0"
+                           Padding="14,8"
+                           VerticalAlignment="Center"
+                           Click="OnOpenBackup"
+                           Visibility="{Binding HasBackup, Converter={StaticResource BooleanToVisibility}}"
+                           ToolTip="Open the timestamped folder in Downloads where this run backed up your original files.">
+                    <ui:Button.Icon>
+                        <ui:SymbolIcon Symbol="FolderOpen24" />
+                    </ui:Button.Icon>
+                </ui:Button>
+
+                <StackPanel Grid.Column="3" Orientation="Horizontal">
+                    <ui:Button Content="CANCEL"
+                               Appearance="Danger"
+                               Padding="24,12"
+                               FontSize="13" FontWeight="SemiBold"
+                               Margin="0,0,8,0"
+                               Visibility="{Binding IsProcessing, Converter={StaticResource BooleanToVisibility}}"
+                               Click="OnCancel"
+                               ToolTip="Stop the sweep. The asset currently being written finishes; the rest are left untouched.">
+                        <ui:Button.Icon>
+                            <ui:SymbolIcon Symbol="Dismiss24" />
+                        </ui:Button.Icon>
+                    </ui:Button>
+                    <ui:Button Content="OPTIMIZE ALL"
+                               Appearance="Primary"
+                               Padding="32,12"
+                               FontSize="13" FontWeight="SemiBold"
+                               IsEnabled="{Binding CanProcess}"
+                               Click="OnRun"
+                               ToolTip="Optimize every resolved, supported asset just enough to clear its warning. Overwrites in place (with backups if enabled).">
+                        <ui:Button.Icon>
+                            <ui:SymbolIcon Symbol="Sparkle24" />
+                        </ui:Button.Icon>
+                    </ui:Button>
+                </StackPanel>
+            </Grid>
+        </Border>
+
+        <!-- Drag-over overlay: shows across the whole tab while a valid .log/.txt
+             drag is in progress so the user gets clear "release to load" feedback. -->
+        <Border x:Name="DropOverlay" Grid.RowSpan="3"
+                Visibility="Collapsed" IsHitTestVisible="False"
+                Background="#B0202020"
+                BorderBrush="{DynamicResource AccentControlElevationBorderBrush}"
+                BorderThickness="3" CornerRadius="8" Margin="6">
+            <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center">
+                <ui:SymbolIcon Symbol="ArrowUpload24" FontSize="60" HorizontalAlignment="Center" Margin="0,0,0,12" />
+                <TextBlock Text="Drop the .log / .txt file to load it"
+                           FontSize="20" FontWeight="SemiBold" HorizontalAlignment="Center" Foreground="White" />
+            </StackPanel>
+        </Border>
+    </Grid>
+</UserControl>
