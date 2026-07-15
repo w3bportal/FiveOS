@@ -1,0 +1,115 @@
+<UserControl x:Class="FiveOS.Views.Controls.ApiKeyCard"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:ui="http://schemas.lepo.co/wpfui/2022/xaml"
+             xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+             xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+             mc:Ignorable="d"
+             d:DesignWidth="700">
+
+    <Border CornerRadius="6"
+            Padding="18,16"
+            Background="{DynamicResource ControlFillColorSecondaryBrush}"
+            BorderThickness="1"
+            BorderBrush="{DynamicResource ControlElevationBorderBrush}">
+        <StackPanel>
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+                <StackPanel Grid.Column="0" Orientation="Horizontal">
+                    <ui:SymbolIcon x:Name="HeaderIcon"
+                                   Symbol="Sparkle24"
+                                   FontSize="20"
+                                   VerticalAlignment="Center"
+                                   Opacity="0.85" />
+                    <TextBlock x:Name="TitleText"
+                               FontSize="14"
+                               FontWeight="SemiBold"
+                               Margin="10,0,0,0"
+                               VerticalAlignment="Center" />
+                </StackPanel>
+                <Border Grid.Column="1"
+                        x:Name="StatusPill"
+                        CornerRadius="9"
+                        Padding="8,2"
+                        VerticalAlignment="Center"
+                        Background="{DynamicResource ControlFillColorTertiaryBrush}">
+                    <TextBlock x:Name="StatusText"
+                               FontSize="11"
+                               FontWeight="SemiBold"
+                               Text="Not saved"
+                               Opacity="0.7" />
+                </Border>
+            </Grid>
+
+            <TextBlock x:Name="HelpText"
+                       FontSize="11"
+                       Opacity="0.7"
+                       TextWrapping="Wrap"
+                       Margin="0,8,0,0">
+                <Hyperlink x:Name="HelpLink" Click="OnOpenConsole">
+                    <Run x:Name="HelpLinkText" Text="Get a key" />
+                </Hyperlink>
+                <Run x:Name="HelpTextSuffix" Text="" />
+            </TextBlock>
+
+            <Grid x:Name="EditRow" Margin="0,12,0,0">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+                <PasswordBox Grid.Column="0"
+                             x:Name="KeyBox"
+                             FontFamily="Consolas"
+                             FontSize="13"
+                             Padding="8,6"
+                             VerticalAlignment="Center"
+                             ToolTip="Paste your API key for this provider. Stored encrypted via Windows DPAPI in your user profile — never logged, never sent anywhere except the provider's own API." />
+                <ui:Button Grid.Column="1"
+                           Content="Save"
+                           Appearance="Primary"
+                           Padding="14,6"
+                           Margin="8,0,0,0"
+                           Click="OnSave"
+                           ToolTip="Encrypt the key and save it. Subsequent requests to this provider authenticate automatically." />
+                <ui:Button Grid.Column="2"
+                           x:Name="CancelButton"
+                           Content="Cancel"
+                           Appearance="Secondary"
+                           Padding="14,6"
+                           Margin="6,0,0,0"
+                           Visibility="Collapsed"
+                           Click="OnCancel"
+                           ToolTip="Abandon the edit and keep the previously-saved key." />
+            </Grid>
+
+            <StackPanel x:Name="SavedRow"
+                        Orientation="Horizontal"
+                        Margin="0,12,0,0"
+                        Visibility="Collapsed">
+                <ui:Button Content="Replace key"
+                           Appearance="Secondary"
+                           Padding="14,6"
+                           Click="OnEdit"
+                           ToolTip="Swap the saved key for a new one — useful after regenerating it on the provider's dashboard.">
+                    <ui:Button.Icon>
+                        <ui:SymbolIcon Symbol="Edit24" />
+                    </ui:Button.Icon>
+                </ui:Button>
+                <ui:Button Content="Clear"
+                           Appearance="Secondary"
+                           Padding="14,6"
+                           Margin="8,0,0,0"
+                           Click="OnClear"
+                           ToolTip="Remove the saved key. This provider will be unavailable until you save a new one.">
+                    <ui:Button.Icon>
+                        <ui:SymbolIcon Symbol="Delete24" />
+                    </ui:Button.Icon>
+                </ui:Button>
+            </StackPanel>
+        </StackPanel>
+    </Border>
+</UserControl>

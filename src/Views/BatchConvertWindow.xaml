@@ -1,0 +1,319 @@
+<ui:FluentWindow x:Class="FiveOS.Views.BatchConvertWindow"
+                 xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+                 xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+                 xmlns:ui="http://schemas.lepo.co/wpfui/2022/xaml"
+                 xmlns:vm="clr-namespace:FiveOS.ViewModels"
+                 xmlns:conv="clr-namespace:FiveOS.Converters"
+                 Title="Batch convert"
+                 Height="640" Width="720"
+                 MinHeight="540" MinWidth="640"
+                 WindowStartupLocation="CenterOwner"
+                 WindowBackdropType="Mica"
+                 ExtendsContentIntoTitleBar="True"
+                 AllowDrop="True"
+                 DragOver="OnWindowDragOver"
+                 Drop="OnWindowDrop">
+
+    <ui:FluentWindow.Resources>
+        <conv:BooleanToVisibilityConverter x:Key="BooleanToVisibility" />
+        <conv:InverseBooleanToVisibilityConverter x:Key="InverseBooleanToVisibility" />
+        <conv:InverseBooleanConverter x:Key="InverseBoolean" />
+    </ui:FluentWindow.Resources>
+
+    <Grid>
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+        </Grid.RowDefinitions>
+
+        <ui:TitleBar Grid.Row="0"
+                     Title="Batch convert"
+                     ShowMaximize="False"
+                     ShowMinimize="False" />
+
+        <!-- ─── Header: pack name + drop hint ─────────────────────── -->
+        <Border Grid.Row="1" Margin="20,8,20,0">
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+
+                <StackPanel Grid.Column="0">
+                    <TextBlock Text="Pack name"
+                               FontSize="11"
+                               Opacity="0.7"
+                               Margin="0,0,0,4" />
+                    <ui:TextBox Text="{Binding PackName, UpdateSourceTrigger=PropertyChanged}"
+                                PlaceholderText="props_pack"
+                                FontFamily="Consolas"
+                                FontSize="13"
+                                MaxLength="48"
+                                IsEnabled="{Binding IsIdle}"
+                                ToolTip="Becomes the FiveM resource folder name and the .zip stem. Lowercase + underscores recommended." />
+                    <TextBlock Margin="2,4,0,0"
+                               FontSize="11"
+                               Opacity="0.55"
+                               FontFamily="Consolas">
+                        <Run Text="Output: " />
+                        <Run Text="{Binding SafePackName, Mode=OneWay}" />
+                        <Run Text=".zip" />
+                    </TextBlock>
+                </StackPanel>
+
+                <StackPanel Grid.Column="1"
+                            VerticalAlignment="Center"
+                            HorizontalAlignment="Right"
+                            Margin="16,0,0,0">
+                    <TextBlock HorizontalAlignment="Right"
+                               FontSize="22"
+                               FontWeight="Light"
+                               FontFamily="Consolas">
+                        <Run Text="{Binding Count, Mode=OneWay, FallbackValue=0}" />
+                        <Run Text="/" Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
+                        <Run Text="30" Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
+                    </TextBlock>
+                    <TextBlock Text="queued"
+                               HorizontalAlignment="Right"
+                               FontSize="10"
+                               Opacity="0.55" />
+                </StackPanel>
+            </Grid>
+        </Border>
+
+        <!-- ─── Body: queue list with empty-state drop zone ───────── -->
+        <Border Grid.Row="2"
+                Margin="20,12,20,0"
+                CornerRadius="8"
+                BorderThickness="1"
+                BorderBrush="{DynamicResource ControlElevationBorderBrush}"
+                Background="{DynamicResource ControlFillColorDefaultBrush}">
+            <Grid>
+                <!-- Empty state: clickable drop zone -->
+                <Border x:Name="EmptyDropZone"
+                        Background="Transparent"
+                        Cursor="Hand"
+                        MouseLeftButtonUp="OnEmptyZoneClick"
+                        Visibility="{Binding IsEmpty, Converter={StaticResource BooleanToVisibility}}">
+                    <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center">
+                        <ui:SymbolIcon Symbol="DocumentAdd24"
+                                       FontSize="48"
+                                       HorizontalAlignment="Center"
+                                       Opacity="0.5"
+                                       Margin="0,0,0,12" />
+                        <TextBlock Text="Drop 3D files here, or click to browse"
+                                   HorizontalAlignment="Center"
+                                   FontSize="14"
+                                   Opacity="0.75" />
+                        <TextBlock Text=".obj · .glb · .gltf · .fbx · .dae · .ply · .stl"
+                                   HorizontalAlignment="Center"
+                                   FontFamily="Consolas"
+                                   FontSize="11"
+                                   Opacity="0.45"
+                                   Margin="0,6,0,0" />
+                        <TextBlock Text="Up to 30 files per batch. Each becomes one archetype in the pack."
+                                   HorizontalAlignment="Center"
+                                   FontSize="11"
+                                   Opacity="0.45"
+                                   Margin="0,4,0,0" />
+                    </StackPanel>
+                </Border>
+
+                <!-- Populated state: scrollable item list -->
+                <ScrollViewer VerticalScrollBarVisibility="Auto"
+                              Visibility="{Binding HasItems, Converter={StaticResource BooleanToVisibility}}">
+                    <ItemsControl ItemsSource="{Binding Items}">
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate DataType="{x:Type vm:BatchConvertItem}">
+                                <Border Margin="6,4"
+                                        Padding="10,8"
+                                        CornerRadius="6"
+                                        Background="{DynamicResource ControlFillColorSecondaryBrush}">
+                                    <Grid>
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="Auto" />
+                                            <ColumnDefinition Width="*" />
+                                            <ColumnDefinition Width="Auto" />
+                                            <ColumnDefinition Width="Auto" />
+                                        </Grid.ColumnDefinitions>
+
+                                        <ui:SymbolIcon Grid.Column="0"
+                                                       Symbol="Cube24"
+                                                       FontSize="18"
+                                                       Margin="0,0,10,0"
+                                                       VerticalAlignment="Center"
+                                                       Opacity="0.7" />
+
+                                        <StackPanel Grid.Column="1" VerticalAlignment="Center">
+                                            <TextBlock Text="{Binding SourceName}"
+                                                       FontSize="13"
+                                                       FontWeight="SemiBold"
+                                                       TextTrimming="CharacterEllipsis" />
+                                            <StackPanel Orientation="Horizontal" Margin="0,2,0,0">
+                                                <TextBlock Text="archetype: "
+                                                           FontSize="11"
+                                                           FontFamily="Consolas"
+                                                           Opacity="0.55" />
+                                                <TextBlock Text="{Binding AssetName}"
+                                                           FontSize="11"
+                                                           FontFamily="Consolas"
+                                                           Opacity="0.85" />
+                                                <TextBlock Text=" · "
+                                                           FontSize="11"
+                                                           Opacity="0.4" />
+                                                <TextBlock Text="{Binding SizeDisplay}"
+                                                           FontSize="11"
+                                                           FontFamily="Consolas"
+                                                           Opacity="0.55" />
+                                            </StackPanel>
+                                            <TextBlock Text="{Binding Error}"
+                                                       FontSize="11"
+                                                       Foreground="#F26"
+                                                       Margin="0,4,0,0"
+                                                       TextWrapping="Wrap"
+                                                       Visibility="{Binding HasError, Converter={StaticResource BooleanToVisibility}}" />
+                                        </StackPanel>
+
+                                        <Border Grid.Column="2"
+                                                CornerRadius="9"
+                                                Padding="10,3"
+                                                VerticalAlignment="Center"
+                                                Margin="0,0,6,0"
+                                                Background="{Binding StatusBackgroundBrush}">
+                                            <TextBlock Text="{Binding StatusLabel}"
+                                                       FontSize="11"
+                                                       FontWeight="SemiBold"
+                                                       Foreground="{Binding StatusForegroundBrush}" />
+                                        </Border>
+
+                                        <ui:Button Grid.Column="3"
+                                                   Appearance="Transparent"
+                                                   Padding="4"
+                                                   VerticalAlignment="Center"
+                                                   Click="OnRemoveItem"
+                                                   IsEnabled="{Binding DataContext.IsIdle, RelativeSource={RelativeSource AncestorType={x:Type ui:FluentWindow}}}"
+                                                   ToolTip="Remove from queue">
+                                            <ui:Button.Icon>
+                                                <ui:SymbolIcon Symbol="Dismiss20" FontSize="14" />
+                                            </ui:Button.Icon>
+                                        </ui:Button>
+                                    </Grid>
+                                </Border>
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                </ScrollViewer>
+            </Grid>
+        </Border>
+
+        <!-- ─── Options ───────────────────────────────────────────── -->
+        <Border Grid.Row="3" Margin="20,12,20,0">
+            <Grid IsEnabled="{Binding IsIdle}">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="*" />
+                </Grid.ColumnDefinitions>
+
+                <StackPanel Grid.Column="0">
+                    <CheckBox Content="Embed collision into YDR"
+                              IsChecked="{Binding EmbedCollision, Mode=TwoWay}"
+                              Margin="0,0,0,4"
+                              ToolTip="Bake the collision mesh into each .ydr (no sibling .ybn). Recommended for static props." />
+                    <CheckBox Content="Include collision"
+                              IsChecked="{Binding IncludeCollision, Mode=TwoWay}"
+                              Margin="0,0,0,4"
+                              ToolTip="Generate per-prop collision so peds and vehicles don't walk through the model." />
+                    <CheckBox Content="Build .ytyp archetypes"
+                              IsChecked="{Binding IncludeYtyp, Mode=TwoWay}"
+                              Margin="0,0,0,4"
+                              ToolTip="Add each prop to the merged archetype dictionary so .ymap placement and housing menus see them." />
+                </StackPanel>
+
+                <StackPanel Grid.Column="1">
+                    <CheckBox Content="Extract embedded textures"
+                              IsChecked="{Binding ExtractTextures, Mode=TwoWay}"
+                              Margin="0,0,0,4"
+                              ToolTip="Pull textures from the source mesh and bake them into the YDR's embedded TextureDictionary." />
+                    <CheckBox Content="Generate LODs"
+                              IsChecked="{Binding GenerateLods, Mode=TwoWay}"
+                              Margin="0,0,0,4"
+                              ToolTip="Decimate clones of each High model into Med/Low/VLow tiers. Slower convert, faster runtime." />
+                    <CheckBox Content="Finalise pack when queue completes"
+                              IsChecked="{Binding FinalizeWhenDone, Mode=TwoWay}"
+                              Margin="0,0,0,4"
+                              ToolTip="Auto-build the merged FiveM resource as soon as the last item converts. Uncheck to leave the items staged in the active pack session so you can keep adding more from the main window." />
+                </StackPanel>
+            </Grid>
+        </Border>
+
+        <!-- ─── Status + actions ──────────────────────────────────── -->
+        <Border Grid.Row="4"
+                Margin="20,12,20,16"
+                Padding="0,12,0,0"
+                BorderThickness="0,1,0,0"
+                BorderBrush="{DynamicResource ControlElevationBorderBrush}">
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+
+                <StackPanel Grid.Column="0" VerticalAlignment="Center">
+                    <TextBlock Text="{Binding StatusText}"
+                               FontSize="12"
+                               Opacity="0.85"
+                               TextWrapping="Wrap" />
+                    <ProgressBar Maximum="{Binding Count}"
+                                 Value="{Binding CurrentIndex, Mode=OneWay}"
+                                 Height="3"
+                                 Margin="0,6,0,0"
+                                 Visibility="{Binding IsRunning, Converter={StaticResource BooleanToVisibility}}" />
+                </StackPanel>
+
+                <StackPanel Grid.Column="1"
+                            Orientation="Horizontal"
+                            VerticalAlignment="Center"
+                            HorizontalAlignment="Right">
+                    <ui:Button Content="Add files"
+                               Appearance="Secondary"
+                               Padding="14,6"
+                               Margin="0,0,6,0"
+                               Click="OnBrowse"
+                               IsEnabled="{Binding CanAdd}"
+                               ToolTip="Open a file picker to add up to 30 source meshes to the queue.">
+                        <ui:Button.Icon>
+                            <ui:SymbolIcon Symbol="DocumentAdd20" />
+                        </ui:Button.Icon>
+                    </ui:Button>
+                    <ui:Button Content="Clear"
+                               Appearance="Secondary"
+                               Padding="14,6"
+                               Margin="0,0,6,0"
+                               Click="OnClear"
+                               IsEnabled="{Binding CanClear}"
+                               ToolTip="Drop every item from the queue." />
+                    <ui:Button Content="Close"
+                               Appearance="Secondary"
+                               Padding="14,6"
+                               Margin="0,0,6,0"
+                               Click="OnClose"
+                               ToolTip="Close the dialog. Items already converted stay in the active pack session." />
+                    <ui:Button x:Name="StartButton"
+                               Content="Start"
+                               Appearance="Primary"
+                               Padding="20,6"
+                               Click="OnStart"
+                               IsEnabled="{Binding CanStart}"
+                               ToolTip="Convert each queued file and route the output into a single FiveM resource.">
+                        <ui:Button.Icon>
+                            <ui:SymbolIcon Symbol="Play24" />
+                        </ui:Button.Icon>
+                    </ui:Button>
+                </StackPanel>
+            </Grid>
+        </Border>
+    </Grid>
+</ui:FluentWindow>

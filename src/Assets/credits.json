@@ -1,0 +1,56 @@
+{
+  "version": 1,
+  "intro": "FiveOS stands on the shoulders of these third-party projects and services. Click any link to visit the source.",
+  "categories": [
+    {
+      "name": "RAGE / FiveM tooling",
+      "items": [
+        {
+          "name": "CodeWalker",
+          "url": "https://github.com/dexyfex/CodeWalker",
+          "description": "RAGE resource library — reads/writes .ydr, .ytd, .ymap, .ybn. The binary writer that makes FiveOS's converter possible.",
+          "license": "MIT"
+        }
+      ]
+    },
+    {
+      "name": "External APIs",
+      "items": [
+        {
+          "name": "Sketchfab",
+          "url": "https://sketchfab.com/developers",
+          "description": "Source for File → Import from Sketchfab URL. Requires a personal API token.",
+          "license": "Sketchfab API ToS"
+        },
+        {
+          "name": "Meshy AI",
+          "url": "https://www.meshy.ai/api",
+          "description": "Image → 3D generation on the Mesh Optimize tab.",
+          "license": "Meshy API ToS"
+        }
+      ]
+    },
+    {
+      "name": "Game assets (reference only)",
+      "items": [
+        {
+          "name": "Rockstar Games / Take-Two Interactive",
+          "url": "https://www.rockstargames.com/",
+          "description": "GTA V freemode reference meshes used in Emotes for pose scale and retargeting. Grand Theft Auto and related marks are property of Take-Two Interactive / Rockstar Games. Not affiliated with Rockstar or Take-Two.",
+          "license": "All rights reserved (reference use)"
+        }
+      ]
+    },
+    {
+      "name": "Inspirations / ports",
+      "items": [
+        {
+          "name": "Modly",
+          "url": "https://github.com/cfx-portal/Modly",
+          "description": "Reference for the Mesh Optimize tab's decimate / remesh pipeline.",
+          "license": "Open source"
+        }
+      ]
+    }
+  ]
+}

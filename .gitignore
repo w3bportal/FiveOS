@@ -1,0 +1,66 @@
+# FiveOS — open source (GPL-3.0). The full app source is tracked here.
+# This ignores build output, secrets, and the published exe.
+
+# ── Build output ─────────────────────────────────────────────
+[Bb]in/
+[Oo]bj/
+.vs/
+publish/
+publish_out/
+publish_new/
+*.pdb
+*.cache
+*.user
+*_wpftmp.csproj
+
+# ── Published single-file exe (distributed via GitHub Releases) ─
+/FiveOS.exe
+*.exe.bak
+
+# ── Secrets — never commit ───────────────────────────────────
+**/appsettings.json
+**/appsettings.*.json
+*.env
+.env
+.env.*
+*.pem
+*.pfx
+*.p12
+*.key
+.dev.vars
+**/secrets/
+**/signing-metadata.json
+**/azure-signing.json
+**/*signing*metadata*.json
+
+# ── Editor / local tooling ───────────────────────────────────
+.claude/
+.wrangler/
+tmp_test/
+debug.log
+*tm:
+/.cursor/rules/
+.txt
+
+# ── Private to this machine (not part of the release) ────────
+/bot/
+/research/
+/tools/
+__pycache__/
+*.pyc
+
+# ── Trimble SketchUp SDK leftovers — never redistribute ──────
+**/SketchUpAPI.dll
+**/SketchUpCommonPreferences.dll
+**/skp2gltf.exe
+
+# ── Thumbnails addon — lives in github.com/w3bportal/FiveOS-addons ─
+/src/ViewModels/ThumbnailViewModel.cs
+/src/Views/ThumbnailView.xaml
+/src/Views/ThumbnailView.xaml.cs
+
+# Cursor IDE (local only)
+.cursor/
+
+# Preview videos hosted on GitHub Releases
+docs/videos/

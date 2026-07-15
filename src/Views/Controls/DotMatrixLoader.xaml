@@ -1,0 +1,8 @@
+<UserControl x:Class="FiveOS.Views.Controls.DotMatrixLoader"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             Background="Transparent">
+    <Grid x:Name="DotsContainer"
+          HorizontalAlignment="Center"
+          VerticalAlignment="Center" />
+</UserControl>
