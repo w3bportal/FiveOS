@@ -364,6 +364,8 @@ public partial class MainWindow : FluentWindow
     private async Task MaybeOfferPendingUpdateAsync()
     {
         if (_updateOffered) return;
+        // Manual-only mode: never auto-prompt; badge / Help → Check still work.
+        if (!Services.UserSettings.LoadGlobalUpdate()) return;
         if (_pendingUpdate is not
             { Status: Services.UpdateChecker.Status.UpdateAvailable, Latest: not null } result)
             return;
