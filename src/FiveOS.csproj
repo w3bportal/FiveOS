@@ -13,9 +13,9 @@
 
     <AssemblyName>FiveOS</AssemblyName>
     <RootNamespace>FiveOS</RootNamespace>
-    <Version>1.0.6</Version>
-    <FileVersion>1.0.6.0</FileVersion>
-    <AssemblyVersion>1.0.6.0</AssemblyVersion>
+    <Version>1.0.7</Version>
+    <FileVersion>1.0.7.0</FileVersion>
+    <AssemblyVersion>1.0.7.0</AssemblyVersion>
     <Authors>FiveOS</Authors>
     <Company>FiveOS</Company>
     <Product>FiveOS</Product>
