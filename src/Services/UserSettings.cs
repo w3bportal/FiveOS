@@ -33,7 +33,7 @@ public static class UserSettings
     /// <see cref="Migrate"/> before the blob is handed back. Unknown
     /// (higher) versions are accepted as-is to avoid clobbering a
     /// future install's settings if the user downgrades.</summary>
-    private const int CurrentSchemaVersion = 1;
+    private const int CurrentSchemaVersion = 2;
 
     internal sealed class Blob
     {
@@ -66,9 +66,9 @@ public static class UserSettings
         public string? SkippedUpdateVersion { get; set; }
 
         /// <summary>When true, check for updates on startup and prompt if a
-        /// newer build is available. When false (default), updates are
-        /// manual only via Help → Check for updates.</summary>
-        public bool GlobalUpdate { get; set; } = false;
+        /// newer build is available. When false, updates are manual only
+        /// via Help → Check for updates.</summary>
+        public bool GlobalUpdate { get; set; } = true;
 
         /// <summary>Path to the reference (scale-comparison) model shown
         /// alongside the user's prop in the 3D preview. Empty / null disables
@@ -221,6 +221,14 @@ public static class UserSettings
         // data shape changes; just stamp the version so future bumps
         // have a baseline to migrate from.
         if (b.SchemaVersion < 1) b.SchemaVersion = 1;
+
+        // v1 → v2: turn Global Update on for everyone so startup prompts
+        // for new releases (Motion hub Download / Add to timeline, etc.).
+        if (b.SchemaVersion < 2)
+        {
+            b.GlobalUpdate = true;
+            b.SchemaVersion = 2;
+        }
     }
 
     // Serializes concurrent writers so two saves can't interleave.
