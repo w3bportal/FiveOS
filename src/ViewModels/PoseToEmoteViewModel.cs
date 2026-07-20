@@ -741,6 +741,11 @@ public partial class PoseToEmoteViewModel : ObservableObject
     /// <see cref="PoseIkMode"/> by the view.</summary>
     [ObservableProperty] private string _poseModeLabel = "FK";
 
+    /// <summary>Pin feet to the ground while posing. Only active when
+    /// <see cref="PoseIkMode"/> is on — the viewer plants via two-bone leg
+    /// IK. Toolbar control is disabled in FK mode.</summary>
+    [ObservableProperty] private bool _poseFootLock = false;
+
     // The Inspector POSE LIBRARY section now binds to the existing
     // CustomPoses collection (populated from PoseLibraryService). The
     // brief PosePresets parallel collection that lived here was a

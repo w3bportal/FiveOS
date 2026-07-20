@@ -56,6 +56,11 @@ public partial class App : Application
         var ver = typeof(App).Assembly.GetName().Version?.ToString(3) ?? "?";
         Services.FosLogger.Info("boot", $"FiveOS {ver} starting (PID {Environment.ProcessId})");
 
+        // AssimpNet can't find assimp.dll inside single-file extract dirs
+        // (raw LoadLibrary ignores AddDllDirectory). Preload by absolute
+        // path so Motion "Add to timeline" / anim import works.
+        Services.NativeAssimpLoader.Preload();
+
         // Bring up Sentry before the exception handlers below so any
         // exception in early startup still has a chance to be reported.
         // No-op when FIVEOS_SENTRY_DSN is unset (forks / dev runs / OSS

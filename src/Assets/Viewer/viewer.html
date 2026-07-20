@@ -99,6 +99,7 @@
   .gizmo-toggle label { font-size: 11px; color: var(--vscode-fg); cursor: pointer; display: inline-flex; align-items: center; gap: 5px; }
   .gizmo-toggle label svg { width: 11px; height: 11px; }
   /* Sub-mesh selection chip (bottom-center). Appears when the user clicks
+
      a single mesh under the cursor so they can split it into its own layer
      — e.g. isolate a mirror pane from its frame. Styled like the gizmo bar. */
   #submesh-bar {
@@ -821,15 +822,23 @@ let poseIkHandles = [];           // { id, target, mesh, kind, effector, twoBone
 let poseIkActiveHandle = null;
 let poseIkDragCapture = null;     // Map<boneIdx, quat> for undo while IK-dragging
 // Full-body IK: one FABRIKSolver over the primary deform skeleton. Drives
-// the multi-bone torso/shoulder lean + spine + head chains so dragging a
-// hand carries the clavicle and upper chest with it; the analytic
-// two-bone solver still cleans the elbow/knee afterwards. Rebuilt whenever
-// the IK handles are (re)built; chains stay disabled until a handle is
-// grabbed so only the dragged limb ever solves.
+// hands through spine→pelvis and feet through thigh→pelvis so the torso
+// follows the reach; analytic two-bone cleans elbows/knees afterwards.
+// During a drag we also hip-follow (pelvis Y) and re-plant the other foot
+// so the stance stays grounded like an advanced control rig.
 let poseFabrik = null;
 let poseFabrikSkeleton = null;
+// Captured at IK grab: pelvis local pos + planted world foot targets so the
+// body can follow the dragged limb without skating the other foot.
+let poseIkBodyCapture = null; // { pelvis, pelvisPos:[x,y,z], plants:{footL/R}, footStartY }
 let poseHoverIkHandle = null;     // IK handle currently under the cursor (hover glow)
 let poseIkMode = false;           // false = FK (click a limb → rotate); true = IK (drag a hand/foot → shoulder+chest+other side follow)
+// Foot lock (IK only): pin each foot's world plant target and re-solve
+// two-bone leg IK so feet stay on the floor while posing. Dragging a foot
+// slides it on that plant height (Y locked); the other foot stays fixed.
+let poseFootLock = false;
+let poseFootLocks = { footL: null, footR: null }; // {x,y,z} world or null
+const _footLockTmp = new THREE.Vector3();
 let _boneLinesOn = true;          // thick skeleton bone lines on/off (rig sub-toggle)
 let _fingersMode = 'on';          // 'on' | 'off' — finger control visibility
 let _posePaintPending = false;    // set on enterPoseMode; posts 'pose-painted' after the first render
@@ -1544,17 +1553,49 @@ transformControls.addEventListener('dragging-changed', e => {
   }
 });
 
-// History capture: FK rotate selection, or IK limb chain (A/B/C bones).
+// Snapshot leg bones that foot-lock may rewrite so undo covers plant IK.
+function snapshotFootLockBonesInto(map) {
+  if (!map || !poseFootLock || !poseIkMode) return;
+  for (const id of ['footL', 'footR']) {
+    const fh = poseIkHandles.find(x => x && x.id === id);
+    if (!fh) continue;
+    for (const bone of ikAffectedBones(fh)) {
+      const idx = poseBones.indexOf(bone);
+      if (idx < 0 || map.has(idx)) continue;
+      map.set(idx, [bone.quaternion.x, bone.quaternion.y, bone.quaternion.z, bone.quaternion.w]);
+    }
+  }
+}
+
+// History capture: FK rotate/translate selection, or IK limb chain.
+let dragPosCapture = null; // Map<boneIdx, [x,y,z]> for FK translate undo
 transformControls.addEventListener('mouseDown', () => {
   if (!poseMode) return;
   if (poseIkActiveHandle && transformControls.mode === 'translate') {
     poseIkDragCapture = new Map();
-    // Snapshot every bone the chain can rotate (full FABRIK chain + the
-    // analytic triplet) so a full-body IK drag is one atomic undo step.
+    dragPosCapture = new Map();
+    // Snapshot every bone the chain can rotate (full FABRIK + analytic +
+    // stance legs) so a full-body IK drag is one atomic undo step.
     for (const bone of ikAffectedBones(poseIkActiveHandle)) {
       const idx = poseBones.indexOf(bone);
       if (idx < 0) continue;
       poseIkDragCapture.set(idx, [bone.quaternion.x, bone.quaternion.y, bone.quaternion.z, bone.quaternion.w]);
+    }
+    snapshotFootLockBonesInto(poseIkDragCapture);
+    captureIkBodyState(poseIkActiveHandle);
+    if (poseIkBodyCapture && poseIkBodyCapture.pelvis) {
+      const p = poseIkBodyCapture.pelvis;
+      const idx = poseBones.indexOf(p);
+      if (idx >= 0) dragPosCapture.set(idx, [p.position.x, p.position.y, p.position.z]);
+    }
+    return;
+  }
+  if (transformControls.mode === 'translate' && poseSelection.length > 0 && !poseIkActiveHandle) {
+    dragPosCapture = new Map();
+    for (const bone of poseSelection) {
+      const idx = poseBones.indexOf(bone);
+      if (idx < 0) continue;
+      dragPosCapture.set(idx, [bone.position.x, bone.position.y, bone.position.z]);
     }
     return;
   }
@@ -1566,6 +1607,8 @@ transformControls.addEventListener('mouseDown', () => {
     if (idx < 0) continue;
     dragQuatCapture.set(idx, [bone.quaternion.x, bone.quaternion.y, bone.quaternion.z, bone.quaternion.w]);
   }
+  // FK rotate with foot lock on: legs may be re-solved to keep plants.
+  snapshotFootLockBonesInto(dragQuatCapture);
 });
 
 transformControls.addEventListener('mouseUp', () => {
@@ -1582,7 +1625,42 @@ transformControls.addEventListener('mouseUp', () => {
       }
       if (changed) items.push({ idx, before, after });
     }
+    // Hip-follow may have moved the pelvis — fold that into the same undo.
+    if (dragPosCapture && dragPosCapture.size > 0) {
+      for (const [idx, beforeP] of dragPosCapture) {
+        const bone = poseBones[idx];
+        if (!bone) continue;
+        const afterP = [bone.position.x, bone.position.y, bone.position.z];
+        let changed = false;
+        for (let i = 0; i < 3; i++) {
+          if (Math.abs(beforeP[i] - afterP[i]) > 1e-6) { changed = true; break; }
+        }
+        if (!changed) continue;
+        let it = items.find(x => x.idx === idx);
+        if (!it) { it = { idx }; items.push(it); }
+        it.beforeP = beforeP;
+        it.afterP = afterP;
+      }
+      dragPosCapture = null;
+    }
     poseIkDragCapture = null;
+    poseIkBodyCapture = null;
+    if (items.length > 0) pushHistory({ kind: 'rotate', payload: { items } });
+    return;
+  }
+  if (dragPosCapture && dragPosCapture.size > 0) {
+    const items = [];
+    for (const [idx, beforeP] of dragPosCapture) {
+      const bone = poseBones[idx];
+      if (!bone) continue;
+      const afterP = [bone.position.x, bone.position.y, bone.position.z];
+      let changed = false;
+      for (let i = 0; i < 3; i++) {
+        if (Math.abs(beforeP[i] - afterP[i]) > 1e-6) { changed = true; break; }
+      }
+      if (changed) items.push({ idx, beforeP, afterP });
+    }
+    dragPosCapture = null;
     if (items.length > 0) pushHistory({ kind: 'rotate', payload: { items } });
     return;
   }
@@ -1796,7 +1874,10 @@ function setGizmoMode(mode) {
   if (matched) transformControls.setMode(mode);
 }
 document.querySelectorAll('.gizmo-btn[data-mode]').forEach(btn => {
-  btn.addEventListener('click', () => setGizmoMode(btn.dataset.mode));
+  btn.addEventListener('click', () => {
+    if (poseMode) window.poseSetTransformMode(btn.dataset.mode);
+    else setGizmoMode(btn.dataset.mode);
+  });
 });
 
 // Keyboard shortcuts. Two distinct routing paths:
@@ -1931,23 +2012,8 @@ window.addEventListener('keydown', e => {
         // W/E/R gizmo mode switch (Blender/Maya muscle memory).
         // With an IK hand/foot selected: W = move target, E = rotate the
         // wrist/ankle bone (not the empty IK helper — that used to no-op).
-        if (poseIkActiveHandle) {
-          const mode = lower === 'e' ? 'rotate' : 'translate';
-          attachIkGizmoForMode(mode);
-          requestRender();
-          fosTelemetry.info('hotkey', `ik-gizmo -> ${mode}`);
-          e.preventDefault();
-          return;
-        }
-        if (transformControls.object) {
-          const mode = lower === 'w' ? 'translate' : lower === 'e' ? 'rotate' : 'scale';
-          // FK bone posing is rotate-only — ignore W/R on a selected joint.
-          if (poseSelection.length > 0 && mode !== 'rotate') {
-            e.preventDefault();
-            return;
-          }
-          transformControls.setMode(mode);
-          requestRender();
+        const mode = lower === 'w' ? 'translate' : lower === 'e' ? 'rotate' : 'scale';
+        if (window.poseSetTransformMode(mode)) {
           fosTelemetry.info('hotkey', `gizmo -> ${mode}`);
         }
         e.preventDefault();
@@ -5723,9 +5789,20 @@ function _ikTwistAbout(q, axis, out) {
   return out;
 }
 
-function aimBoneAt(bone, worldTarget) {
+function aimBoneAt(bone, worldTarget, preferChild) {
   if (!bone) return;
-  const child = bone.children.find(c => c.isBone && !(c.userData && c.userData.poseHidden));
+  // Prefer the chain child (thigh→calf, calf→foot). GTA limbs also parent
+  // MH_*/RB_* helpers under the same bone; taking children[0] aimed those
+  // instead, so two-bone IK never folded the knee/elbow.
+  let child = null;
+  if (preferChild && preferChild.isBone && preferChild.parent === bone) child = preferChild;
+  if (!child) {
+    child = bone.children.find(c =>
+      c.isBone && /^SKEL_/i.test(c.name || '') && !(c.userData && c.userData.poseHidden));
+  }
+  if (!child) {
+    child = bone.children.find(c => c.isBone && !(c.userData && c.userData.poseHidden));
+  }
   if (!child || child.position.lengthSq() < 1e-10) return;
 
   bone.updateMatrixWorld(true);
@@ -5788,8 +5865,9 @@ function solveTwoBoneIk(boneA, boneB, boneC, targetWorld) {
   const lbc = _ikB.distanceTo(_ikC);
   if (lab < 1e-5 || lbc < 1e-5) return;
 
+  // Reach shorter than full extension ⇒ mid joint must bend (knee/elbow).
   let lat = _ikA.distanceTo(_ikT);
-  lat = Math.max(1e-4, Math.min(lat, lab + lbc - 1e-4));
+  lat = Math.max(Math.abs(lab - lbc) + 1e-4, Math.min(lat, lab + lbc - 1e-4));
 
   _ikAc.copy(_ikT).sub(_ikA);
   if (_ikAc.lengthSq() < 1e-10) return;
@@ -5799,10 +5877,26 @@ function solveTwoBoneIk(boneA, boneB, boneC, targetWorld) {
   _ikPole.copy(_ikB).sub(_ikA);
   const along = _ikAc.dot(_ikPole);
   _ikPole.addScaledVector(_ikAc, -along);
-  if (_ikPole.lengthSq() < 1e-8) {
-    _ikPole.set(0, 0, 1);
+
+  const isLeg = /Thigh/i.test(boneA.name || '');
+  // Character forward from the hip parent — legs should fold this way.
+  let fwd = null;
+  if (isLeg && boneA.parent) {
+    fwd = new THREE.Vector3(0, 0, -1).transformDirection(boneA.parent.matrixWorld);
+    fwd.y = 0;
+    if (fwd.lengthSq() > 1e-8) fwd.normalize();
+    else fwd = null;
+  }
+
+  if (_ikPole.lengthSq() < 1e-6) {
+    if (fwd) _ikPole.copy(fwd);
+    else _ikPole.set(0, 0, isLeg ? -1 : 1);
     if (Math.abs(_ikAc.dot(_ikPole)) > 0.9) _ikPole.set(0, 1, 0);
     _ikPole.addScaledVector(_ikAc, -_ikAc.dot(_ikPole));
+  } else if (fwd && _ikPole.dot(fwd) < 0) {
+    // Nearly-straight rest poses often put a tiny reverse bias on the knee;
+    // flip so pull-up / pull-in bends forward, not into hyperextension.
+    _ikPole.negate();
   }
   _ikPole.normalize();
 
@@ -5813,9 +5907,9 @@ function solveTwoBoneIk(boneA, boneB, boneC, targetWorld) {
     .addScaledVector(_ikAc, Math.cos(angA) * lab)
     .addScaledVector(_ikPole, Math.sin(angA) * lab);
 
-  aimBoneAt(boneA, _ikMid);
+  aimBoneAt(boneA, _ikMid, boneB);
   boneA.updateMatrixWorld(true);
-  aimBoneAt(boneB, _ikT);
+  aimBoneAt(boneB, _ikT, boneC);
   boneB.updateMatrixWorld(true);
 }
 
@@ -5848,6 +5942,8 @@ function disposeIkHandles() {
   poseIkHandles = [];
   poseIkActiveHandle = null;
   poseHoverIkHandle = null;
+  poseIkBodyCapture = null;
+  clearFootLocks();
   // Drop the FABRIK solver + its chains; buildFiveOsIkHandles rebuilds a
   // fresh one against the current (bind-pose) skeleton on the next call.
   if (poseFabrik) { try { poseFabrik.removeAllChains(); } catch (e) {} }
@@ -5857,31 +5953,29 @@ function disposeIkHandles() {
 
 // Full-body IK rig. Each entry can carry TWO solvers that run in sequence
 // on drag:
-//   • fabrik  — ordered [effector … root]. Multi-bone FABRIK (upf-gti) so
-//               the reach carries the clavicle + upper chest (arms) or bends
-//               the whole spine / aims the head (torso, head handles).
-//   • twoBone — [root, mid, effector]. The proven analytic solver runs
-//               AFTER fabrik to cleanly re-place the last two bones, so
-//               elbows/knees never invert or hyperextend even though the
-//               body leaned. Feet use twoBone only (planted, pelvis stays).
-// `iters` tunes how far the fabrik body-lean converges before the analytic
-// pass nails the effector: arms lean gently (analytic owns the reach),
-// torso/head reach fully (they have no analytic clean-up).
-// Wrist + ankle IK circles only. The spine/head are posed FK via the green
-// rings now (AdvancedSkeleton style), so the torso/head IK handles are gone
-// — they clashed with the rings and dropped a stray purple blob mid-back.
+//   • fabrik  — ordered [effector … root]. Multi-bone FABRIK so a hand
+//               pull leans the spine/pelvis and a foot pull rotates the hips.
+//   • twoBone — [root, mid, effector]. Analytic clean-up after FABRIK so
+//               elbows/knees stay well-behaved.
+// Plus (in applyActiveIkSolve): hip Y follow on foot drags, and auto-plant
+// of the other foot / both feet so the stance follows like a control rig.
+// Wrist + ankle IK circles only. Spine/head stay FK via green rings.
 // Circle colours follow the box rig: left = red, right = gold, feet = cyan.
 const FIVEOS_IK_CHAINS = [
-  { id: 'handL', kind: 'hand', color: 0xef4444, iters: 4,
+  { id: 'handL', kind: 'hand', color: 0xef4444, iters: 7,
     twoBone: ['SKEL_L_UpperArm', 'SKEL_L_Forearm', 'SKEL_L_Hand'],
-    fabrik: ['SKEL_L_Hand', 'SKEL_L_Forearm', 'SKEL_L_UpperArm', 'SKEL_L_Clavicle', 'SKEL_Spine3'] },
-  { id: 'handR', kind: 'hand', color: 0xf5c518, iters: 4,
+    fabrik: ['SKEL_L_Hand', 'SKEL_L_Forearm', 'SKEL_L_UpperArm', 'SKEL_L_Clavicle',
+             'SKEL_Spine3', 'SKEL_Spine2', 'SKEL_Spine1', 'SKEL_Spine0', 'SKEL_Pelvis'] },
+  { id: 'handR', kind: 'hand', color: 0xf5c518, iters: 7,
     twoBone: ['SKEL_R_UpperArm', 'SKEL_R_Forearm', 'SKEL_R_Hand'],
-    fabrik: ['SKEL_R_Hand', 'SKEL_R_Forearm', 'SKEL_R_UpperArm', 'SKEL_R_Clavicle', 'SKEL_Spine3'] },
-  { id: 'footL', kind: 'foot', color: 0x38BDF8, iters: 0,
-    twoBone: ['SKEL_L_Thigh', 'SKEL_L_Calf', 'SKEL_L_Foot'] },
-  { id: 'footR', kind: 'foot', color: 0x38BDF8, iters: 0,
-    twoBone: ['SKEL_R_Thigh', 'SKEL_R_Calf', 'SKEL_R_Foot'] },
+    fabrik: ['SKEL_R_Hand', 'SKEL_R_Forearm', 'SKEL_R_UpperArm', 'SKEL_R_Clavicle',
+             'SKEL_Spine3', 'SKEL_Spine2', 'SKEL_Spine1', 'SKEL_Spine0', 'SKEL_Pelvis'] },
+  { id: 'footL', kind: 'foot', color: 0x38BDF8, iters: 8,
+    twoBone: ['SKEL_L_Thigh', 'SKEL_L_Calf', 'SKEL_L_Foot'],
+    fabrik: ['SKEL_L_Foot', 'SKEL_L_Calf', 'SKEL_L_Thigh', 'SKEL_Pelvis'] },
+  { id: 'footR', kind: 'foot', color: 0x38BDF8, iters: 8,
+    twoBone: ['SKEL_R_Thigh', 'SKEL_R_Calf', 'SKEL_R_Foot'],
+    fabrik: ['SKEL_R_Foot', 'SKEL_R_Calf', 'SKEL_R_Thigh', 'SKEL_Pelvis'] },
 ];
 
 // Bones a given handle's solve can rotate — used to snapshot/diff for undo.
@@ -5891,7 +5985,64 @@ function ikAffectedBones(handle) {
   const push = (b) => { if (b && out.indexOf(b) < 0) out.push(b); };
   if (handle.fabrikBones) handle.fabrikBones.forEach(push);
   if (handle.twoBone) { push(handle.twoBone.a); push(handle.twoBone.b); push(handle.twoBone.c); }
+  // Full-body follow always re-plants the other leg(s).
+  for (const id of ['footL', 'footR']) {
+    if (handle.id === id) continue;
+    const fh = poseIkHandles.find(x => x && x.id === id);
+    if (fh && fh.twoBone) { push(fh.twoBone.a); push(fh.twoBone.b); push(fh.twoBone.c); }
+  }
   return out;
+}
+
+function captureIkBodyState(handle) {
+  if (!handle) { poseIkBodyCapture = null; return; }
+  if (currentModel) currentModel.updateMatrixWorld(true);
+  const pelvis = poseBoneByBaseName('SKEL_Pelvis');
+  const plants = {};
+  for (const id of ['footL', 'footR']) {
+    const fh = poseIkHandles.find(x => x && x.id === id);
+    if (!fh || !fh.effector) { plants[id] = null; continue; }
+    fh.effector.getWorldPosition(_footLockTmp);
+    plants[id] = { x: _footLockTmp.x, y: _footLockTmp.y, z: _footLockTmp.z };
+  }
+  let footStartY = null;
+  if (handle.kind === 'foot' && handle.target) {
+    handle.target.getWorldPosition(_footLockTmp);
+    footStartY = _footLockTmp.y;
+  }
+  poseIkBodyCapture = {
+    pelvis,
+    pelvisPos: pelvis ? [pelvis.position.x, pelvis.position.y, pelvis.position.z] : null,
+    plants,
+    footStartY,
+  };
+}
+
+/** Re-plant feet that aren't the active drag so the stance follows the body. */
+function applyIkStancePlants(exceptId) {
+  const cap = poseIkBodyCapture;
+  if (!cap || !cap.plants) return;
+  for (const id of ['footL', 'footR']) {
+    if (exceptId && id === exceptId) continue;
+    // Explicit Feet lock uses its own plant targets when armed.
+    const lock = (poseFootLock && poseIkMode && poseFootLocks[id]) ? poseFootLocks[id] : cap.plants[id];
+    const fh = poseIkHandles.find(x => x && x.id === id);
+    if (!lock || !fh || !fh.twoBone) continue;
+    _footLockTmp.set(lock.x, lock.y, lock.z);
+    if (fh.target) fh.target.position.copy(_footLockTmp);
+    solveTwoBoneIk(fh.twoBone.a, fh.twoBone.b, fh.twoBone.c, _footLockTmp);
+  }
+}
+
+/** Pull hips down/up with a dragged foot so crouches and steps feel full-body. */
+function applyIkHipFollow(handle) {
+  const cap = poseIkBodyCapture;
+  if (!cap || !cap.pelvis || !cap.pelvisPos || handle.kind !== 'foot' || !handle.target) return;
+  if (cap.footStartY == null) return;
+  handle.target.getWorldPosition(_footLockTmp);
+  // Match vertical foot travel on the pelvis (soft — legs still absorb some).
+  const dy = (_footLockTmp.y - cap.footStartY) * 0.85;
+  cap.pelvis.position.set(cap.pelvisPos[0], cap.pelvisPos[1] + dy, cap.pelvisPos[2]);
 }
 
 // Build the visible manipulator for one IK handle: a bright ring + inner
@@ -5935,13 +6086,16 @@ function setIkHandleVisual(h) {
   if (!h || !h.mesh) return;
   const active = poseIkActiveHandle === h;
   const hover = poseHoverIkHandle === h;
+  const locked = !!(poseFootLock && poseIkMode && h.kind === 'foot' && poseFootLocks[h.id]);
   const scale = active ? 1.28 : (hover ? 1.14 : 1.0);
   h.mesh.scale.setScalar(scale);
   const ringMat = h.mesh.userData.ringMat;
   const coreMat = h.mesh.userData.coreMat;
-  const col = active ? 0xFFFFFF : h.color;
-  if (ringMat) { ringMat.color.setHex(col); ringMat.opacity = active ? 1.0 : (hover ? 0.98 : 0.92); }
-  if (coreMat) { coreMat.color.setHex(active ? 0xFFFFFF : h.color); coreMat.opacity = active ? 1.0 : 0.95; }
+  // Locked feet read as a warmer plant colour so the mode is visible at a glance.
+  const restCol = locked ? 0xF59E0B : h.color;
+  const col = active ? 0xFFFFFF : restCol;
+  if (ringMat) { ringMat.color.setHex(col); ringMat.opacity = active ? 1.0 : (hover ? 0.98 : (locked ? 1.0 : 0.92)); }
+  if (coreMat) { coreMat.color.setHex(active ? 0xFFFFFF : restCol); coreMat.opacity = active ? 1.0 : 0.95; }
 }
 
 function refreshIkHandleVisuals() {
@@ -5978,16 +6132,23 @@ function buildFiveOsIkHandles() {
       twoBone = { a, b, c };
     }
 
-    // FABRIK bone list; drop any the rig lacks. Need >=2 to solve.
+    // FABRIK chain = walk parents from effector → stop bone so we never
+    // skip a link (filter(Boolean) on a name list used to leave gaps and
+    // break the solver). Only SKEL_* deform bones are kept.
     let fabrikBones = null;
-    if (def.fabrik) {
-      const resolved = def.fabrik.map(poseBoneByBaseName).filter(Boolean);
-      if (resolved.length >= 2) fabrikBones = resolved;
-      else if (def.id === 'head' && resolved.length === 1 && resolved[0].parent && resolved[0].parent.isBone) {
-        // poseBoneByBaseName strips a trailing _<n>, so "SKEL_Neck_1" (a real
-        // GTA bone name, not an index) never matches. Walk the hierarchy
-        // instead: head + its parent (the neck) is a valid 2-bone aim chain.
-        fabrikBones = [resolved[0], resolved[0].parent];
+    if (def.fabrik && def.fabrik.length) {
+      const tip = poseBoneByBaseName(def.fabrik[0]);
+      const stopName = String(def.fabrik[def.fabrik.length - 1] || '').replace(/_\d+$/, '');
+      if (tip) {
+        const chain = [];
+        for (let b = tip; b && b.isBone; b = b.parent) {
+          const n = (b.name || '').replace(/_\d+$/, '');
+          if (!/^SKEL_/i.test(n)) continue;
+          chain.push(b);
+          if (n === stopName || n === 'SKEL_Pelvis') break;
+          if (chain.length > 14) break;
+        }
+        if (chain.length >= 2) fabrikBones = chain;
       }
     }
 
@@ -6025,6 +6186,11 @@ function buildFiveOsIkHandles() {
     poseIkHandles.push(handle);
   }
   syncIkHandleTransforms(true);
+  // Handles were rebuilt — re-capture plant targets if foot lock is armed.
+  if (poseFootLock && poseIkMode) {
+    captureFootLocks();
+    applyFootLocks(null);
+  }
   refreshIkHandleVisuals();
 }
 
@@ -6055,12 +6221,76 @@ function refreshIkHandleVisibility() {
 // hand/foot and the shoulder, chest and other side follow (full-body FABRIK).
 window.poseSetIkMode = function (on) {
   poseIkMode = !!on;
-  if (!poseIkMode) { poseHoverIkHandle = null; }
+  if (!poseIkMode) {
+    poseHoverIkHandle = null;
+    poseIkActiveHandle = null;
+    poseIkBodyCapture = null;
+    if (poseFabrik) try { poseFabrik.setChainEnablerAll(false); } catch (e) {}
+    // Foot lock is IK-only — drop live plant targets while FK is active.
+    // Host may still keep the toggle checked; re-enabling IK re-captures.
+    clearFootLocks();
+  } else if (poseFootLock) {
+    captureFootLocks();
+    applyFootLocks(null);
+  }
   try { refreshIkHandleVisibility(); } catch (e) {}
   try { refreshIkHandleVisuals(); } catch (e) {}
   try { renderer.domElement.style.cursor = ''; } catch (e) {}
   requestRender();
   return poseIkMode;
+};
+
+function clearFootLocks() {
+  poseFootLocks.footL = null;
+  poseFootLocks.footR = null;
+}
+
+function captureFootLocks() {
+  if (!poseIkMode) { clearFootLocks(); return; }
+  if (currentModel) currentModel.updateMatrixWorld(true);
+  for (const id of ['footL', 'footR']) {
+    const h = poseIkHandles.find(x => x && x.id === id);
+    if (!h || !h.effector) { poseFootLocks[id] = null; continue; }
+    h.effector.getWorldPosition(_footLockTmp);
+    // Plant at the foot's current world spot (height = contact). Don't yank
+    // to y=0 — ankles sit above the grid; snap-to-ground owns floor drop.
+    poseFootLocks[id] = { x: _footLockTmp.x, y: _footLockTmp.y, z: _footLockTmp.z };
+    if (h.target) h.target.position.copy(_footLockTmp);
+  }
+}
+
+/** Re-solve two-bone legs to planted world targets. Skip `exceptId` (the
+ *  foot currently being dragged so it can slide on the floor). */
+function applyFootLocks(exceptId) {
+  if (!poseFootLock || !poseIkMode) return false;
+  let any = false;
+  for (const id of ['footL', 'footR']) {
+    if (exceptId && id === exceptId) continue;
+    const lock = poseFootLocks[id];
+    const h = poseIkHandles.find(x => x && x.id === id);
+    if (!lock || !h || !h.twoBone) continue;
+    _footLockTmp.set(lock.x, lock.y, lock.z);
+    if (h.target) h.target.position.copy(_footLockTmp);
+    solveTwoBoneIk(h.twoBone.a, h.twoBone.b, h.twoBone.c, _footLockTmp);
+    any = true;
+  }
+  return any;
+}
+
+// Foot lock toggle (host toolbar). No-op unless IK mode is on.
+window.poseSetFootLock = function (on) {
+  poseFootLock = !!on;
+  if (poseFootLock && poseIkMode) {
+    captureFootLocks();
+    applyFootLocks(null);
+    if (typeof poseSyncSkeletonMeshes === 'function') poseSyncSkeletonMeshes();
+    syncIkHandleTransforms(true);
+  } else {
+    clearFootLocks();
+  }
+  try { refreshIkHandleVisuals(); } catch (e) {}
+  requestRender();
+  return poseFootLock && poseIkMode;
 };
 
 function refreshSkeletonHelperVisibility() {
@@ -6173,7 +6403,8 @@ function attachIkGizmoForMode(mode) {
   if (!h) return false;
   if (currentModel) currentModel.updateMatrixWorld(true);
   syncIkHandleTransforms(true);
-  if (mode === 'rotate' && h.effector) {
+  const useRotate = mode === 'rotate' && h.effector;
+  if (useRotate) {
     posePickedBone = h.effector;
     poseSelection = [h.effector];
     transformControls.attach(h.effector);
@@ -6190,6 +6421,55 @@ function attachIkGizmoForMode(mode) {
   gizmoBar.style.display = 'none';
   return true;
 }
+
+// Host + hotkey entry point for Move / Rotate / Scale on the emote page.
+// Works in FK and IK: W = position, E = rotate (R = scale on whole model).
+window.poseSetTransformMode = function (mode) {
+  const m = String(mode || '').toLowerCase();
+  if (m !== 'translate' && m !== 'rotate' && m !== 'scale') return false;
+
+  // IK hand/foot: re-attach target (move) vs effector bone (rotate).
+  if (poseIkActiveHandle) {
+    attachIkGizmoForMode(m === 'rotate' ? 'rotate' : 'translate');
+    requestRender();
+    return true;
+  }
+  if (transformControls.object) {
+    const obj = transformControls.object;
+    const stale = poseIkHandles.find(h => h && (h.target === obj || h.effector === obj));
+    if (stale) {
+      poseIkActiveHandle = stale;
+      attachIkGizmoForMode(m === 'rotate' ? 'rotate' : 'translate');
+      requestRender();
+      return true;
+    }
+  }
+
+  // FK bone selection — W/E switch position vs rotation on the joint.
+  if (poseSelection.length > 0) {
+    if (m === 'scale') return false;
+    const bone = poseSelection[poseSelection.length - 1];
+    if (!bone) return false;
+    posePickedBone = bone;
+    if (currentModel) currentModel.updateMatrixWorld(true);
+    transformControls.attach(bone);
+    transformControls.setMode(m);
+    if (m === 'rotate') applyAxisLockToGizmo();
+    gizmoBar.style.display = 'none';
+    requestRender();
+    return true;
+  }
+
+  if (!transformControls.object) return false;
+  // Whole-model / prop transform (gizmo bar visible).
+  if (gizmoBar && gizmoBar.style.display !== 'none') {
+    setGizmoMode(m);
+  } else {
+    transformControls.setMode(m);
+  }
+  requestRender();
+  return true;
+};
 
 function attachIkHandle(handle) {
   if (!handle) return;
@@ -6223,34 +6503,62 @@ function applyActiveIkSolve() {
 
   // 0) Re-solve from the pose captured at grab time. FABRIK converges a
   //    little more every frame, so without this the body-lean would keep
-  //    creeping toward a full bend whenever the cursor pauses. Restoring
-  //    the grab-time quats makes each solve depend only on where the target
-  //    is now — the lean stays proportional to the reach, and the analytic
-  //    pole below stays stable (no elbow/knee flipping).
+  //    creeping. Restoring grab-time quats (+ pelvis pos) makes each solve
+  //    depend only on where the target is now.
   if (poseIkDragCapture) {
     for (const [idx, q] of poseIkDragCapture) {
       const b = poseBones[idx];
       if (b) b.quaternion.set(q[0], q[1], q[2], q[3]);
     }
-    if (currentModel) currentModel.updateMatrixWorld(true);
+  }
+  if (poseIkBodyCapture && poseIkBodyCapture.pelvis && poseIkBodyCapture.pelvisPos) {
+    const p = poseIkBodyCapture.pelvis;
+    p.position.set(
+      poseIkBodyCapture.pelvisPos[0],
+      poseIkBodyCapture.pelvisPos[1],
+      poseIkBodyCapture.pelvisPos[2]);
+  }
+  if (currentModel) currentModel.updateMatrixWorld(true);
+
+  // Foot lock: a dragged foot slides on the floor — pin Y to the plant
+  // height and update the XZ lock so the plant follows the slide.
+  if (poseFootLock && poseIkMode && h.kind === 'foot' && h.target) {
+    const lock = poseFootLocks[h.id];
+    if (lock) {
+      h.target.position.y = lock.y;
+      h.target.getWorldPosition(_footLockTmp);
+      poseFootLocks[h.id] = { x: _footLockTmp.x, y: lock.y, z: _footLockTmp.z };
+    }
   }
 
-  // 1) FABRIK body-lean — arms carry the clavicle + upper chest toward the
-  //    reach; the torso / head handles bend the spine / aim the head. Only
-  //    this handle's chain is enabled, so nothing else moves. iters tunes
-  //    how far the lean converges (arms lean gently, torso/head reach fully).
+  // 1) Hip follow — pull the pelvis with a dragged foot (crouch / step).
+  applyIkHipFollow(h);
+  if (currentModel) currentModel.updateMatrixWorld(true);
+
+  // 2) FABRIK body-lean — hands through spine→pelvis, feet through hips.
   if (h.hasFabrik && poseFabrik) {
     poseFabrik.iterations = Math.max(1, h.iters || 8);
     poseFabrik.update();
     if (currentModel) currentModel.updateMatrixWorld(true);
   }
 
-  // 2) Analytic clean of the last two bones so the elbow / knee lands on a
-  //    proper pole and never inverts or hyperextends, even after the lean.
+  // 3) Analytic clean of the last two bones (elbow / knee).
   if (h.twoBone) {
     const target = new THREE.Vector3();
     h.target.getWorldPosition(target);
     solveTwoBoneIk(h.twoBone.a, h.twoBone.b, h.twoBone.c, target);
+  }
+
+  // 4) Stance plants — keep the other foot (or both, on a hand drag) glued
+  //    so the whole body follows without skating. Feet-lock targets win
+  //    when that mode is on.
+  if (currentModel) currentModel.updateMatrixWorld(true);
+  if (h.kind === 'foot') {
+    applyIkStancePlants(h.id);
+    if (poseFootLock && poseIkMode) applyFootLocks(h.id);
+  } else {
+    applyIkStancePlants(null);
+    if (poseFootLock && poseIkMode) applyFootLocks(null);
   }
 
   if (typeof poseSyncSkeletonMeshes === 'function') poseSyncSkeletonMeshes();
@@ -6440,6 +6748,8 @@ window.selectRigForTransform = function (rigId) {
   transformControls.detach();
   // Same size logic as the 3D model viewer (maxDim * 0.6).
   updateGizmoSizeFromModel();
+  poseIkActiveHandle = null;
+  if (poseFabrik) poseFabrik.setChainEnablerAll(false);
   transformControls.attach(root);
   transformControls.setMode('translate');
   gizmoBar.style.display = 'flex';
@@ -6707,6 +7017,14 @@ window.selectPoseBone = function (index) {
   // gizmo every frame — the rings would jitter and the rotation would
   // never commit cleanly.
   if (transformControls.dragging) return;
+  // IK effector echo: host selects the hand/foot bone after an IK pick.
+  // Must NOT call attachPoseBone — that clears poseIkActiveHandle and
+  // kills W/E mode switching.
+  if (poseIkActiveHandle && poseIkActiveHandle.effector === bone) {
+    refreshPoseJointDots();
+    requestRender();
+    return;
+  }
   // Same-bone no-op: avoids tripping the matrixWorld refresh +
   // transformControls.attach path when the host echoes the current
   // selection back to us (typical after pose-bone-selected ping-pong).
@@ -10477,11 +10795,18 @@ renderer.domElement.addEventListener('pointerdown', e => {
   const grabIk = () => {
     let h = ikHits[0].object.userData.ikHandle;
     for (let o = ikHits[0].object; o && !h; o = o.parent) h = o.userData && o.userData.ikHandle;
+    // E-mode (rotate wrist/ankle): the IK ring sits on the effector and
+    // steals clicks meant for the rotate gizmo. Skip the active handle so
+    // TransformControls can own the drag; other feet/hands still select.
+    if (h && poseIkActiveHandle === h && transformControls.mode === 'rotate') {
+      return false;
+    }
     pointerDownIkHandle = h || null;
     pointerDownOnJointMarker = true;
     pointerDownAt = { x: e.clientX, y: e.clientY };
     controls.enabled = false;
     e.preventDefault();
+    return true;
   };
 
   // Click priority (order matters).
@@ -10499,11 +10824,17 @@ renderer.domElement.addEventListener('pointerdown', e => {
   }
 
   if (poseIkMode) {
-    if (ikHits.length > 0) { grabIk(); return; }
+    if (ikHits.length > 0) {
+      if (grabIk()) return;
+      // Active handle + rotate (E): do NOT fall through to the FK joint
+      // under the ring — attachPoseBone would clear poseIkActiveHandle and
+      // make W a silent no-op. Let TransformControls own the pointer.
+      return;
+    }
     if (jointHits.length > 0) { grabJoint(); return; }
   } else {
     if (jointHits.length > 0) { grabJoint(); return; }
-    if (ikHits.length > 0) { grabIk(); return; }
+    if (ikHits.length > 0 && grabIk()) return;
   }
 }, true);
 
@@ -10587,6 +10918,10 @@ renderer.domElement.addEventListener('pointerup', e => {
     const h = pointerDownIkHandle;
     pointerDownIkHandle = null;
     pointerDownPickedBone = null;
+    // Same handle already active: keep the current W/E mode. attachIkHandle
+    // always starts in translate, so re-clicking the ring after pressing E
+    // used to silently wipe rotate (wrist/ankle) back to move.
+    if (poseIkActiveHandle === h) return;
     attachIkHandle(h);
     return;
   }
@@ -10664,7 +10999,12 @@ transformControls.addEventListener('objectChange', () => {
     return;
   }
 
-  // FK rotate — keep IK rings glued to hands/feet.
+  // FK rotate — keep IK rings glued to hands/feet. With foot lock on in
+  // IK mode, re-plant both feet so spine/pelvis rotates don't lift them.
+  if (poseFootLock && poseIkMode && !poseIkActiveHandle) {
+    if (currentModel) currentModel.updateMatrixWorld(true);
+    applyFootLocks(null);
+  }
   syncIkHandleTransforms(true);
 
   if (!posePickedBone) return;
