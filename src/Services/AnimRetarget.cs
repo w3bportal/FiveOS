@@ -435,24 +435,19 @@ internal static class AnimRetarget
         // side only bakes the SKEL_ROOT mover when the user keeps the Root Motion
         // movement mode (default for imports) and targets a standalone resource
         // that extracts movers; picking In Place drops it for a clean dpemotes
-        // clip. (Env: FIVEOS_NO_ROOTMOTION=1 to force it off,
-        // FIVEOS_FOOTLOCK=1 to force-enable the foot-lock IK.)
+        // clip. (Env: FIVEOS_NO_ROOTMOTION=1 to force it off.)
         bool doRoot = Environment.GetEnvironmentVariable("FIVEOS_NO_ROOTMOTION") != "1";
-        // Foot-lock is OFF by default: it was measured to be pure loss. Its only
-        // job is to stop a planted foot skating as the root travels, and on three
-        // clips it did the OPPOSITE — planted-foot skate got WORSE with it on
-        // (dance 0.93 vs 0.74 cm/frame, TikTok 0.75 vs 0.65, and 0.01 vs 0.01 on a
-        // real Mixamo FBX, i.e. no effect) while its 2-bone IK re-solved genuinely
-        // planted legs against the TARGET's proportions and straightened the knees
-        // (right knee off by 27.3° on grounded frames; whole-clip intrinsic error
-        // 6.5° with it vs 2.2° without).
+        // Foot-lock is ON by default for FBX / mocap retargets (Move AI, Blender,
+        // Mixamo, Cascadeur). Without it the rotation transfer + scaled root
+        // travel leave planted feet drifting in world XZ — a step-back reads as
+        // a skate/slide even when the source clip locked the support foot.
         //
-        // It is redundant here: the video worker already derives root travel by
-        // locking foot contacts, so the source's planted feet are stable before
-        // this ever runs, and re-solving them on a differently-proportioned rig
-        // only introduces error. FIVEOS_FOOTLOCK=1 re-enables it for experiments.
-        bool doFoot = Environment.GetEnvironmentVariable("FIVEOS_FOOTLOCK") == "1"
-                      && Environment.GetEnvironmentVariable("FIVEOS_NO_FOOTLOCK") != "1";
+        // Earlier measurements that flipped this OFF were against the proprietary
+        // video-worker path (already contact-locked before retarget) and used
+        // plant detection that assumed Y-up source height. This retarget path is
+        // FBX/mocap only; plant detection now runs in GTA-up via Rc so Z-up
+        // Blender/Move AI clips plant correctly. FIVEOS_NO_FOOTLOCK=1 disables.
+        bool doFoot = Environment.GetEnvironmentVariable("FIVEOS_NO_FOOTLOCK") != "1";
         // Vertical grounding keeps the lower foot on the floor (see GroundToFeet).
         // ON by default; FIVEOS_NO_GROUND=1 disables it for experiments.
         bool noGround = Environment.GetEnvironmentVariable("FIVEOS_NO_GROUND") == "1";
@@ -578,13 +573,21 @@ internal static class AnimRetarget
             float pelvisDrop = 0;
             if (gLFoot != null && gRFoot != null)
                 pelvisDrop = ComputePelvisDrop(gtaBones, driveNames, perFrame, rootMotion, rootName, gLFoot, gRFoot, frames);
+            // Plant detection must see GTA-up height + horizontal speed. Raw
+            // source Y is wrong for Z-up Blender / Move AI / Maya FBX — those
+            // put height on Z, so the old Y gate never locked a real plant and
+            // the support foot skated on step-backs.
+            V[]? plantL = srcLFoot != null ? ToGtaUpPath(srcLFootP, Rc, frames) : null;
+            V[]? plantR = srcRFoot != null ? ToGtaUpPath(srcRFootP, Rc, frames) : null;
             bool[]? plantedL = null, plantedR = null;
-            if (srcLFoot != null && gLThigh != null && gLCalf != null && gLFoot != null)
-                plantedL = FootLock(gtaBones, driveNames, perFrame, rootMotion, rootName, gLThigh, gLCalf, gLFoot, tLThighG, tLCalfG, tLFootG, srcLFootP, frames, pelvisDrop);
-            if (srcRFoot != null && gRThigh != null && gRCalf != null && gRFoot != null)
-                plantedR = FootLock(gtaBones, driveNames, perFrame, rootMotion, rootName, gRThigh, gRCalf, gRFoot, tRThighG, tRCalfG, tRFootG, srcRFootP, frames, pelvisDrop);
+            if (plantL != null && gLThigh != null && gLCalf != null && gLFoot != null)
+                plantedL = FootLock(gtaBones, driveNames, perFrame, rootMotion, rootName, gLThigh, gLCalf, gLFoot, tLThighG, tLCalfG, tLFootG, plantL, frames, pelvisDrop);
+            if (plantR != null && gRThigh != null && gRCalf != null && gRFoot != null)
+                plantedR = FootLock(gtaBones, driveNames, perFrame, rootMotion, rootName, gRThigh, gRCalf, gRFoot, tRThighG, tRCalfG, tRFootG, plantR, frames, pelvisDrop);
             if (rootMotion != null && plantedL != null && plantedR != null)
                 ClampRootWhilePlanted(rootMotion, plantedL, plantedR, frames);
+            if (plantedL != null || plantedR != null)
+                warnings.Add("Foot-lock: planted feet pinned in world XZ (step/stance no longer skates with root travel).");
         }
 
         return emit.Select(e => new PosedBoneTrack(e.tag, perFrame[e.tag],
@@ -718,7 +721,8 @@ internal static class AnimRetarget
         // Speed-alone was the bug: it flags the top of a swing (slow, airborne)
         // as "planted", then the IK yanks the leg down into a hunch. Gating on
         // foot height (the standard contact "schedule" — ozz foot_ik / GMR) locks
-        // only feet genuinely on the floor. Source is Y-up, so Y is height.
+        // only feet genuinely on the floor. Caller must pass GTA-up paths (via
+        // Rc) so Y is height for both Y-up Mixamo and Z-up Blender/Move AI.
         var planted = DetectPlantedFrames(srcFootP, frames);
         if (planted is null) return null;
 
@@ -888,18 +892,48 @@ internal static class AnimRetarget
         }
     }
 
-    /// <summary>Detect planted frames from source foot world path (speed + height).</summary>
+    /// <summary>
+    /// Map a source world path into GTA-up space via the bind facing align Rc.
+    /// Required before plant detection so height is always on Y.
+    /// </summary>
+    private static V[] ToGtaUpPath(V[] src, Q Rc, int frames)
+    {
+        var dst = new V[frames];
+        for (int f = 0; f < frames; f++)
+            dst[f] = V.Transform(src[f], Rc);
+        return dst;
+    }
+
+    /// <summary>
+    /// Detect planted frames from a GTA-up foot world path (horizontal speed + height).
+    /// Uses XZ speed only — vertical bob must not count as travel — matching the
+    /// viewer foot-plant detector and ozz/GMR contact schedules.
+    /// </summary>
     private static bool[]? DetectPlantedFrames(V[] srcFootP, int frames)
     {
         var speed = new float[frames]; float maxSpeed = 0;
         float minY = float.MaxValue, maxY = float.MinValue;
-        for (int f = 0; f < frames; f++) { float y = srcFootP[f].Y; if (y < minY) minY = y; if (y > maxY) maxY = y; }
-        for (int f = 1; f < frames; f++) { speed[f] = (srcFootP[f] - srcFootP[f - 1]).Length(); if (speed[f] > maxSpeed) maxSpeed = speed[f]; }
+        for (int f = 0; f < frames; f++)
+        {
+            float y = srcFootP[f].Y;
+            if (y < minY) minY = y;
+            if (y > maxY) maxY = y;
+        }
+        for (int f = 1; f < frames; f++)
+        {
+            float dx = srcFootP[f].X - srcFootP[f - 1].X;
+            float dz = srcFootP[f].Z - srcFootP[f - 1].Z;
+            speed[f] = MathF.Sqrt(dx * dx + dz * dz);
+            if (speed[f] > maxSpeed) maxSpeed = speed[f];
+        }
         if (maxSpeed < 1e-5f) return null;
-        float thr = maxSpeed * 0.20f;
-        float yGate = minY + (maxY - minY) * 0.35f;
+        // Slightly looser than the old 0.20/0.35 so walk / step-back stance
+        // frames aren't missed (matches viewer _rtDetectPlanted).
+        float thr = maxSpeed * 0.30f;
+        float yGate = minY + (maxY - minY) * 0.45f;
         var planted = new bool[frames];
-        for (int f = 0; f < frames; f++) planted[f] = speed[Math.Max(1, f)] < thr && srcFootP[f].Y <= yGate;
+        for (int f = 0; f < frames; f++)
+            planted[f] = speed[Math.Max(1, f)] < thr && srcFootP[f].Y <= yGate;
         for (int f = 1; f < frames - 3; f++)
             if (!planted[f] && planted[f - 1] && (planted[f + 1] || planted[f + 2] || planted[f + 3])) planted[f] = true;
         return planted;

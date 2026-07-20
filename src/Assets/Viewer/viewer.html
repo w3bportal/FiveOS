@@ -625,6 +625,14 @@ let poseModelDragStartPos = null;
 let posePreviewFootIk = true;      // runtime foot contact polish in viewer (WYSIWYG preview)
 let poseFloorOffsetY = 0;        // snap-to-ground vertical bias baked into export roots
 const _poseFootTmp = new THREE.Vector3();
+// Keyframe-path world foot plant (anim-import with root travel). Soft-pins
+// planted feet in world XZ so a step-back doesn't skate in the preview even
+// if bake residual remains. Null when the clip has no travelling root.
+let poseKfFootPlant = null;
+const _poseKfFootInv = new THREE.Matrix4();
+const _poseKfFootWorld = new THREE.Vector3();
+const _poseKfFootLocal = new THREE.Vector3();
+const _poseKfFootMaxCorr = 0.08; // metres — soft clamp; keeps ankles from ballooning
 
 // CLIP_LIBRARY -- shared between authored pose-keyframes (kind:'pose')
 // and animation clips that arrived with imported models (kind:'imported').
@@ -5073,6 +5081,126 @@ function _rtApplyFootPlant(f) {
   if (_rt.modelRoot) _rt.modelRoot.updateMatrixWorld(true);
 }
 
+// ── Keyframe-path foot plant (anim-import setKeyframes) ───────────────
+// Same world-XZ plant idea as _rtApplyFootPlant, but for the editable
+// keyframe player. Keyframes only drive rotations; we restore foot rest
+// positions before correcting so plant deltas never accumulate.
+function poseClearKfFootPlant() {
+  poseKfFootPlant = null;
+}
+
+function poseBuildKfFootPlant() {
+  poseClearKfFootPlant();
+  if (!poseMode || !poseRootTarget || !poseRootBase || !poseBones?.length) return null;
+  if (poseKeyframes.length < 4) return null;
+  const nameMap = poseBuildBoneNameMap();
+  const lIdx = nameMap.get('SKEL_L_Foot') ?? nameMap.get('SKEL_L_Toe0');
+  const rIdx = nameMap.get('SKEL_R_Foot') ?? nameMap.get('SKEL_R_Toe0');
+  if (lIdx == null || rIdx == null) return null;
+  const lFoot = poseBones[lIdx], rFoot = poseBones[rIdx];
+  if (!lFoot || !rFoot) return null;
+
+  const savedQ = poseBones.map(b => b.quaternion.clone());
+  const savedP = poseBones.map(b => b.position.clone());
+  const savedModel = poseRootTarget.position.clone();
+  const pathL = [], pathR = [];
+  try {
+    for (let i = 0; i < poseKeyframes.length; i++) {
+      const kf = poseKeyframes[i];
+      poseApplySnapshot(kf.bones);
+      // Sample plant intent WITHOUT horizontal travel (body-relative gait),
+      // same as _rtBuildFootPlant holding modelRoot at base.
+      poseRootTarget.position.copy(poseRootBase);
+      if (Array.isArray(kf.root) && kf.root.length >= 3)
+        poseRootTarget.position.y = poseRootBase.y + (kf.root[1] || 0);
+      poseRootTarget.updateMatrixWorld(true);
+      _poseKfFootInv.copy(poseRootTarget.matrixWorld).invert();
+      lFoot.getWorldPosition(_poseFootTmp); _poseFootTmp.applyMatrix4(_poseKfFootInv);
+      pathL.push([_poseFootTmp.x, _poseFootTmp.y, _poseFootTmp.z]);
+      rFoot.getWorldPosition(_poseFootTmp); _poseFootTmp.applyMatrix4(_poseKfFootInv);
+      pathR.push([_poseFootTmp.x, _poseFootTmp.y, _poseFootTmp.z]);
+    }
+  } catch (e) {
+    console.warn('kf foot-plant sample failed', e);
+    return null;
+  } finally {
+    for (let i = 0; i < poseBones.length; i++) {
+      poseBones[i].quaternion.copy(savedQ[i]);
+      poseBones[i].position.copy(savedP[i]);
+    }
+    poseRootTarget.position.copy(savedModel);
+  }
+
+  const plantedL = _rtDetectPlanted(pathL);
+  const plantedR = _rtDetectPlanted(pathR);
+  if (!plantedL && !plantedR) return null;
+  poseKfFootPlant = {
+    lFoot, rFoot, lIdx, rIdx,
+    plantedL, plantedR,
+    lockL: null, lockR: null,
+    keyCount: poseKeyframes.length,
+  };
+  return poseKfFootPlant;
+}
+
+function poseKfFootIndexAtTime(t) {
+  if (!poseKeyframes.length) return 0;
+  if (t <= poseKeyframes[0].time) return 0;
+  if (t >= poseKeyframes[poseKeyframes.length - 1].time) return poseKeyframes.length - 1;
+  let i = 0;
+  while (i < poseKeyframes.length - 1 && poseKeyframes[i + 1].time <= t) i++;
+  // Prefer the nearer key for the plant mask (stance is discrete).
+  const a = poseKeyframes[i], b = poseKeyframes[i + 1];
+  if (!b) return i;
+  return (t - a.time) <= (b.time - t) ? i : i + 1;
+}
+
+function poseApplyKfFootPlant() {
+  const fp = poseKfFootPlant;
+  if (!fp || !posePreviewFootIk || !poseRootMotionPreview) return;
+  if (!poseRootTarget || poseSuppressRootApply) return;
+  // Only meaningful while the ped is travelling — In Place has no skate to fix.
+  const ki = poseKfFootIndexAtTime(poseTime);
+  if (poseRootTarget) poseRootTarget.updateMatrixWorld(true);
+
+  const sides = [
+    [fp.lFoot, fp.lIdx, fp.plantedL, 'lockL'],
+    [fp.rFoot, fp.rIdx, fp.plantedR, 'lockR'],
+  ];
+  for (const [bone, idx, planted, lockKey] of sides) {
+    if (!bone || !planted || !bone.parent) continue;
+    // Always restore rest translation first — keyframes never write position,
+    // so a prior plant delta would otherwise stick / accumulate.
+    if (idx != null && poseInitialPositions[idx])
+      bone.position.copy(poseInitialPositions[idx]);
+    if (!planted[ki]) {
+      fp[lockKey] = null;
+      continue;
+    }
+    bone.updateWorldMatrix(true, false);
+    bone.getWorldPosition(_poseFootTmp);
+    if (!fp[lockKey]) {
+      fp[lockKey] = { x: _poseFootTmp.x, z: _poseFootTmp.z };
+      continue;
+    }
+    let errX = _poseFootTmp.x - fp[lockKey].x;
+    let errZ = _poseFootTmp.z - fp[lockKey].z;
+    const errLen = Math.hypot(errX, errZ);
+    if (errLen < 1e-5) continue;
+    if (errLen > _poseKfFootMaxCorr) {
+      const s = _poseKfFootMaxCorr / errLen;
+      errX *= s;
+      errZ *= s;
+    }
+    _poseKfFootWorld.set(_poseFootTmp.x - errX, _poseFootTmp.y, _poseFootTmp.z - errZ);
+    bone.parent.updateWorldMatrix(true, false);
+    _poseKfFootInv.copy(bone.parent.matrixWorld).invert();
+    _poseKfFootLocal.copy(_poseKfFootWorld).applyMatrix4(_poseKfFootInv);
+    bone.position.set(_poseKfFootLocal.x, _poseKfFootLocal.y, _poseKfFootLocal.z);
+  }
+  if (poseRootTarget) poseRootTarget.updateMatrixWorld(true);
+}
+
 // ══════════════════════════════════════════════════════════════════════
 // BONE HIERARCHY INSPECTOR (diagnostic)
 //
@@ -6929,6 +7057,7 @@ window.exitPoseMode = function () {
   poseKeyframes = [];
   poseKeyframeSource = null;
   poseBoneSpace = 'glb';
+  poseClearKfFootPlant();
   // History entries hold bone indices from the old rig — popping them
   // against the new one would corrupt the pose. Drop + tell the host.
   poseClearHistory('rig-changed');
@@ -7257,9 +7386,8 @@ function poseSyncRootBaseFromCurrentPosition() {
 
 function poseApplyPreviewFootIk() {
   if (!posePreviewFootIk || !poseMode || !currentModel) return;
-  // Baked imports (Cascadeur/Mixamo/FBX) already went through C# retarget +
-  // foot-lock. Nudging root Y every frame from foot height fights the clip
-  // and reads as shake/jitter — especially on walk cycles.
+  // Baked imports already ground via C# GroundToFeet — don't nudge root Y.
+  // World-XZ plant for travelling anim-imports is handled by poseApplyKfFootPlant.
   if (poseKeyframeSource === 'anim-import') return;
   if (poseStrips.some(s => {
     const c = poseClips.find(x => x.id === s.clipId);
@@ -7323,10 +7451,27 @@ function poseApplyRoot(rootArr, yaw) {
 window.poseSetRootMotionPreview = function (enabled) {
   poseRootMotionPreview = enabled !== false;
   try {
+    if (poseKfFootPlant) {
+      poseKfFootPlant.lockL = null;
+      poseKfFootPlant.lockR = null;
+    }
     if (!poseRootMotionPreview && poseRootTarget && poseRootBase) {
       poseRootTarget.position.x = poseRootBase.x;   // drop horizontal travel now,
       poseRootTarget.position.z = poseRootBase.z;   // keep .y (crouch / hop)
       poseApplyRootYaw(undefined);
+      // Restore foot rest positions — plant deltas must not linger in-place.
+      if (poseKfFootPlant) {
+        const sides = [
+          [poseKfFootPlant.lFoot, poseKfFootPlant.lIdx],
+          [poseKfFootPlant.rFoot, poseKfFootPlant.rIdx],
+        ];
+        for (const [bone, idx] of sides) {
+          if (bone && idx != null && poseInitialPositions[idx])
+            bone.position.copy(poseInitialPositions[idx]);
+        }
+      }
+    } else {
+      poseEvaluate(poseTime);
     }
   } catch (e) { /* best effort */ }
   return poseRootMotionPreview;
@@ -9027,6 +9172,7 @@ window.poseClearKeyframes = function () {
     poseKeyframes = [];
     poseKeyframeSource = null;
     poseBoneSpace = 'glb';
+    poseClearKfFootPlant();
     fosTelemetry.info('timeline', 'all keyframes cleared');
     postToHost({ kind: 'pose-timeline-update', keyframes: [], time: poseTime, duration: poseDuration, fps: poseFps, playing: posePlaying });
   });
@@ -9050,6 +9196,7 @@ window.poseClearAll = function () {
   poseKeyframes = [];
   poseKeyframeSource = null;
   poseBoneSpace = 'glb';
+  poseClearKfFootPlant();
   poseTime = 0;
   // resetPose() no-ops unless poseMode is on, and pushes its own undo
   // entry — clearing an already-bind pose stays off the history stack.
@@ -9489,6 +9636,14 @@ window.setKeyframes = function (payloadOrJson, options) {
   poseTime = 0;
   // Evaluate at t=0 so the rig immediately matches the first frame.
   poseEvaluate(0);
+  // Travelling anim-imports: build a world-XZ plant mask so planted feet
+  // stay glued during preview (step-back / walk stance no longer skate).
+  poseClearKfFootPlant();
+  if (hasRoot && payload.source === 'anim-import' && poseRootMotionPreview) {
+    try { poseBuildKfFootPlant(); } catch (e) { console.warn('kf foot-plant build failed', e); }
+    poseEvaluate(0);
+    poseApplyKfFootPlant();
+  }
   // Diagnostic: how far does the root actually travel? If this is ~0 the
   // motion is being lost upstream (reconstruction), not in playback.
   let rootMax = 0;
@@ -9498,6 +9653,7 @@ window.setKeyframes = function (payloadOrJson, options) {
   fosTelemetry.info('timeline', `imported ${rebuilt.length} keyframe(s)`, {
     droppedBones, duration: poseDuration, fps: poseFps,
     hasRoot, rootTravel: +rootMax.toFixed(3), rootTarget: poseRootTarget ? (poseRootTarget.name || 'model') : 'none',
+    footPlant: !!(poseKfFootPlant),
   });
   if (!silent) {
     postToHost({
@@ -9763,11 +9919,10 @@ window.importBoneTracksAsClip = function (payloadOrJson, clipName) {
   }
 
   // rtLoad stops + resets only after bones match — keep prior pose on failure.
-  // Anim-import / ycd library previews already author feet for freemode;
-  // viewer foot-plant IK yanks foot.position in parent space, balloons
-  // ankles/heels, and a throw mid-_rtApply used to kill the play RAF.
-  const allowFootPlant = payload.source !== 'anim-import'
-    && payload.source !== 'ycd-import'
+  // Soft world-XZ foot plant is safe for travelling clips (soft-clamped);
+  // ycd-import / sealed library clips still opt out — their feet are already
+  // authored and plant IK used to balloon ankles on those.
+  const allowFootPlant = payload.source !== 'ycd-import'
     && payload.footPlant !== false;
   let rtResult;
   try {
@@ -9895,7 +10050,15 @@ window.importBoneTracksAsEditableKeys = function (payload, clipName) {
     poseDuration = Math.max(0.1, Math.min(60, (frames - 1) / fps));
     poseFps = fps;
     poseTime = 0;
+    poseClearKfFootPlant();
+    const hasRoot = built.some(k => Array.isArray(k.root) && k.root.length >= 3
+      && (Math.abs(k.root[0]) + Math.abs(k.root[2]) > 1e-4));
     poseEvaluate(0);
+    if (hasRoot && poseRootMotionPreview) {
+      try { poseBuildKfFootPlant(); } catch (e) { console.warn('kf foot-plant build failed', e); }
+      poseEvaluate(0);
+      poseApplyKfFootPlant();
+    }
     // Final state is committed — this ONE echo is the import's announcement.
     poseSquelchTimelineEcho = false;
     postToHost({
@@ -10290,12 +10453,14 @@ function poseEvaluate(t) {
   if (poseKeyframes.length === 1 || t <= poseKeyframes[0].time) {
     poseApplySnapshot(poseKeyframes[0].bones);
     poseApplyRoot(poseKeyframes[0].root, poseKeyframes[0].yaw);
+    poseApplyKfFootPlant();
     return;
   }
   if (t >= poseKeyframes[poseKeyframes.length - 1].time) {
     const last = poseKeyframes[poseKeyframes.length - 1];
     poseApplySnapshot(last.bones);
     poseApplyRoot(last.root, last.yaw);
+    poseApplyKfFootPlant();
     return;
   }
   // Find bracketing pair.
@@ -10313,6 +10478,7 @@ function poseEvaluate(t) {
   if (easeMode === 'hold') {
     poseApplySnapshot(a.bones);
     poseApplyRoot(a.root, a.yaw);
+    poseApplyKfFootPlant();
     return;
   }
   alpha = poseApplyEase(alpha, easeMode);
@@ -10373,6 +10539,7 @@ function poseEvaluate(t) {
   } else {
     poseApplyRootYaw(null);
   }
+  poseApplyKfFootPlant();
 }
 
 // Set the easing mode for the keyframe at the given time. Returns true
