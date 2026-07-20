@@ -618,6 +618,7 @@ let poseRootBaseQuat = null;  // its base orientation — mover heading (yaw) co
 // the extracted mover is still kept in the keyframes for export. The Movement
 // dropdown (In Place ↔ Root Motion) flips it via poseSetRootMotionPreview.
 let poseRootMotionPreview = true;
+let poseRootMotionScale = 1;      // horizontal travel sensitivity (Travel slider)
 let poseRootYawApplied = false; // true while an animated heading is live (restore base quat when it ends)
 let poseUpAxis = null;        // lazy THREE.Vector3(0,1,0) — viewer up
 let poseSuppressRootApply = false; // true while user drags whole-model translate gizmo
@@ -4487,14 +4488,16 @@ function _rtApply(frame) {
   if (_rt.root && _rt.root.length) {
     const rm = _rt.root[Math.min(f, _rt.root.length - 1)];
     if (Array.isArray(rm) && rm.length >= 3) {
+      const s = (typeof poseRootMotionScale === 'number' && isFinite(poseRootMotionScale))
+        ? Math.max(0.1, Math.min(2, poseRootMotionScale)) : 1;
       if (_rt.modelRoot && _rt.modelRootBase) {
         _rt.modelRoot.position.set(
-          _rt.modelRootBase.x + rm[0],
+          _rt.modelRootBase.x + rm[0] * s,
           _rt.modelRootBase.y + rm[1],
-          _rt.modelRootBase.z + rm[2]);
+          _rt.modelRootBase.z + rm[2] * s);
       } else if (_rt.rootBone && _rt.rootRest) {
         _rt.rootBone.position.set(
-          _rt.rootRest.x + rm[0], _rt.rootRest.y + rm[1], _rt.rootRest.z + rm[2]);
+          _rt.rootRest.x + rm[0] * s, _rt.rootRest.y + rm[1], _rt.rootRest.z + rm[2] * s);
       }
     }
   }
@@ -7433,11 +7436,14 @@ function poseApplyRoot(rootArr, yaw) {
   // In-place preview keeps the VERTICAL root (crouch / hop — the performance)
   // but drops the HORIZONTAL travel + heading, so the ped dances in place
   // instead of sliding. The full mover stays in the keyframes for export.
+  // poseRootMotionScale dials horizontal travel only (Travel sensitivity).
+  const s = (typeof poseRootMotionScale === 'number' && isFinite(poseRootMotionScale))
+    ? Math.max(0.1, Math.min(2, poseRootMotionScale)) : 1;
   if (Array.isArray(rootArr)) {
     poseRootTarget.position.set(
-      poseRootBase.x + (poseRootMotionPreview ? rootArr[0] : 0),
+      poseRootBase.x + (poseRootMotionPreview ? rootArr[0] * s : 0),
       poseRootBase.y + rootArr[1],
-      poseRootBase.z + (poseRootMotionPreview ? rootArr[2] : 0));
+      poseRootBase.z + (poseRootMotionPreview ? rootArr[2] * s : 0));
   } else {
     poseRootTarget.position.copy(poseRootBase);
   }
@@ -7475,6 +7481,25 @@ window.poseSetRootMotionPreview = function (enabled) {
     }
   } catch (e) { /* best effort */ }
   return poseRootMotionPreview;
+};
+
+// Travel sensitivity (0.1–2): scales forward/back/strafe only. Hop/crouch Y
+// stays full strength. Live export samples read the scaled model position so
+// preview and .ycd stay WYSIWYG.
+window.poseSetRootMotionScale = function (scale) {
+  const s = Number(scale);
+  poseRootMotionScale = (isFinite(s) ? Math.max(0.1, Math.min(2, s)) : 1);
+  if (poseKfFootPlant) {
+    poseKfFootPlant.lockL = null;
+    poseKfFootPlant.lockR = null;
+  }
+  try {
+    if (poseMode && poseKeyframes.length) poseEvaluate(poseTime);
+    else if (_rt && _rt.tracks && _rt.tracks.length)
+      _rtApply(typeof _rt.frame === 'number' ? _rt.frame : 0);
+  } catch (e) { /* best effort */ }
+  requestRender();
+  return poseRootMotionScale;
 };
 
 // Pose save / apply use window.getPose + window.applyPose (defined
@@ -10523,12 +10548,15 @@ function poseEvaluate(t) {
   if (!poseSuppressRootApply && poseRootTarget && poseRootBase && (a.root || b.root)) {
     // In-place preview keeps the vertical (crouch / hop) but drops horizontal
     // travel; Root Motion mode applies all three. See poseRootMotionPreview.
+    // poseRootMotionScale dials X/Z only (Travel sensitivity).
     const ar = a.root || [0, 0, 0], br = b.root || [0, 0, 0];
     const trav = poseRootMotionPreview ? 1 : 0;
+    const s = (typeof poseRootMotionScale === 'number' && isFinite(poseRootMotionScale))
+      ? Math.max(0.1, Math.min(2, poseRootMotionScale)) : 1;
     poseRootTarget.position.set(
-      poseRootBase.x + (ar[0] + (br[0] - ar[0]) * alpha) * trav,
+      poseRootBase.x + (ar[0] + (br[0] - ar[0]) * alpha) * trav * s,
       poseRootBase.y + ar[1] + (br[1] - ar[1]) * alpha,
-      poseRootBase.z + (ar[2] + (br[2] - ar[2]) * alpha) * trav);
+      poseRootBase.z + (ar[2] + (br[2] - ar[2]) * alpha) * trav * s);
   }
   // Mover heading: plain lerp — yaw deltas arrive unwrapped from import,
   // so no ±π seam can sit between two adjacent keys. Suppressed with travel.

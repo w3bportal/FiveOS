@@ -197,6 +197,11 @@ public partial class PoseToEmoteView : UserControl
                 bool travel = _vm.Movement == Services.EmoteMovement.RootMotion;
                 _ = Viewport.CoreWebView2.ExecuteScriptAsync(
                     $"window.poseSetRootMotionPreview && window.poseSetRootMotionPreview({(travel ? "true" : "false")})");
+                PushRootMotionScaleToViewer();
+            }
+            else if (_webViewReady && ev.PropertyName == nameof(PoseToEmoteViewModel.RootMotionScale))
+            {
+                PushRootMotionScaleToViewer();
             }
 
             // Inspector → JS push: secondary-motion toggle + intensity
@@ -722,6 +727,8 @@ public partial class PoseToEmoteView : UserControl
                             $"window.poseSetOnionSkin && window.poseSetOnionSkin({onion});" +
                             $"window.poseSetIkMode && window.poseSetIkMode({ikOn});" +
                             $"window.poseSetFootLock && window.poseSetFootLock({footOn})");
+                        PushSecondaryMotionToViewer();
+                        PushRootMotionScaleToViewer();
                         // Clear any prior clip drive dots until a new map arrives.
                         foreach (var bone in _vm.Bones)
                         {
@@ -4403,6 +4410,17 @@ case "prop-loaded":
             $"window.poseSetSecondaryMotion && window.poseSetSecondaryMotion({enabled}, {intensity})");
     }
 
+    /// <summary>Push root-travel sensitivity into the viewer so preview
+    /// (and live export samples) match the Travel slider.</summary>
+    private async void PushRootMotionScaleToViewer()
+    {
+        if (!_webViewReady) return;
+        var scale = _vm.RootMotionScale
+            .ToString("0.###", System.Globalization.CultureInfo.InvariantCulture);
+        await Viewport.CoreWebView2.ExecuteScriptAsync(
+            $"window.poseSetRootMotionScale && window.poseSetRootMotionScale({scale})");
+    }
+
     private async Task<bool> HasAnimatedTimelineAsync()
     {
         if (!_webViewReady) return false;
@@ -5144,12 +5162,15 @@ case "prop-loaded":
         if (_vm.MovementIndex == (int)Services.EmoteMovement.RootMotion)
         {
             var exportSource = root.TryGetProperty("source", out var srcEl) ? (srcEl.GetString() ?? "") : "";
+            float travelScale = (float)Math.Clamp(_vm.RootMotionScale, 0.1, 2.0);
+            // Live viewer samples already include poseRootMotionScale (WYSIWYG).
+            // Keyframe-JSON fallback stores the unscaled mover — apply scale here.
             if (root.TryGetProperty("roots", out var rootsEl) && rootsEl.GetArrayLength() >= 2)
                 rootMotion = BuildRootMotionTrackFromSamples(rootsEl, frames, fps, exportSource);
             else if (!string.IsNullOrEmpty(kfJsonForRootMotion))
             {
                 using var kdoc = JsonDocument.Parse(kfJsonForRootMotion);
-                rootMotion = BuildRootMotionTrack(kdoc.RootElement, frames, fps);
+                rootMotion = BuildRootMotionTrack(kdoc.RootElement, frames, fps, travelScale);
             }
             if (rootMotion != null && root.TryGetProperty("floorOffsetY", out var foEl))
             {
@@ -5413,15 +5434,19 @@ case "prop-loaded":
     /// <c>root</c> offsets. Samples the offset at every clip frame (linear) and
     /// converts viewer glTF Y-up to RAGE Z-up. Video imports use
     /// <c>[x, screen-up, 0]</c> → RAGE <c>[x, 0, screen-up]</c>; animation
-    /// imports use <c>[x, 0, fwd]</c> → RAGE <c>[x, fwd, 0]</c>. Returns null
-    /// when there's no root data or the travel is negligible (&lt; 3 cm).</summary>
-    private static Services.PosedPositionTrack? BuildRootMotionTrack(JsonElement docRoot, int frames, int fps)
+    /// imports use <c>[x, 0, fwd]</c> → RAGE <c>[x, fwd, 0]</c>.
+    /// <paramref name="travelScale"/> multiplies horizontal travel only
+    /// (Travel sensitivity). Returns null when there's no root data or the
+    /// travel is negligible (&lt; 3 cm).</summary>
+    private static Services.PosedPositionTrack? BuildRootMotionTrack(
+        JsonElement docRoot, int frames, int fps, float travelScale = 1f)
     {
         if (!docRoot.TryGetProperty("keyframes", out var kfEl) || kfEl.ValueKind != JsonValueKind.Array)
             return null;
 
         var source = docRoot.TryGetProperty("source", out var sEl) ? (sEl.GetString() ?? "") : "";
         bool animImport = string.Equals(source, "anim-import", StringComparison.OrdinalIgnoreCase);
+        float scale = Math.Clamp(travelScale, 0.1f, 2f);
 
         var samples = new List<(double Time, System.Numerics.Vector3 Pos)>();
         foreach (var kf in kfEl.EnumerateArray())
@@ -5440,7 +5465,7 @@ case "prop-loaded":
         float maxD = 0f;
         var origin = samples[0].Pos;
         foreach (var s in samples) maxD = Math.Max(maxD, System.Numerics.Vector3.Distance(s.Pos, origin));
-        if (maxD < 0.03f) return null;
+        if (maxD * scale < 0.03f) return null;
 
         var perFrame = new System.Numerics.Vector3[frames];
         for (int f = 0; f < frames; f++)
@@ -5448,10 +5473,10 @@ case "prop-loaded":
             var v = SampleVec3AtTime(samples, f / (double)fps);
             // Animation retarget roots are glTF ground-plane [x, 0, fwd].
             // Video roots are [x, screen-up, 0]. Never feed glTF Y into RAGE Z
-            // (up) — that was the floating bug.
+            // (up) — that was the floating bug. Scale horizontal only.
             perFrame[f] = animImport
-                ? new System.Numerics.Vector3(v.X, v.Z, 0f)
-                : new System.Numerics.Vector3(v.X, 0f, v.Y);
+                ? new System.Numerics.Vector3(v.X * scale, v.Z * scale, 0f)
+                : new System.Numerics.Vector3(v.X * scale, 0f, v.Y * scale);
         }
         return new Services.PosedPositionTrack(0 /* SKEL_ROOT */, perFrame);
     }

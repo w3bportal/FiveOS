@@ -660,6 +660,22 @@ public partial class PoseToEmoteViewModel : ObservableObject
     public Services.EmoteMovement EffectiveExportMovement =>
         IsAnimatedExport ? Movement : Services.EmoteMovement.InPlace;
 
+    /// <summary>
+    /// Multiplier on horizontal root travel (forward / back / strafe). 1 = full
+    /// imported mover; dial down when FiveOS travel looks exaggerated vs the
+    /// source. Vertical hop/crouch is never scaled. Preview + export both honour
+    /// this so what you see is what bakes into the .ycd.
+    /// </summary>
+    [ObservableProperty] private double _rootMotionScale = 1.0;
+
+    /// <summary>True when the travel-amount slider should be interactive.</summary>
+    public bool RootMotionScaleEnabled => Movement == Services.EmoteMovement.RootMotion;
+
+    partial void OnMovementIndexChanged(int value)
+    {
+        OnPropertyChanged(nameof(RootMotionScaleEnabled));
+    }
+
     // ── Body calibration (retarget → this ped) ─────────────────────────
     // A retarget copies joint ANGLES, which is only complete if the target has
     // the source's build. It never does, so identical angles land the hands

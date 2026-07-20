@@ -407,7 +407,8 @@
                           Padding="0">
             <DockPanel Margin="10,6" LastChildFill="False" MinWidth="640">
                 <!-- Motion account / credits UI now lives in the Motion hub panel. -->
-                <ComboBox DockPanel.Dock="Right"
+                <ComboBox x:Name="MovementCombo"
+                          DockPanel.Dock="Right"
                           SelectedIndex="{Binding MovementIndex, Mode=TwoWay}"
                           MinWidth="190"
                           VerticalAlignment="Center"
@@ -416,6 +417,66 @@
                     <ComboBoxItem Content="Upper body (can move)" ToolTip="Only the upper body animates; legs keep walking/idling, so the player can move. Waves, salutes, gestures. This is dpemotes' 'EmoteMoving'. (flag 49 looping, 50 one-shot)" />
                     <ComboBoxItem Content="Root motion (ped travels)" ToolTip="Full body + mover extraction — the ped physically walks along the clip's SKEL_ROOT path. Default for imported animations. Needs fxresource export for FiveM." />
                 </ComboBox>
+                <ToggleButton x:Name="TravelFlyoutBtn"
+                              DockPanel.Dock="Right"
+                              Padding="10,5"
+                              Margin="0,0,6,0"
+                              IsEnabled="{Binding RootMotionScaleEnabled}"
+                              ToolTip="Travel amount — how far the ped walks along the clip's mover. Dial down when forward/back/strafe looks exaggerated vs the source.">
+                    <StackPanel Orientation="Horizontal">
+                        <ui:SymbolIcon Symbol="ArrowBidirectional24" FontSize="13" Margin="0,0,6,0" />
+                        <TextBlock Text="Travel" FontSize="11" />
+                        <ui:SymbolIcon Symbol="ChevronDown12" FontSize="9" Margin="5,1,0,0" Opacity="0.6" />
+                    </StackPanel>
+                </ToggleButton>
+                <Popup IsOpen="{Binding IsChecked, ElementName=TravelFlyoutBtn, Mode=TwoWay}"
+                       PlacementTarget="{Binding ElementName=TravelFlyoutBtn}"
+                       Placement="Bottom"
+                       AllowsTransparency="True"
+                       PopupAnimation="Fade">
+                    <Border Background="{DynamicResource ApplicationBackgroundBrush}"
+                            BorderBrush="{DynamicResource ControlElevationBorderBrush}"
+                            BorderThickness="1"
+                            CornerRadius="8"
+                            Padding="14,12"
+                            Width="280"
+                            Margin="0,4,0,0">
+                        <StackPanel>
+                            <TextBlock Text="Root travel amount"
+                                       FontSize="11"
+                                       FontWeight="SemiBold"
+                                       Margin="0,0,0,6"
+                                       ToolTip="Scales forward / back / left / right travel only. Hop and crouch height stay full strength." />
+                            <Grid Margin="0,0,0,2">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="Auto" />
+                                </Grid.ColumnDefinitions>
+                                <TextBlock Grid.Column="0" Text="Sensitivity" FontSize="11" VerticalAlignment="Center" />
+                                <TextBlock Grid.Column="1" FontFamily="Consolas" FontSize="10" VerticalAlignment="Center"
+                                           Foreground="{DynamicResource TextFillColorSecondaryBrush}">
+                                    <Run Text="{Binding RootMotionScale, StringFormat={}{0:P0}, Mode=OneWay}" />
+                                </TextBlock>
+                            </Grid>
+                            <Slider Minimum="0.1" Maximum="2.0" SmallChange="0.05" LargeChange="0.1"
+                                    TickFrequency="0.1"
+                                    Value="{Binding RootMotionScale, Mode=TwoWay}"
+                                    IsEnabled="{Binding RootMotionScaleEnabled}"
+                                    Margin="0,2,0,0"
+                                    ToolTip="100% = full imported mover. Lower if the ped overshoots vs Blender / Move AI." />
+                            <Grid Margin="0,2,0,0">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="*" />
+                                </Grid.ColumnDefinitions>
+                                <TextBlock Grid.Column="0" Text="subtle" FontSize="9" Opacity="0.5" />
+                                <TextBlock Grid.Column="1" Text="100%" FontSize="9" Opacity="0.5" HorizontalAlignment="Center" />
+                                <TextBlock Grid.Column="2" Text="exaggerated" FontSize="9" Opacity="0.5" HorizontalAlignment="Right" />
+                            </Grid>
+                        </StackPanel>
+                    </Border>
+                </Popup>
                 <StackPanel Orientation="Horizontal" DockPanel.Dock="Left">
                 <!-- Primary actions — ONE home: the toolbar (sidebar retired 2026-07-16). -->
                 <ui:Button Click="OnImportAnimation"
