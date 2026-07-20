@@ -279,12 +279,21 @@ public partial class App : Application
         // trap the user behind the splash — if the check outlives the cap the
         // app proceeds and the result still lands (footer badge + themed
         // offer) via MainWindow.SetPendingUpdate once it finally completes.
-        _ = RunSplashUpdateCheckAsync(splash, main, TimeSpan.FromSeconds(5),
-            onSettled: () =>
-            {
-                updateCheckDone = true;
-                tryFinish();
-            });
+        // Skipped entirely when Settings → Global update is off (manual only).
+        if (Services.UserSettings.LoadGlobalUpdate())
+        {
+            _ = RunSplashUpdateCheckAsync(splash, main, TimeSpan.FromSeconds(5),
+                onSettled: () =>
+                {
+                    updateCheckDone = true;
+                    tryFinish();
+                });
+        }
+        else
+        {
+            updateCheckDone = true;
+            tryFinish();
+        }
 
         // ─── Plugin host wiring ──────────────────────────────────────
         // The PluginManager exposes two callback hooks the host owns:

@@ -357,6 +357,7 @@ public partial class SettingsView : UserControl
     // ─────────────── About ───────────────
 
     private bool _suppressDiscordToggle;
+    private bool _suppressGlobalUpdateToggle;
 
     private void RefreshAbout()
     {
@@ -374,10 +375,20 @@ public partial class SettingsView : UserControl
             AboutVersion.Text = v is null ? "0.0.0" : $"{v.Major}.{v.Minor}.{v.Build}";
         }
 
-        // Hydrate the Discord toggle from disk without firing its handler.
+        // Hydrate toggles from disk without firing their handlers.
+        _suppressGlobalUpdateToggle = true;
+        GlobalUpdateToggle.IsChecked = UserSettings.LoadGlobalUpdate();
+        _suppressGlobalUpdateToggle = false;
+
         _suppressDiscordToggle = true;
         DiscordPresenceToggle.IsChecked = UserSettings.LoadEnableDiscordPresence();
         _suppressDiscordToggle = false;
+    }
+
+    private void OnGlobalUpdateToggled(object sender, RoutedEventArgs e)
+    {
+        if (_suppressGlobalUpdateToggle) return;
+        UserSettings.SaveGlobalUpdate(GlobalUpdateToggle.IsChecked == true);
     }
 
     private void OnDiscordPresenceToggled(object sender, RoutedEventArgs e)

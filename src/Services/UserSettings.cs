@@ -65,6 +65,11 @@ public static class UserSettings
         /// stays visible); any NEWER release prompts again.</summary>
         public string? SkippedUpdateVersion { get; set; }
 
+        /// <summary>When true, check for updates on startup and prompt if a
+        /// newer build is available. When false (default), updates are
+        /// manual only via Help → Check for updates.</summary>
+        public bool GlobalUpdate { get; set; } = false;
+
         /// <summary>Path to the reference (scale-comparison) model shown
         /// alongside the user's prop in the 3D preview. Empty / null disables
         /// the reference. Default points at the user-supplied ped_scale.fbx
@@ -330,6 +335,16 @@ public static class UserSettings
     {
         var b = Read();
         b.SkippedUpdateVersion = string.IsNullOrWhiteSpace(versionTag) ? null : versionTag;
+        Write(b);
+    }
+
+    /// <summary>True = prompt for updates on startup; false = manual only.</summary>
+    public static bool LoadGlobalUpdate() => Read().GlobalUpdate;
+
+    public static void SaveGlobalUpdate(bool enabled)
+    {
+        var b = Read();
+        b.GlobalUpdate = enabled;
         Write(b);
     }
 

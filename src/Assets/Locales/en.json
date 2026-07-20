@@ -59,6 +59,8 @@
   "Settings.Title": "Settings",
   "Settings.General": "General",
   "Settings.GeneralDesc": "App-wide preferences and integrations.",
+  "Settings.GlobalUpdate": "Global update",
+  "Settings.GlobalUpdateDesc": "Off by default — update manually via Help → Check for updates. Turn on to prompt for updates when FiveOS starts.",
   "Settings.Output": "Server settings",
   "Settings.ApiKeys": "API keys & credentials",
   "Settings.Cache": "Storage & cache",

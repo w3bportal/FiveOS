@@ -190,6 +190,40 @@
                     <TextBlock Style="{StaticResource PageSubtitle}"
                                Text="{loc:Loc Settings.GeneralDesc}" />
 
+                    <!-- ─── Global update ─── -->
+                    <Border CornerRadius="6"
+                            Padding="18,16"
+                            Margin="0,12,0,0"
+                            Background="{DynamicResource ControlFillColorSecondaryBrush}"
+                            BorderThickness="1"
+                            BorderBrush="{DynamicResource ControlElevationBorderBrush}">
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+                            <StackPanel Grid.Column="0">
+                                <StackPanel Orientation="Horizontal">
+                                    <ui:SymbolIcon Symbol="ArrowDownload24" FontSize="20"
+                                                   VerticalAlignment="Center" Opacity="0.85" />
+                                    <TextBlock Text="{loc:Loc Settings.GlobalUpdate}"
+                                               Style="{StaticResource ProviderTitle}"
+                                               Margin="10,0,0,0"
+                                               VerticalAlignment="Center" />
+                                </StackPanel>
+                                <TextBlock Style="{StaticResource ProviderHelp}"
+                                           Text="{loc:Loc Settings.GlobalUpdateDesc}" />
+                            </StackPanel>
+                            <ui:ToggleSwitch Grid.Column="1"
+                                             x:Name="GlobalUpdateToggle"
+                                             VerticalAlignment="Center"
+                                             Margin="16,0,0,0"
+                                             Checked="OnGlobalUpdateToggled"
+                                             Unchecked="OnGlobalUpdateToggled"
+                                             ToolTip="On: check for updates when FiveOS starts and prompt if a newer build is available. Off: update only when you use Help → Check for updates." />
+                        </Grid>
+                    </Border>
+
                     <!-- ─── Discord Rich Presence ─── -->
                     <Border CornerRadius="6"
                             Padding="18,16"
