@@ -254,10 +254,23 @@ public partial class PoseToEmoteView : UserControl
                     var on = _vm.PoseIkMode ? "true" : "false";
                     _ = Viewport.CoreWebView2.ExecuteScriptAsync(
                         $"window.poseSetIkMode && window.poseSetIkMode({on})");
+                    // Foot lock only applies in IK — re-push so the viewer
+                    // arms/disarms plant targets when the mode flips.
+                    var foot = (_vm.PoseIkMode && _vm.PoseFootLock) ? "true" : "false";
+                    _ = Viewport.CoreWebView2.ExecuteScriptAsync(
+                        $"window.poseSetFootLock && window.poseSetFootLock({foot})");
                 }
                 _vm.PoseModeLabel = _vm.PoseIkMode ? "IK" : "FK";
             }
-
+            if (ev.PropertyName == nameof(PoseToEmoteViewModel.PoseFootLock))
+            {
+                if (_webViewReady)
+                {
+                    var on = (_vm.PoseIkMode && _vm.PoseFootLock) ? "true" : "false";
+                    _ = Viewport.CoreWebView2.ExecuteScriptAsync(
+                        $"window.poseSetFootLock && window.poseSetFootLock({on})");
+                }
+            }
             // Redraw whichever timeline layer the change affects.
             // TimelineTime is the hot path (fires every playback frame);
             // we just shift the playhead instead of redrawing everything.
@@ -703,10 +716,12 @@ public partial class PoseToEmoteView : UserControl
                         var mode = (_vm.RigDisplayMode ?? "fiveos").Replace("\\", "\\\\").Replace("'", "\\'");
                         var onion = _vm.OnionSkinEnabled ? "true" : "false";
                         var ikOn = _vm.PoseIkMode ? "true" : "false";
+                        var footOn = (_vm.PoseIkMode && _vm.PoseFootLock) ? "true" : "false";
                         _ = Viewport.CoreWebView2.ExecuteScriptAsync(
                             $"window.poseSetRigDisplay && window.poseSetRigDisplay('{mode}');" +
                             $"window.poseSetOnionSkin && window.poseSetOnionSkin({onion});" +
-                            $"window.poseSetIkMode && window.poseSetIkMode({ikOn})");
+                            $"window.poseSetIkMode && window.poseSetIkMode({ikOn});" +
+                            $"window.poseSetFootLock && window.poseSetFootLock({footOn})");
                         // Clear any prior clip drive dots until a new map arrives.
                         foreach (var bone in _vm.Bones)
                         {
@@ -2123,6 +2138,23 @@ case "prop-loaded":
             case System.Windows.Input.Key.K:
                 OnAddKeyframe(this, new RoutedEventArgs());
                 e.Handled = true;
+                break;
+            // W/E/R — Move / Rotate / Scale. Forwarded so they still work when
+            // focus is on the timeline or toolbar (WebView2 only sees keys
+            // when it has focus). Viewer routes IK vs whole-model itself.
+            case System.Windows.Input.Key.W when !ctrl:
+            case System.Windows.Input.Key.E when !ctrl:
+            case System.Windows.Input.Key.R when !ctrl:
+                if (_webViewReady && !mods.HasFlag(System.Windows.Input.ModifierKeys.Alt)
+                    && !mods.HasFlag(System.Windows.Input.ModifierKeys.Shift))
+                {
+                    var mode = e.Key == System.Windows.Input.Key.E ? "rotate"
+                        : e.Key == System.Windows.Input.Key.R ? "scale"
+                        : "translate";
+                    _ = Viewport.CoreWebView2.ExecuteScriptAsync(
+                        $"window.poseSetTransformMode && window.poseSetTransformMode('{mode}')");
+                    e.Handled = true;
+                }
                 break;
         }
     }

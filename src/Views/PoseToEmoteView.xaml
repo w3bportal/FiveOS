@@ -524,6 +524,16 @@
                         <TextBlock Text="{Binding PoseModeLabel}" FontSize="11" MinWidth="15" />
                     </StackPanel>
                 </ToggleButton>
+                <ToggleButton IsChecked="{Binding PoseFootLock, Mode=TwoWay}"
+                              IsEnabled="{Binding PoseIkMode}"
+                              Padding="10,5"
+                              Margin="6,0,0,0"
+                              ToolTip="Foot lock — pin feet to the ground while posing. Requires IK mode. Dragging a hand keeps both feet planted; dragging a foot slides it on the floor (height stays locked).">
+                    <StackPanel Orientation="Horizontal">
+                        <ui:SymbolIcon Symbol="Pin24" FontSize="13" Margin="0,0,6,0" />
+                        <TextBlock Text="Feet" FontSize="11" />
+                    </StackPanel>
+                </ToggleButton>
                 <ToggleButton IsChecked="{Binding OnionSkinEnabled, Mode=TwoWay}"
                               Padding="10,5"
                               Margin="6,0,0,0"
@@ -1803,9 +1813,54 @@
                                     <TextBlock Text="Trim" FontSize="11" />
                                 </StackPanel>
                             </ui:Button>
+                            <Border Width="1" Height="18" Background="#FF454545" Margin="0,0,6,0" />
+                            <ToggleButton IsChecked="{Binding TimelineSnapEnabled, Mode=TwoWay}"
+                                          Click="OnTimelineSnapClick"
+                                          Padding="7,3" Margin="0,0,4,0"
+                                          ToolTip="Snap edits to whole frames (hold Shift to bypass)">
+                                <TextBlock Text="Snap" FontSize="11" />
+                            </ToggleButton>
+                            <ToggleButton IsChecked="{Binding TimelineLoop, Mode=OneWay}"
+                                          Click="OnTimelineLoopToggle"
+                                          Padding="7,3" Margin="0,0,4,0"
+                                          ToolTip="Loop playback (/)">
+                                <TextBlock Text="Loop" FontSize="11" />
+                            </ToggleButton>
+                            <ui:Button Click="OnTimelineDeleteSelection" Appearance="Secondary" Padding="7,3" Margin="0,0,4,0"
+                                       ToolTip="Delete selection (Del)">
+                                <TextBlock Text="Delete" FontSize="11" />
+                            </ui:Button>
+                            <ui:Button Click="OnTimelineDuplicateSelection" Appearance="Secondary" Padding="7,3" Margin="0,0,4,0"
+                                       ToolTip="Duplicate selection (Ctrl+D)">
+                                <TextBlock Text="Duplicate" FontSize="11" />
+                            </ui:Button>
+                            <ui:Button Click="OnTimelineFrameSelected" Appearance="Secondary" Padding="7,3" Margin="0,0,4,0"
+                                       ToolTip="Frame selected keys in the timeline">
+                                <TextBlock Text="Frame" FontSize="11" />
+                            </ui:Button>
+                            <ui:Button Click="OnTimelineFitAll" Appearance="Secondary" Padding="7,3" Margin="0,0,4,0"
+                                       ToolTip="Fit whole animation in the timeline">
+                                <TextBlock Text="Fit" FontSize="11" />
+                            </ui:Button>
+                            <ui:Button Click="OnTimelineSetInClick" Appearance="Secondary" Padding="7,3" Margin="0,0,4,0"
+                                       ToolTip="Trim start to playhead (I)">
+                                <TextBlock Text="In" FontSize="11" />
+                            </ui:Button>
+                            <ui:Button Click="OnTimelineSetOutClick" Appearance="Secondary" Padding="7,3" Margin="0,0,4,0"
+                                       ToolTip="Trim end to playhead (O)">
+                                <TextBlock Text="Out" FontSize="11" />
+                            </ui:Button>
+                            <ui:Button Click="OnTimelineSplitClick" Appearance="Secondary" Padding="7,3" Margin="0,0,4,0"
+                                       ToolTip="Split clip at playhead">
+                                <TextBlock Text="Split" FontSize="11" />
+                            </ui:Button>
+                            <ui:Button Click="OnClearAll" Appearance="Secondary" Padding="7,3" Margin="0,0,0,0"
+                                       ToolTip="Clear clips, library, keyframes, and pose (Shift+Del). Model stays.">
+                                <TextBlock Text="Clear" FontSize="11" />
+                            </ui:Button>
                         </StackPanel>
 
-                        <!-- Right: Snap, filter, overflow, shortcuts tip -->
+                        <!-- Right: status, filter, shortcuts tip -->
                         <StackPanel Grid.Column="1"
                                     Orientation="Horizontal"
                                     HorizontalAlignment="Right"
@@ -1815,7 +1870,7 @@
                                        FontSize="10"
                                        Foreground="#9A9A9A"
                                        VerticalAlignment="Center"
-                                       MaxWidth="340"
+                                       MaxWidth="220"
                                        TextTrimming="CharacterEllipsis"
                                        Margin="0,0,8,0" />
                             <TextBlock Text="{Binding SkippedSummary}"
@@ -1830,7 +1885,6 @@
                                                 Padding="4,0"
                                                 Margin="0,0,8,0"
                                                 Visibility="{Binding HasSkippedBones, Converter={StaticResource BooleanToVisibility}}" />
-                            <!-- Filter collapses behind an icon; Snap + Loop moved to the ⋯ menu. -->
                             <ToggleButton x:Name="FilterToggle"
                                           Padding="7,4"
                                           Margin="0,0,6,0"
@@ -1844,47 +1898,6 @@
                                         Text="{Binding TimelineTrackFilter, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
                                         TextChanged="OnTimelineTrackFilterChanged"
                                         PlaceholderText="Filter bones…" />
-                            <ui:Button x:Name="TimelineMoreBtn"
-                                       Appearance="Secondary"
-                                       Padding="7,4"
-                                       Margin="0,0,4,0"
-                                       Click="OnTimelineMoreClick"
-                                       ToolTip="More timeline tools">
-                                <ui:Button.ContextMenu>
-                                    <ContextMenu>
-                                        <MenuItem Header="Snap to frames"
-                                                  IsCheckable="True"
-                                                  IsChecked="{Binding PlacementTarget.DataContext.TimelineSnapEnabled, RelativeSource={RelativeSource AncestorType=ContextMenu}, Mode=TwoWay}"
-                                                  Click="OnTimelineSnapClick" />
-                                        <MenuItem Header="Loop playback"
-                                                  IsCheckable="True"
-                                                  IsChecked="{Binding PlacementTarget.DataContext.TimelineLoop, RelativeSource={RelativeSource AncestorType=ContextMenu}, Mode=OneWay}"
-                                                  Click="OnTimelineLoopToggle" />
-                                        <Separator />
-                                        <MenuItem Header="Delete selection (Del)"
-                                                  Click="OnTimelineDeleteSelection" />
-                                        <MenuItem Header="Duplicate selection (Ctrl+D)"
-                                                  Click="OnTimelineDuplicateSelection" />
-                                        <Separator />
-                                        <MenuItem Header="Frame selected keys"
-                                                  Click="OnTimelineFrameSelected" />
-                                        <MenuItem Header="Fit whole animation"
-                                                  Click="OnTimelineFitAll" />
-                                        <Separator />
-                                        <MenuItem Header="Trim start to playhead (I)"
-                                                  Click="OnTimelineSetInClick" />
-                                        <MenuItem Header="Trim end to playhead (O)"
-                                                  Click="OnTimelineSetOutClick" />
-                                        <MenuItem Header="Split at playhead"
-                                                  Click="OnTimelineSplitClick" />
-                                        <Separator />
-                                        <MenuItem Header="Clear all…"
-                                                  Click="OnClearAll"
-                                                  ToolTip="Clear clips, library, keyframes, and pose (Shift+Del). Model stays." />
-                                    </ContextMenu>
-                                </ui:Button.ContextMenu>
-                                <ui:SymbolIcon Symbol="MoreHorizontal24" FontSize="14" />
-                            </ui:Button>
                             <ui:Button Appearance="Secondary"
                                        Padding="7,4"
                                        ToolTipService.ShowDuration="60000">
