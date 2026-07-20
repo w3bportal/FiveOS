@@ -5800,8 +5800,9 @@ case "prop-loaded":
         }
     }
 
-    /// <summary>Import a local animation file (.fbx/.glb/…) onto the timeline.</summary>
-    public async Task ImportAnimationFileAsync(string path)
+    /// <summary>Import a local animation file (.fbx/.glb/…) onto the timeline.
+    /// Returns true only when the clip is on the timeline and ready to preview.</summary>
+    public async Task<bool> ImportAnimationFileAsync(string path)
     {
         SetImportOverlay(on: true, "Importing animation.");
         _vm.StatusText = "Importing animation.";
@@ -5820,12 +5821,13 @@ case "prop-loaded":
                 {
                     _vm.StatusText = "Couldn't read Sims package: " + ex.Message;
                     AppendDebug("err", "error", "Sims package list failed", ex.Message);
-                    return;
+                    FosLogger.Warn("import", "Sims package list failed: " + ex.Message);
+                    return false;
                 }
                 if (list.Count == 0)
                 {
                     _vm.StatusText = "No CLIP animations found in this Sims 4 .package.";
-                    return;
+                    return false;
                 }
                 simsClipIndex = 0;
                 if (list.Count > 1)
@@ -5848,7 +5850,7 @@ case "prop-loaded":
                         }
                     }
                     _vm.StatusText = "Import cancelled.";
-                    return;
+                    return false;
                 }
                 SetImportOverlay(on: true, "Importing Sims clip.");
                 await PumpUiAsync();
@@ -5869,7 +5871,8 @@ case "prop-loaded":
                 {
                     _vm.StatusText = res?.Error ?? "Physics mocap import failed.";
                     AppendDebug("err", "error", "Physics mocap import failed", res?.Error ?? "(no result)");
-                    return;
+                    FosLogger.Warn("import", _vm.StatusText);
+                    return false;
                 }
                 foreach (string warning in res.Warnings)
                     AppendDebug("warn", "timeline", "Physics mocap", warning);
@@ -5882,17 +5885,18 @@ case "prop-loaded":
                 if (physPayload == null || physMapped == 0)
                 {
                     _vm.StatusText = "No bones in this physics mocap map onto the loaded rig.";
-                    return;
+                    FosLogger.Warn("import", _vm.StatusText);
+                    return false;
                 }
-                await ApplyImportedAnimAsync(res, physPayload, physMapped, System.IO.Path.GetFileName(path));
-                return;
+                return await ApplyImportedAnimAsync(res, physPayload, physMapped, System.IO.Path.GetFileName(path));
             }
             AnimationContainerResolver.ResolveResult resolveResult = await Task.Run(() => AnimationContainerResolver.Resolve(path));
             if (!resolveResult.Success)
             {
                 _vm.StatusText = resolveResult.Error ?? "Import failed.";
                 AppendDebug("err", "error", "Animation container resolve failed", resolveResult.Error ?? "");
-                return;
+                FosLogger.Warn("import", _vm.StatusText);
+                return false;
             }
             if (!string.IsNullOrWhiteSpace(resolveResult.Note))
             {
@@ -5911,7 +5915,8 @@ case "prop-loaded":
             {
                 _vm.StatusText = res?.Error ?? "Import failed.";
                 AppendDebug("err", "error", "Animation import failed", res?.Error ?? "(no result)");
-                return;
+                FosLogger.Warn("import", "Animation import failed: " + (_vm.StatusText));
+                return false;
             }
             _uncalibrated = res;
             _uncalibratedName = System.IO.Path.GetFileName(path);
@@ -5923,7 +5928,8 @@ case "prop-loaded":
             {
                 _vm.StatusText = "No bones in this clip map onto the loaded rig.";
                 AppendDebug("warn", "timeline", "Animation import: 0 bones mapped", System.IO.Path.GetFileName(path));
-                return;
+                FosLogger.Warn("import", _vm.StatusText + " — " + System.IO.Path.GetFileName(path));
+                return false;
             }
             // A travelling clip still imports its mover, but MOVEMENT no longer
             // offers root motion, so there is no mode to switch to — the export
@@ -5935,8 +5941,7 @@ case "prop-loaded":
                 AppendDebug("warn", "timeline", "Clip carries root motion",
                     "The ped will play this in place — root motion export is not available.");
             }
-            await ApplyImportedAnimAsync(res, text, mappedBones, System.IO.Path.GetFileName(path));
-            return;
+            return await ApplyImportedAnimAsync(res, text, mappedBones, System.IO.Path.GetFileName(path));
             IL_0363:
             AnimEmoteImporter.Result simsRes = null;
             try
@@ -5951,9 +5956,10 @@ case "prop-loaded":
             {
                 _vm.StatusText = simsRes?.Error ?? "Sims import failed.";
                 AppendDebug("err", "error", "Sims import failed", simsRes?.Error ?? "(no result)");
-                return;
+                FosLogger.Warn("import", _vm.StatusText);
+                return false;
             }
-            AppendDebug("info", "timeline", "Sims CLIP imported", $"{simsRes.ClipName} � {simsRes.MappedBones.Count} bones � {simsRes.Frames}f @{simsRes.Fps}fps");
+            AppendDebug("info", "timeline", "Sims CLIP imported", $"{simsRes.ClipName} · {simsRes.MappedBones.Count} bones · {simsRes.Frames}f @{simsRes.Fps}fps");
             foreach (string warning in simsRes.Warnings)
             {
                 AppendDebug("warn", "timeline", "Sims import", warning);
@@ -5964,15 +5970,18 @@ case "prop-loaded":
             if (text2 == null || mappedBones2 == 0)
             {
                 _vm.StatusText = "No bones in this Sims clip map onto the loaded rig.";
-                return;
+                FosLogger.Warn("import", _vm.StatusText);
+                return false;
             }
             rootMotion = simsRes.RootMotion;
-            await ApplyImportedAnimAsync(simsRes, text2, mappedBones2, System.IO.Path.GetFileName(path));
+            return await ApplyImportedAnimAsync(simsRes, text2, mappedBones2, System.IO.Path.GetFileName(path));
         }
         catch (Exception ex4)
         {
             _vm.StatusText = "Import failed: " + ex4.Message;
             AppendDebug("err", "error", "Animation import exception", ex4.ToString());
+            FosLogger.Warn("import", "Animation import exception", ex4);
+            return false;
         }
         finally
         {
@@ -5980,7 +5989,7 @@ case "prop-loaded":
         }
     }
 
-    private async Task ApplyImportedAnimAsync(AnimEmoteImporter.Result res, string payloadJson, int mappedBones, string displayName)
+    private async Task<bool> ApplyImportedAnimAsync(AnimEmoteImporter.Result res, string payloadJson, int mappedBones, string displayName)
     {
         SetImportOverlay(on: true, "Pushing animation into timeline.");
         _vm.StatusText = "Pushing animation into timeline.";
@@ -5989,7 +5998,7 @@ case "prop-loaded":
         string clipName = res.ClipName ?? System.IO.Path.GetFileNameWithoutExtension(displayName);
         if (!(await ImportPayloadAsClipAsync(payloadJson, clipName)))
         {
-            return;
+            return false;
         }
         // Imported animations default to Root motion (ped travels): the baked
         // mover is applied so the ped physically moves. Switch Movement → In Place
@@ -6039,6 +6048,7 @@ case "prop-loaded":
         {
             AppendDebug("warn", "timeline", "Clip longer than the 60s timeline cap", $"{res.DurationSeconds:F1}s - trailing frames are clamped.");
         }
+        return true;
     }
 
     private static string? BuildAnimKeyframePayload(AnimEmoteImporter.Result res, IReadOnlyList<string> rigBoneNames, out int mappedBones)
