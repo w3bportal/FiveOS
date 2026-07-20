@@ -1928,11 +1928,24 @@ window.addEventListener('keydown', e => {
         }
       }
       if (lower === 'w' || lower === 'e' || lower === 'r') {
-        // W/E/R gizmo mode switch (Blender/Maya muscle memory), same as
-        // prop mode — applies to whatever the gizmo currently holds
-        // (bone, IK ring, or a selected rig).
+        // W/E/R gizmo mode switch (Blender/Maya muscle memory).
+        // With an IK hand/foot selected: W = move target, E = rotate the
+        // wrist/ankle bone (not the empty IK helper — that used to no-op).
+        if (poseIkActiveHandle) {
+          const mode = lower === 'e' ? 'rotate' : 'translate';
+          attachIkGizmoForMode(mode);
+          requestRender();
+          fosTelemetry.info('hotkey', `ik-gizmo -> ${mode}`);
+          e.preventDefault();
+          return;
+        }
         if (transformControls.object) {
           const mode = lower === 'w' ? 'translate' : lower === 'e' ? 'rotate' : 'scale';
+          // FK bone posing is rotate-only — ignore W/R on a selected joint.
+          if (poseSelection.length > 0 && mode !== 'rotate') {
+            e.preventDefault();
+            return;
+          }
           transformControls.setMode(mode);
           requestRender();
           fosTelemetry.info('hotkey', `gizmo -> ${mode}`);
@@ -6152,6 +6165,32 @@ window.poseSetRigDisplay = function (mode) {
   } catch (_) {}
 };
 
+// IK handles: W = move the target (limb IK), E = rotate the wrist/ankle
+// bone itself. Without this split, pressing E rotated the empty IK target
+// Object3D and the hand never moved — "can't rotate IK wrists".
+function attachIkGizmoForMode(mode) {
+  const h = poseIkActiveHandle;
+  if (!h) return false;
+  if (currentModel) currentModel.updateMatrixWorld(true);
+  syncIkHandleTransforms(true);
+  if (mode === 'rotate' && h.effector) {
+    posePickedBone = h.effector;
+    poseSelection = [h.effector];
+    transformControls.attach(h.effector);
+    transformControls.setMode('rotate');
+    applyAxisLockToGizmo();
+  } else {
+    // Translate (default) — and scale is meaningless on an IK target, so
+    // fall back to move.
+    posePickedBone = h.effector || null;
+    poseSelection = [];
+    transformControls.attach(h.target);
+    transformControls.setMode('translate');
+  }
+  gizmoBar.style.display = 'none';
+  return true;
+}
+
 function attachIkHandle(handle) {
   if (!handle) return;
   poseIkActiveHandle = handle;
@@ -6163,11 +6202,7 @@ function attachIkHandle(handle) {
     poseFabrik.setChainEnablerAll(false);
     if (handle.hasFabrik) poseFabrik.setChainEnabler(handle.id, true);
   }
-  if (currentModel) currentModel.updateMatrixWorld(true);
-  syncIkHandleTransforms(true);
-  transformControls.attach(handle.target);
-  transformControls.setMode('translate');
-  gizmoBar.style.display = 'none';
+  attachIkGizmoForMode('translate');
   postToHost({ kind: 'rig-selected-for-transform', rigId: null });
   postToHost({
     kind: 'pose-bone-selected',
@@ -10609,6 +10644,22 @@ transformControls.addEventListener('objectChange', () => {
   // IK translate: solve limb chain into FK rotations every drag frame.
   if (poseIkActiveHandle && transformControls.mode === 'translate') {
     applyActiveIkSolve();
+    requestRender();
+    return;
+  }
+
+  // IK + rotate: gizmo is on the wrist/ankle bone — FK-rotate orientation
+  // only; don't re-solve the chain (that would fight the wrist twist).
+  if (poseIkActiveHandle && transformControls.mode === 'rotate') {
+    if (typeof poseSyncSkeletonMeshes === 'function') poseSyncSkeletonMeshes();
+    syncIkHandleTransforms(true);
+    if (posePickedBone) {
+      postToHost({
+        kind: 'pose-bone-changed',
+        name: posePickedBone.name || '',
+        multiCount: 1,
+      });
+    }
     requestRender();
     return;
   }

@@ -518,7 +518,7 @@
                 <ToggleButton IsChecked="{Binding PoseIkMode, Mode=TwoWay}"
                               Padding="10,5"
                               Margin="6,0,0,0"
-                              ToolTip="Posing mode. FK (off): click a limb to rotate it — wrist, spine, fingers. IK (on): drag a hand or foot and the shoulder, chest and the other side follow along (full-body IK). Click to switch.">
+                              ToolTip="Posing mode. FK (off): click a limb to rotate it — wrist, spine, fingers. IK (on): drag a hand or foot to move it (full-body IK). With a hand/foot selected, press E to rotate the wrist/ankle, W to move again. Click to switch.">
                     <StackPanel Orientation="Horizontal">
                         <ui:SymbolIcon Symbol="ArrowSync24" FontSize="13" Margin="0,0,6,0" />
                         <TextBlock Text="{Binding PoseModeLabel}" FontSize="11" MinWidth="15" />
