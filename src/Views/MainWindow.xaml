@@ -607,7 +607,7 @@
                       VerticalAlignment="Center">
                     <!-- ── File ── -->
                     <MenuItem Header="{loc:Loc Menu.File}"
-                              Style="{StaticResource C4DTopLevelGold}">
+                              Style="{StaticResource C4DTopLevelMuted}">
                         <MenuItem Header="Dashboard"
                                   Style="{StaticResource C4DMenuCommand}"
                                   Command="{Binding GoHomeCommand}"
@@ -822,7 +822,7 @@
 
                     <!-- ── Edit ── -->
                     <MenuItem Header="{loc:Loc Menu.Edit}"
-                              Style="{StaticResource C4DTopLevelGold}">
+                              Style="{StaticResource C4DTopLevelMuted}">
                         <MenuItem Header="HISTORY"
                                   Style="{StaticResource C4DMenuSectionHeader}" />
                         <MenuItem Header="{loc:Loc Menu.Undo}"
@@ -973,7 +973,7 @@
 
                     <!-- ── Settings ── -->
                     <MenuItem Header="{loc:Loc Menu.Settings}"
-                              Style="{StaticResource C4DTopLevelGold}"
+                              Style="{StaticResource C4DTopLevelMuted}"
                               Click="OnSettingsOpen"
                               ToolTip="API keys, output folders, language and other preferences." />
 
