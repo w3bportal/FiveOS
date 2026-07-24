@@ -1,4 +1,4 @@
-﻿<UserControl x:Class="FiveOS.Views.PoseToEmoteView"
+<UserControl x:Class="FiveOS.Views.PoseToEmoteView"
              xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:ui="http://schemas.lepo.co/wpfui/2022/xaml"
@@ -159,7 +159,36 @@
                         Tag="{Binding}"
                         Cursor="Hand"
                         Focusable="False"
-                        HorizontalContentAlignment="Stretch">
+                        HorizontalContentAlignment="Stretch"
+                        ContextMenuOpening="OnOutlinerContextMenuOpening">
+                    <Button.ContextMenu>
+                        <ContextMenu Background="#FF1A1A1A" BorderBrush="#FF363636" BorderThickness="1" Padding="0,4">
+                            <MenuItem Style="{StaticResource C4DMenuSectionHeader}" Header="SELECTION" />
+                            <MenuItem Style="{StaticResource C4DMenuCommand}" Header="Select All"
+                                      InputGestureText="Ctrl+A" Click="OnOutlinerSelectAll">
+                                <MenuItem.Icon><ui:SymbolIcon Symbol="SelectAllOn24" FontSize="14" /></MenuItem.Icon>
+                            </MenuItem>
+                            <MenuItem Style="{StaticResource C4DMenuCommand}" Header="Deselect All"
+                                      Click="OnOutlinerDeselectAll">
+                                <MenuItem.Icon><ui:SymbolIcon Symbol="SelectAllOff24" FontSize="14" /></MenuItem.Icon>
+                            </MenuItem>
+                            <Separator Style="{StaticResource C4DMenuSeparator}" />
+                            <MenuItem Style="{StaticResource C4DMenuSectionHeader}" Header="HIERARCHY" />
+                            <MenuItem Style="{StaticResource C4DMenuCommand}" Header="Unfold All"
+                                      Click="OnOutlinerExpandAll">
+                                <MenuItem.Icon><ui:SymbolIcon Symbol="ChevronDown24" FontSize="14" /></MenuItem.Icon>
+                            </MenuItem>
+                            <MenuItem Style="{StaticResource C4DMenuCommand}" Header="Fold All"
+                                      Click="OnOutlinerCollapseAll">
+                                <MenuItem.Icon><ui:SymbolIcon Symbol="ChevronUp24" FontSize="14" /></MenuItem.Icon>
+                            </MenuItem>
+                            <Separator Style="{StaticResource C4DMenuSeparator}" />
+                            <MenuItem Style="{StaticResource C4DMenuCommand}" Header="Copy Name"
+                                      Click="OnOutlinerCopyName">
+                                <MenuItem.Icon><ui:SymbolIcon Symbol="Copy24" FontSize="14" /></MenuItem.Icon>
+                            </MenuItem>
+                        </ContextMenu>
+                    </Button.ContextMenu>
                     <Button.Template>
                         <ControlTemplate TargetType="Button">
                             <Border x:Name="RigRow"
@@ -230,7 +259,49 @@
                             Tag="{Binding}"
                             Cursor="Hand"
                             Focusable="False"
-                            HorizontalContentAlignment="Stretch">
+                            HorizontalContentAlignment="Stretch"
+                            ContextMenuOpening="OnOutlinerContextMenuOpening">
+                        <Button.ContextMenu>
+                            <ContextMenu Background="#FF1A1A1A" BorderBrush="#FF363636" BorderThickness="1" Padding="0,4">
+                                <MenuItem Style="{StaticResource C4DMenuSectionHeader}" Header="SELECTION" />
+                                <MenuItem Style="{StaticResource C4DMenuCommand}" Header="Select Children"
+                                          Click="OnOutlinerSelectGroupChildren">
+                                    <MenuItem.Icon><ui:SymbolIcon Symbol="SelectObject24" FontSize="14" /></MenuItem.Icon>
+                                </MenuItem>
+                                <MenuItem Style="{StaticResource C4DMenuCommand}" Header="Select All"
+                                          InputGestureText="Ctrl+A" Click="OnOutlinerSelectAll">
+                                    <MenuItem.Icon><ui:SymbolIcon Symbol="SelectAllOn24" FontSize="14" /></MenuItem.Icon>
+                                </MenuItem>
+                                <MenuItem Style="{StaticResource C4DMenuCommand}" Header="Deselect All"
+                                          Click="OnOutlinerDeselectAll">
+                                    <MenuItem.Icon><ui:SymbolIcon Symbol="SelectAllOff24" FontSize="14" /></MenuItem.Icon>
+                                </MenuItem>
+                                <Separator Style="{StaticResource C4DMenuSeparator}" />
+                                <MenuItem Style="{StaticResource C4DMenuSectionHeader}" Header="HIERARCHY" />
+                                <MenuItem Style="{StaticResource C4DMenuCommand}" Header="Unfold"
+                                          Click="OnOutlinerExpandGroup">
+                                    <MenuItem.Icon><ui:SymbolIcon Symbol="ChevronDown24" FontSize="14" /></MenuItem.Icon>
+                                </MenuItem>
+                                <MenuItem Style="{StaticResource C4DMenuCommand}" Header="Fold"
+                                          Click="OnOutlinerCollapseGroup">
+                                    <MenuItem.Icon><ui:SymbolIcon Symbol="ChevronUp24" FontSize="14" /></MenuItem.Icon>
+                                </MenuItem>
+                                <MenuItem Style="{StaticResource C4DMenuCommand}" Header="Unfold All"
+                                          Click="OnOutlinerExpandAll" />
+                                <MenuItem Style="{StaticResource C4DMenuCommand}" Header="Fold All"
+                                          Click="OnOutlinerCollapseAll" />
+                                <Separator Style="{StaticResource C4DMenuSeparator}" />
+                                <MenuItem Style="{StaticResource C4DMenuCommand}" Header="Toggle Visibility"
+                                          Click="OnOutlinerToggleGroupVisibility">
+                                    <MenuItem.Icon><ui:SymbolIcon Symbol="Eye24" FontSize="14" /></MenuItem.Icon>
+                                </MenuItem>
+                                <Separator Style="{StaticResource C4DMenuSeparator}" />
+                                <MenuItem Style="{StaticResource C4DMenuCommand}" Header="Copy Name"
+                                          Click="OnOutlinerCopyName">
+                                    <MenuItem.Icon><ui:SymbolIcon Symbol="Copy24" FontSize="14" /></MenuItem.Icon>
+                                </MenuItem>
+                            </ContextMenu>
+                        </Button.ContextMenu>
                         <Button.Template>
                             <ControlTemplate TargetType="Button">
                                 <Border x:Name="Row"
@@ -305,7 +376,44 @@
                                     HorizontalContentAlignment="Stretch"
                                     Cursor="Hand"
                                     Focusable="False"
-                                    Visibility="{Binding IsHidden, Converter={StaticResource InverseBooleanToVisibility}}">
+                                    Visibility="{Binding IsHidden, Converter={StaticResource InverseBooleanToVisibility}}"
+                                    ContextMenuOpening="OnOutlinerContextMenuOpening">
+                                <Button.ContextMenu>
+                                    <ContextMenu Background="#FF1A1A1A" BorderBrush="#FF363636" BorderThickness="1" Padding="0,4">
+                                        <MenuItem Style="{StaticResource C4DMenuSectionHeader}" Header="SELECTION" />
+                                        <MenuItem Style="{StaticResource C4DMenuCommand}" Header="Select"
+                                                  Click="OnOutlinerSelectBone">
+                                            <MenuItem.Icon><ui:SymbolIcon Symbol="CursorClick24" FontSize="14" /></MenuItem.Icon>
+                                        </MenuItem>
+                                        <MenuItem Style="{StaticResource C4DMenuCommand}" Header="Select Children"
+                                                  Click="OnOutlinerSelectBoneChildren">
+                                            <MenuItem.Icon><ui:SymbolIcon Symbol="SelectObject24" FontSize="14" /></MenuItem.Icon>
+                                        </MenuItem>
+                                        <MenuItem Style="{StaticResource C4DMenuCommand}" Header="Select All"
+                                                  InputGestureText="Ctrl+A" Click="OnOutlinerSelectAll">
+                                            <MenuItem.Icon><ui:SymbolIcon Symbol="SelectAllOn24" FontSize="14" /></MenuItem.Icon>
+                                        </MenuItem>
+                                        <MenuItem Style="{StaticResource C4DMenuCommand}" Header="Deselect All"
+                                                  Click="OnOutlinerDeselectAll">
+                                            <MenuItem.Icon><ui:SymbolIcon Symbol="SelectAllOff24" FontSize="14" /></MenuItem.Icon>
+                                        </MenuItem>
+                                        <Separator Style="{StaticResource C4DMenuSeparator}" />
+                                        <MenuItem Style="{StaticResource C4DMenuSectionHeader}" Header="HIERARCHY" />
+                                        <MenuItem Style="{StaticResource C4DMenuCommand}" Header="Unfold All"
+                                                  Click="OnOutlinerExpandAll">
+                                            <MenuItem.Icon><ui:SymbolIcon Symbol="ChevronDown24" FontSize="14" /></MenuItem.Icon>
+                                        </MenuItem>
+                                        <MenuItem Style="{StaticResource C4DMenuCommand}" Header="Fold All"
+                                                  Click="OnOutlinerCollapseAll">
+                                            <MenuItem.Icon><ui:SymbolIcon Symbol="ChevronUp24" FontSize="14" /></MenuItem.Icon>
+                                        </MenuItem>
+                                        <Separator Style="{StaticResource C4DMenuSeparator}" />
+                                        <MenuItem Style="{StaticResource C4DMenuCommand}" Header="Copy Name"
+                                                  Click="OnOutlinerCopyName">
+                                            <MenuItem.Icon><ui:SymbolIcon Symbol="Copy24" FontSize="14" /></MenuItem.Icon>
+                                        </MenuItem>
+                                    </ContextMenu>
+                                </Button.ContextMenu>
                                 <Button.Template>
                                     <ControlTemplate TargetType="Button">
                                         <Border x:Name="Row"
@@ -383,40 +491,283 @@
 
     <Grid>
         <Grid.RowDefinitions>
-            <!-- Top toolbar: import / save / history actions, moved out
-                 of the sidebar so the sidebar stays poses + export only. -->
+            <!-- Document tabs — multiple open emotes. -->
+            <RowDefinition Height="Auto" />
+            <!-- Top toolbar: import / save / history actions. -->
             <RowDefinition Height="Auto" />
             <!-- Workspace (drag the splitter below to resize). -->
             <RowDefinition Height="*" MinHeight="120" />
             <!-- Horizontal splitter between workspace + timeline. -->
             <RowDefinition Height="4" />
-            <!-- Timeline pane — proportional so a short window doesn't
-                 clip the viewport; drag the splitter to grow/shrink. -->
+            <!-- Timeline pane. -->
             <RowDefinition Height="0.28*" MinHeight="120" />
         </Grid.RowDefinitions>
 
-        <!-- ─── Top toolbar ─── imports, save pose, undo/redo/mirror, settings. -->
+        <!-- ─── Emote document tabs (moved to MainWindow chrome) ─── -->
         <Border Grid.Row="0"
+                Visibility="Collapsed"
+                Height="0">
+            <ScrollViewer HorizontalScrollBarVisibility="Disabled"
+                          VerticalScrollBarVisibility="Disabled"
+                          Height="0">
+                <StackPanel Orientation="Horizontal">
+                    <ItemsControl ItemsSource="{Binding EmoteDocs.Documents}">
+                        <ItemsControl.ItemsPanel>
+                            <ItemsPanelTemplate>
+                                <StackPanel Orientation="Horizontal" />
+                            </ItemsPanelTemplate>
+                        </ItemsControl.ItemsPanel>
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate DataType="{x:Type vm:EmoteDocument}">
+                                <Border MinWidth="96" MaxWidth="200" Height="28"
+                                        Margin="0,3,2,0"
+                                        CornerRadius="4,4,0,0"
+                                        Cursor="Hand"
+                                        MouseLeftButtonUp="OnEmoteTabClick"
+                                        ToolTip="{Binding DisplayTitle}">
+                                    <DockPanel Margin="10,0,4,0">
+                                        <ui:Button DockPanel.Dock="Right"
+                                                   Appearance="Transparent"
+                                                   Width="22" Height="22"
+                                                   Padding="0"
+                                                   VerticalAlignment="Center"
+                                                   Click="OnCloseEmoteTab"
+                                                   ToolTip="Close tab">
+                                            <ui:Button.Icon>
+                                                <ui:SymbolIcon Symbol="Dismiss16" FontSize="10" Opacity="0.7" />
+                                            </ui:Button.Icon>
+                                        </ui:Button>
+                                        <TextBlock Text="{Binding DisplayTitle}"
+                                                   FontSize="12"
+                                                   VerticalAlignment="Center"
+                                                   TextTrimming="CharacterEllipsis"
+                                                   Foreground="{DynamicResource TextFillColorPrimaryBrush}" />
+                                    </DockPanel>
+                                </Border>
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                    <ui:Button Appearance="Transparent"
+                               Width="28" Height="28"
+                               Padding="0"
+                               Margin="2,3,4,0"
+                               VerticalAlignment="Center"
+                               Click="OnNewEmoteTab"
+                               ToolTip="New emote tab">
+                        <ui:Button.Icon>
+                            <ui:SymbolIcon Symbol="Add24" FontSize="14" />
+                        </ui:Button.Icon>
+                    </ui:Button>
+                </StackPanel>
+            </ScrollViewer>
+        </Border>
+
+        <!-- ─── Empty-tab toolbar (no rig yet) ─── -->
+        <Border Grid.Row="1"
+                Background="{DynamicResource ControlFillColorDefaultBrush}"
+                BorderThickness="0,0,0,1"
+                BorderBrush="{DynamicResource ControlElevationBorderBrush}"
+                Visibility="{Binding HasRig, Converter={StaticResource InverseBooleanToVisibility}}">
+            <StackPanel Orientation="Horizontal" Margin="10,6">
+                <ui:Button Click="OnOpenRiggedModel"
+                           Appearance="Primary"
+                           Padding="10,5"
+                           ToolTip="Load a rigged .glb / .fbx">
+                    <StackPanel Orientation="Horizontal">
+                        <ui:SymbolIcon Symbol="FolderOpen24" FontSize="13" Margin="0,0,6,0" />
+                        <TextBlock Text="Open Rig…" FontSize="11" FontWeight="SemiBold" />
+                    </StackPanel>
+                </ui:Button>
+                <ui:Button Click="OnLoadGtaMale"
+                           Appearance="Secondary"
+                           Padding="10,5"
+                           Margin="6,0,0,0"
+                           ToolTip="Synthetic GTA male freemode skeleton">
+                    <TextBlock Text="GTA Male" FontSize="11" />
+                </ui:Button>
+                <ui:Button Click="OnLoadGtaFemale"
+                           Appearance="Secondary"
+                           Padding="10,5"
+                           Margin="6,0,0,0"
+                           ToolTip="Synthetic GTA female freemode skeleton">
+                    <TextBlock Text="GTA Female" FontSize="11" />
+                </ui:Button>
+                <ui:Button Click="OnVideoToEmote"
+                           Appearance="Secondary"
+                           Padding="10,5"
+                           Margin="6,0,0,0"
+                           Visibility="{Binding MotionFeatureEnabled, Converter={StaticResource BooleanToVisibility}}"
+                           ToolTip="Video → Emote (Motion)">
+                    <StackPanel Orientation="Horizontal">
+                        <ui:SymbolIcon Symbol="Video24" FontSize="13" Margin="0,0,6,0" />
+                        <TextBlock Text="Video" FontSize="11" />
+                    </StackPanel>
+                </ui:Button>
+                <TextBlock Text="New emote — open a rig or GTA skeleton to start"
+                           FontSize="11"
+                           Opacity="0.55"
+                           VerticalAlignment="Center"
+                           Margin="14,0,0,0" />
+            </StackPanel>
+        </Border>
+
+        <!-- ─── Top toolbar ─── imports, save pose, undo/redo/mirror, settings. -->
+        <Border Grid.Row="1"
                 Background="{DynamicResource ControlFillColorDefaultBrush}"
                 BorderThickness="0,0,0,1"
                 BorderBrush="{DynamicResource ControlElevationBorderBrush}"
                 Visibility="{Binding HasRig, Converter={StaticResource BooleanToVisibility}}">
-            <!-- Horizontal scroll so toolbar actions never clip on a narrow window. -->
-            <ScrollViewer HorizontalScrollBarVisibility="Auto"
-                          VerticalScrollBarVisibility="Disabled"
-                          Padding="0">
-            <DockPanel Margin="10,6" LastChildFill="False" MinWidth="640">
-                <!-- Motion account / credits UI now lives in the Motion hub panel. -->
-                <ComboBox DockPanel.Dock="Right"
-                          SelectedIndex="{Binding MovementIndex, Mode=TwoWay}"
-                          MinWidth="190"
-                          VerticalAlignment="Center"
-                          ToolTip="How the emote coexists with player movement. Imported / library clips default to root motion so the ped travels. Static poses export as in-place.">
-                    <ComboBoxItem Content="In place (full body)" ToolTip="Whole body plays; player locked in place. Use for static poses / dances that shouldn't travel. (flag 1 looping, 2 one-shot)" />
-                    <ComboBoxItem Content="Upper body (can move)" ToolTip="Only the upper body animates; legs keep walking/idling, so the player can move. Waves, salutes, gestures. This is dpemotes' 'EmoteMoving'. (flag 49 looping, 50 one-shot)" />
-                    <ComboBoxItem Content="Root motion (ped travels)" ToolTip="Full body + mover extraction — the ped physically walks along the clip's SKEL_ROOT path. Default for imported animations. Needs fxresource export for FiveM." />
-                </ComboBox>
-                <StackPanel Orientation="Horizontal" DockPanel.Dock="Left">
+            <!-- Right side (Travel / Plant / Movement) stays pinned; left actions scroll. -->
+            <DockPanel Margin="10,6">
+                <StackPanel DockPanel.Dock="Right"
+                            Orientation="Horizontal"
+                            VerticalAlignment="Center"
+                            Margin="8,0,0,0">
+                    <ToggleButton x:Name="TravelFlyoutBtn"
+                                  Padding="10,5"
+                                  Margin="0,0,6,0"
+                                  IsEnabled="{Binding RootMotionScaleEnabled}"
+                                  ToolTip="Travel amount — how far the ped walks along the clip's mover. Dial down when forward/back/strafe looks exaggerated vs the source. Requires Root motion.">
+                        <StackPanel Orientation="Horizontal">
+                            <ui:SymbolIcon Symbol="ArrowSwap24" FontSize="13" Margin="0,0,6,0" />
+                            <TextBlock Text="Travel" FontSize="11" />
+                            <ui:SymbolIcon Symbol="ChevronDown12" FontSize="9" Margin="5,1,0,0" Opacity="0.6" />
+                        </StackPanel>
+                    </ToggleButton>
+                    <Popup IsOpen="{Binding IsChecked, ElementName=TravelFlyoutBtn, Mode=TwoWay}"
+                           PlacementTarget="{Binding ElementName=TravelFlyoutBtn}"
+                           Placement="Bottom"
+                           AllowsTransparency="True"
+                           StaysOpen="False"
+                           PopupAnimation="Fade">
+                        <Border Background="{DynamicResource ApplicationBackgroundBrush}"
+                                BorderBrush="{DynamicResource ControlElevationBorderBrush}"
+                                BorderThickness="1"
+                                CornerRadius="8"
+                                Padding="14,12"
+                                Width="280"
+                                Margin="0,4,0,0">
+                            <StackPanel>
+                                <TextBlock Text="Root travel amount"
+                                           FontSize="11"
+                                           FontWeight="SemiBold"
+                                           Margin="0,0,0,6"
+                                           ToolTip="Scales forward / back / left / right travel only. Hop and crouch height stay full strength." />
+                                <Grid Margin="0,0,0,2">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="Auto" />
+                                    </Grid.ColumnDefinitions>
+                                    <TextBlock Grid.Column="0" Text="Sensitivity" FontSize="11" VerticalAlignment="Center" />
+                                    <TextBlock Grid.Column="1" FontFamily="Consolas" FontSize="10" VerticalAlignment="Center"
+                                               Foreground="{DynamicResource TextFillColorSecondaryBrush}">
+                                        <Run Text="{Binding RootMotionScale, StringFormat={}{0:P0}, Mode=OneWay}" />
+                                    </TextBlock>
+                                </Grid>
+                                <Slider Minimum="0.1" Maximum="2.0" SmallChange="0.05" LargeChange="0.1"
+                                        TickFrequency="0.1"
+                                        Value="{Binding RootMotionScale, Mode=TwoWay}"
+                                        IsEnabled="{Binding RootMotionScaleEnabled}"
+                                        Margin="0,2,0,0"
+                                        ToolTip="100% = full imported mover. Lower if the ped overshoots vs the source." />
+                                <Grid Margin="0,2,0,0">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="*" />
+                                    </Grid.ColumnDefinitions>
+                                    <TextBlock Grid.Column="0" Text="subtle" FontSize="9" Opacity="0.5" />
+                                    <TextBlock Grid.Column="1" Text="100%" FontSize="9" Opacity="0.5" HorizontalAlignment="Center" />
+                                    <TextBlock Grid.Column="2" Text="exaggerated" FontSize="9" Opacity="0.5" HorizontalAlignment="Right" />
+                                </Grid>
+                            </StackPanel>
+                        </Border>
+                    </Popup>
+                    <ToggleButton x:Name="PlantFlyoutBtn"
+                                  Padding="10,5"
+                                  Margin="0,0,6,0"
+                                  IsEnabled="{Binding FootPlantControlsEnabled}"
+                                  ToolTip="Foot plant — soft-pins planted feet so they don't skate with root travel. Dial down or turn off if ankles look collapsed. Requires Root motion.">
+                        <StackPanel Orientation="Horizontal">
+                            <ui:SymbolIcon Symbol="PersonWalking24" FontSize="13" Margin="0,0,6,0" />
+                            <TextBlock Text="Plant" FontSize="11" />
+                            <ui:SymbolIcon Symbol="ChevronDown12" FontSize="9" Margin="5,1,0,0" Opacity="0.6" />
+                        </StackPanel>
+                    </ToggleButton>
+                    <Popup IsOpen="{Binding IsChecked, ElementName=PlantFlyoutBtn, Mode=TwoWay}"
+                           PlacementTarget="{Binding ElementName=PlantFlyoutBtn}"
+                           Placement="Bottom"
+                           AllowsTransparency="True"
+                           StaysOpen="False"
+                           PopupAnimation="Fade">
+                        <Border Background="{DynamicResource ApplicationBackgroundBrush}"
+                                BorderBrush="{DynamicResource ControlElevationBorderBrush}"
+                                BorderThickness="1"
+                                CornerRadius="8"
+                                Padding="14,12"
+                                Width="280"
+                                Margin="0,4,0,0">
+                            <StackPanel>
+                                <TextBlock Text="Foot plant / anti-skate"
+                                           FontSize="11"
+                                           FontWeight="SemiBold"
+                                           Margin="0,0,0,6"
+                                           ToolTip="Keeps planted feet glued in world XZ while the hips travel." />
+                                <Grid Margin="0,0,0,8">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="Auto" />
+                                    </Grid.ColumnDefinitions>
+                                    <TextBlock Grid.Column="0" Text="Enabled" FontSize="11" VerticalAlignment="Center" />
+                                    <ui:ToggleSwitch Grid.Column="1"
+                                                     IsChecked="{Binding FootPlantEnabled, Mode=TwoWay}"
+                                                     IsEnabled="{Binding FootPlantControlsEnabled}"
+                                                     ToolTip="Off = raw retarget feet (may skate). On = soft world-XZ plant." />
+                                </Grid>
+                                <Grid Margin="0,0,0,2">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="Auto" />
+                                    </Grid.ColumnDefinitions>
+                                    <TextBlock Grid.Column="0" Text="Intensity" FontSize="11" VerticalAlignment="Center" />
+                                    <TextBlock Grid.Column="1" FontFamily="Consolas" FontSize="10" VerticalAlignment="Center"
+                                               Foreground="{DynamicResource TextFillColorSecondaryBrush}">
+                                        <Run Text="{Binding FootPlantIntensity, StringFormat={}{0:P0}, Mode=OneWay}" />
+                                    </TextBlock>
+                                </Grid>
+                                <Slider Minimum="0" Maximum="1.0" SmallChange="0.05" LargeChange="0.1"
+                                        TickFrequency="0.05"
+                                        Value="{Binding FootPlantIntensity, Mode=TwoWay}"
+                                        IsEnabled="{Binding FootPlantEnabled}"
+                                        Margin="0,2,0,0"
+                                        ToolTip="How hard planted feet are pulled back to their lock. Lower if ankles pinch or shins bow." />
+                                <Grid Margin="0,2,0,0">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="*" />
+                                    </Grid.ColumnDefinitions>
+                                    <TextBlock Grid.Column="0" Text="off" FontSize="9" Opacity="0.5" />
+                                    <TextBlock Grid.Column="1" Text="gentle" FontSize="9" Opacity="0.5" HorizontalAlignment="Center" />
+                                    <TextBlock Grid.Column="2" Text="full" FontSize="9" Opacity="0.5" HorizontalAlignment="Right" />
+                                </Grid>
+                            </StackPanel>
+                        </Border>
+                    </Popup>
+                    <ComboBox x:Name="MovementCombo"
+                              SelectedIndex="{Binding MovementIndex, Mode=TwoWay}"
+                              MinWidth="190"
+                              VerticalAlignment="Center"
+                              ToolTip="How the emote coexists with player movement. Imported / library clips default to root motion so the ped travels. Static poses export as in-place.">
+                        <ComboBoxItem Content="In place (full body)" ToolTip="Whole body plays; player locked in place. Use for static poses / dances that shouldn't travel. (flag 1 looping, 2 one-shot)" />
+                        <ComboBoxItem Content="Upper body (can move)" ToolTip="Only the upper body animates; legs keep walking/idling, so the player can move. Waves, salutes, gestures. This is dpemotes' 'EmoteMoving'. (flag 49 looping, 50 one-shot)" />
+                        <ComboBoxItem Content="Root motion (ped travels)" ToolTip="Full body + mover extraction — the ped physically walks along the clip's SKEL_ROOT path. Default for imported animations. Needs fxresource export for FiveM." />
+                    </ComboBox>
+                </StackPanel>
+                <ScrollViewer HorizontalScrollBarVisibility="Auto"
+                              VerticalScrollBarVisibility="Disabled"
+                              Padding="0">
+                <StackPanel Orientation="Horizontal">
                 <!-- Primary actions — ONE home: the toolbar (sidebar retired 2026-07-16). -->
                 <ui:Button Click="OnImportAnimation"
                            Appearance="Primary"
@@ -457,28 +808,6 @@
                     <StackPanel Orientation="Horizontal">
                         <ui:SymbolIcon Symbol="Save24" FontSize="13" Margin="0,0,6,0" />
                         <TextBlock Text="Export" FontSize="11" FontWeight="SemiBold" />
-                    </StackPanel>
-                </ui:Button>
-                <Border Width="1" Margin="10,2" Background="{DynamicResource ControlElevationBorderBrush}" />
-                <ui:Button Click="OnUndoPose"
-                           Appearance="Secondary"
-                           Padding="10,5"
-                           IsEnabled="{Binding CanUndo}"
-                           ToolTip="Undo the most recent pose edit (Ctrl+Z).">
-                    <StackPanel Orientation="Horizontal">
-                        <ui:SymbolIcon Symbol="ArrowUndo24" FontSize="13" Margin="0,0,6,0" />
-                        <TextBlock Text="Undo" FontSize="11" />
-                    </StackPanel>
-                </ui:Button>
-                <ui:Button Click="OnRedoPose"
-                           Appearance="Secondary"
-                           Padding="10,5"
-                           Margin="6,0,0,0"
-                           IsEnabled="{Binding CanRedo}"
-                           ToolTip="Redo the most recently undone pose edit (Ctrl+Y).">
-                    <StackPanel Orientation="Horizontal">
-                        <ui:SymbolIcon Symbol="ArrowRedo24" FontSize="13" Margin="0,0,6,0" />
-                        <TextBlock Text="Redo" FontSize="11" />
                     </StackPanel>
                 </ui:Button>
                 <ui:Button Click="OnMirrorPose"
@@ -700,11 +1029,11 @@
                     </Border>
                 </Popup>
                 </StackPanel>
+                </ScrollViewer>
             </DockPanel>
-            </ScrollViewer>
         </Border>
 
-        <GridSplitter Grid.Row="2"
+        <GridSplitter Grid.Row="3"
                       HorizontalAlignment="Stretch"
                       VerticalAlignment="Stretch"
                       Background="{DynamicResource ControlElevationBorderBrush}"
@@ -713,7 +1042,7 @@
                       Visibility="{Binding HasRig, Converter={StaticResource BooleanToVisibility}}"
                       Cursor="SizeNS" />
 
-        <Grid Grid.Row="1">
+        <Grid Grid.Row="2">
             <Grid.ColumnDefinitions>
                 <!-- Viewport — the star of the page. -->
                 <ColumnDefinition Width="*" MinWidth="160" />
@@ -734,7 +1063,7 @@
                     <Button Click="OnSidebarTabOutliner" Cursor="Hand" Focusable="False" Margin="0,0,0,3">
                         <Button.Template>
                             <ControlTemplate TargetType="Button">
-                                <Border x:Name="Tb" Background="#FF2E2E2E" CornerRadius="4,0,0,4" Padding="4,14">
+                                <Border x:Name="Tb" Background="#FF363636" CornerRadius="4,0,0,4" Padding="4,14">
                                     <TextBlock Text="Outliner" FontSize="11" FontWeight="SemiBold" Foreground="#FFC8C8C8"
                                                HorizontalAlignment="Center">
                                         <TextBlock.LayoutTransform>
@@ -756,7 +1085,7 @@
                     <Button Click="OnSidebarTabEmotes" Cursor="Hand" Focusable="False" Margin="0,0,0,3">
                         <Button.Template>
                             <ControlTemplate TargetType="Button">
-                                <Border x:Name="Tb" Background="#FF2E2E2E" CornerRadius="4,0,0,4" Padding="4,14">
+                                <Border x:Name="Tb" Background="#FF363636" CornerRadius="4,0,0,4" Padding="4,14">
                                     <TextBlock Text="Animation Library" FontSize="11" FontWeight="SemiBold" Foreground="#FFC8C8C8"
                                                HorizontalAlignment="Center">
                                         <TextBlock.LayoutTransform>
@@ -782,7 +1111,7 @@
                             Visibility="{Binding MotionFeatureEnabled, Converter={StaticResource BooleanToVisibility}}">
                         <Button.Template>
                             <ControlTemplate TargetType="Button">
-                                <Border x:Name="Tb" Background="#FF2E2E2E" CornerRadius="4,0,0,4" Padding="4,14">
+                                <Border x:Name="Tb" Background="#FF363636" CornerRadius="4,0,0,4" Padding="4,14">
                                     <TextBlock Text="Motion" FontSize="11" FontWeight="SemiBold" Foreground="#FFC8C8C8"
                                                HorizontalAlignment="Center">
                                         <TextBlock.LayoutTransform>
@@ -959,7 +1288,32 @@
                             <ScrollViewer Grid.Row="2"
                                           VerticalScrollBarVisibility="Auto"
                                           HorizontalScrollBarVisibility="Disabled"
-                                          Background="{DynamicResource ControlFillColorDefaultBrush}">
+                                          Background="{DynamicResource ControlFillColorDefaultBrush}"
+                                          Focusable="True"
+                                          PreviewKeyDown="OnOutlinerPreviewKeyDown">
+                                <ScrollViewer.ContextMenu>
+                                    <ContextMenu Background="#FF1A1A1A" BorderBrush="#FF363636" BorderThickness="1" Padding="0,4">
+                                        <MenuItem Style="{StaticResource C4DMenuSectionHeader}" Header="SELECTION" />
+                                        <MenuItem Style="{StaticResource C4DMenuCommand}" Header="Select All"
+                                                  InputGestureText="Ctrl+A" Click="OnOutlinerSelectAll">
+                                            <MenuItem.Icon><ui:SymbolIcon Symbol="SelectAllOn24" FontSize="14" /></MenuItem.Icon>
+                                        </MenuItem>
+                                        <MenuItem Style="{StaticResource C4DMenuCommand}" Header="Deselect All"
+                                                  Click="OnOutlinerDeselectAll">
+                                            <MenuItem.Icon><ui:SymbolIcon Symbol="SelectAllOff24" FontSize="14" /></MenuItem.Icon>
+                                        </MenuItem>
+                                        <Separator Style="{StaticResource C4DMenuSeparator}" />
+                                        <MenuItem Style="{StaticResource C4DMenuSectionHeader}" Header="HIERARCHY" />
+                                        <MenuItem Style="{StaticResource C4DMenuCommand}" Header="Unfold All"
+                                                  Click="OnOutlinerExpandAll">
+                                            <MenuItem.Icon><ui:SymbolIcon Symbol="ChevronDown24" FontSize="14" /></MenuItem.Icon>
+                                        </MenuItem>
+                                        <MenuItem Style="{StaticResource C4DMenuCommand}" Header="Fold All"
+                                                  Click="OnOutlinerCollapseAll">
+                                            <MenuItem.Icon><ui:SymbolIcon Symbol="ChevronUp24" FontSize="14" /></MenuItem.Icon>
+                                        </MenuItem>
+                                    </ContextMenu>
+                                </ScrollViewer.ContextMenu>
                                 <ItemsControl x:Name="BoneGroupsTree"
                                               ItemsSource="{Binding Rigs}"
                                               ItemTemplate="{StaticResource PoseRigTemplate}" />
@@ -1231,7 +1585,7 @@
                             </Border>
                             <ControlTemplate.Triggers>
                                 <Trigger Property="IsMouseOver" Value="True">
-                                    <Setter TargetName="Grip" Property="Background" Value="#FF4A4A4A" />
+                                    <Setter TargetName="Grip" Property="Background" Value="#FF4D4D4D" />
                                 </Trigger>
                                 <Trigger Property="IsDragging" Value="True">
                                     <Setter TargetName="Grip" Property="Background" Value="{DynamicResource AccentFillColorDefaultBrush}" />
@@ -1698,11 +2052,11 @@
 
         </Grid>
 
-        <!-- ─── Timeline (Cascadeur-style clip editor) ─── -->
-        <Border Grid.Row="3"
-                Background="#FF181818"
+        <!-- ─── Timeline (C4D Dark transport + Keys/Clips) ─── -->
+        <Border Grid.Row="4"
+                Background="#FF1F1F1F"
                 BorderThickness="0,1,0,0"
-                BorderBrush="#FF454545"
+                BorderBrush="#FF363636"
                 Visibility="{Binding HasRig, Converter={StaticResource BooleanToVisibility}}">
             <Grid>
                 <Grid.RowDefinitions>
@@ -1711,35 +2065,28 @@
                     <RowDefinition Height="30" />
                 </Grid.RowDefinitions>
 
-                <!-- ── Toolbar: essentials + overflow menu ── -->
+                <!-- ── Toolbar: C4D-style transport ── -->
                 <Border Grid.Row="0"
-                        Background="#FF252526"
-                        BorderBrush="#FF454545"
+                        Background="#FF2B2B2B"
+                        BorderBrush="#FF363636"
                         BorderThickness="0,0,0,1">
-                    <Grid Margin="8,0">
-                        <Grid.ColumnDefinitions>
-                            <ColumnDefinition Width="*" />
-                            <ColumnDefinition Width="Auto" />
-                        </Grid.ColumnDefinitions>
-
-                        <!-- Left: mode + edit essentials -->
-                        <StackPanel Grid.Column="0"
-                                    Orientation="Horizontal"
-                                    HorizontalAlignment="Left"
-                                    VerticalAlignment="Center">
-                            <StackPanel.Resources>
-                                <!-- Compact dark numeric field for the Frame/Start/End boxes. -->
+                    <!-- Transport stays geometrically centered; side gutters overlay.
+                         Inner MinWidth = bar width so Center alignment tracks resize;
+                         when content is wider than the bar, the ScrollViewer pans. -->
+                    <Grid x:Name="TransportBarGrid" Margin="4,0" ClipToBounds="True">
+                        <Grid.Resources>
+                                <!-- C4D Dark frame field (COLOR_BGGADGET / COLOR_TEXT_EDIT). -->
                                 <Style x:Key="FrameNumBox" TargetType="TextBox">
-                                    <Setter Property="Background" Value="#FF2B2B2B" />
-                                    <Setter Property="Foreground" Value="#FFECECEC" />
-                                    <Setter Property="CaretBrush" Value="#FFECECEC" />
-                                    <Setter Property="SelectionBrush" Value="#FF3A6EA5" />
-                                    <Setter Property="BorderBrush" Value="#FF4A4A4A" />
-                                    <Setter Property="BorderThickness" Value="1" />
-                                    <Setter Property="FontFamily" Value="Consolas" />
+                                    <Setter Property="Background" Value="#FF4D4D4D" />
+                                    <Setter Property="Foreground" Value="#FFCCCCCC" />
+                                    <Setter Property="CaretBrush" Value="#FFCCCCCC" />
+                                    <Setter Property="SelectionBrush" Value="{DynamicResource SystemAccentColorBrush}" />
+                                    <Setter Property="BorderBrush" Value="#FF363636" />
+                                    <Setter Property="BorderThickness" Value="0" />
+                                    <Setter Property="FontFamily" Value="Segoe UI" />
                                     <Setter Property="FontSize" Value="12" />
                                     <Setter Property="Height" Value="24" />
-                                    <Setter Property="Padding" Value="4,0" />
+                                    <Setter Property="Padding" Value="8,0" />
                                     <Setter Property="VerticalContentAlignment" Value="Center" />
                                     <Setter Property="TextAlignment" Value="Center" />
                                     <Setter Property="Template">
@@ -1749,7 +2096,7 @@
                                                         Background="{TemplateBinding Background}"
                                                         BorderBrush="{TemplateBinding BorderBrush}"
                                                         BorderThickness="{TemplateBinding BorderThickness}"
-                                                        CornerRadius="4">
+                                                        CornerRadius="3">
                                                     <ScrollViewer x:Name="PART_ContentHost"
                                                                   Margin="{TemplateBinding Padding}"
                                                                   VerticalAlignment="Center"
@@ -1757,134 +2104,515 @@
                                                                   HorizontalScrollBarVisibility="Hidden"
                                                                   VerticalScrollBarVisibility="Hidden" />
                                                 </Border>
+                                            </ControlTemplate>
+                                        </Setter.Value>
+                                    </Setter>
+                                </Style>
+                                <!-- Inline number inside the Start/End segmented group. -->
+                                <Style x:Key="FrameRangeInlineBox" TargetType="TextBox">
+                                    <Setter Property="Background" Value="Transparent" />
+                                    <Setter Property="Foreground" Value="#FFCCCCCC" />
+                                    <Setter Property="CaretBrush" Value="#FFCCCCCC" />
+                                    <Setter Property="SelectionBrush" Value="{DynamicResource SystemAccentColorBrush}" />
+                                    <Setter Property="BorderThickness" Value="0" />
+                                    <Setter Property="FontFamily" Value="Segoe UI" />
+                                    <Setter Property="FontSize" Value="12" />
+                                    <Setter Property="Height" Value="22" />
+                                    <Setter Property="Padding" Value="6,0,2,0" />
+                                    <Setter Property="VerticalContentAlignment" Value="Center" />
+                                    <Setter Property="TextAlignment" Value="Right" />
+                                    <Setter Property="Template">
+                                        <Setter.Value>
+                                            <ControlTemplate TargetType="TextBox">
+                                                <Border Background="{TemplateBinding Background}">
+                                                    <ScrollViewer x:Name="PART_ContentHost"
+                                                                  Margin="{TemplateBinding Padding}"
+                                                                  VerticalAlignment="Center"
+                                                                  Focusable="False"
+                                                                  HorizontalScrollBarVisibility="Hidden"
+                                                                  VerticalScrollBarVisibility="Hidden" />
+                                                </Border>
+                                            </ControlTemplate>
+                                        </Setter.Value>
+                                    </Setter>
+                                </Style>
+                                <!-- C4D palette buttons (COLOR_BG_PALETTE / COLOR_ICONS_BG_ACTIVE). -->
+                                <Style x:Key="TransportBtn" TargetType="Button">
+                                    <Setter Property="Width" Value="26" />
+                                    <Setter Property="Height" Value="24" />
+                                    <Setter Property="Padding" Value="0" />
+                                    <Setter Property="Margin" Value="1,0" />
+                                    <Setter Property="Background" Value="#FF3D3D3D" />
+                                    <Setter Property="BorderThickness" Value="0" />
+                                    <Setter Property="Foreground" Value="#FFBFBFBF" />
+                                    <Setter Property="Cursor" Value="Hand" />
+                                    <Setter Property="Focusable" Value="False" />
+                                    <Setter Property="Template">
+                                        <Setter.Value>
+                                            <ControlTemplate TargetType="Button">
+                                                <Border x:Name="bd"
+                                                        Background="{TemplateBinding Background}"
+                                                        CornerRadius="2"
+                                                        SnapsToDevicePixels="True">
+                                                    <ContentPresenter HorizontalAlignment="Center"
+                                                                      VerticalAlignment="Center" />
+                                                </Border>
                                                 <ControlTemplate.Triggers>
                                                     <Trigger Property="IsMouseOver" Value="True">
-                                                        <Setter TargetName="bd" Property="BorderBrush" Value="#FF5E5E5E" />
+                                                        <Setter TargetName="bd" Property="Background" Value="#FF4D4D4D" />
                                                     </Trigger>
-                                                    <Trigger Property="IsKeyboardFocused" Value="True">
-                                                        <Setter TargetName="bd" Property="BorderBrush" Value="#FF60CDFF" />
+                                                    <Trigger Property="IsPressed" Value="True">
+                                                        <Setter TargetName="bd" Property="Background" Value="{DynamicResource SystemAccentColorBrush}" />
                                                     </Trigger>
                                                 </ControlTemplate.Triggers>
                                             </ControlTemplate>
                                         </Setter.Value>
                                     </Setter>
                                 </Style>
-                            </StackPanel.Resources>
-                            <!-- Transport — timeline header, standard 3D layout (was in the sidebar). -->
-                            <ui:Button Click="OnAddKeyframe" Appearance="Secondary" Padding="7,4" Margin="0,0,4,0" ToolTip="Set keyframe (K)">
-                                <ui:SymbolIcon Symbol="Record28" FontSize="12" Foreground="#4A9EFF" />
-                            </ui:Button>
-                            <ui:Button Click="OnTimelinePrevFrame" Appearance="Secondary" Padding="7,4" Margin="0,0,2,0" ToolTip="Previous frame (,)">
-                                <ui:SymbolIcon Symbol="ChevronLeft24" FontSize="12" />
-                            </ui:Button>
-                            <ui:Button Click="OnTimelinePlayPause" Appearance="Primary" Padding="9,4" Margin="0,0,2,0" ToolTip="Play / pause (Space)">
-                                <ui:SymbolIcon x:Name="PlayIcon" Symbol="Play24" FontSize="12" />
-                            </ui:Button>
-                            <ui:Button Click="OnTimelineNextFrame" Appearance="Secondary" Padding="7,4" Margin="0,0,8,0" ToolTip="Next frame (.)">
-                                <ui:SymbolIcon Symbol="ChevronRight24" FontSize="12" />
-                            </ui:Button>
-                            <TextBlock Text="{Binding TimelineTimecodeLabel}"
-                                       FontFamily="Consolas" FontSize="12" Foreground="#60CDFF"
-                                       VerticalAlignment="Center" Margin="0,0,10,0" />
-                            <Border Width="1" Height="18" Background="#FF454545" Margin="0,0,8,0" />
-                            <!-- AE-style transport fields (1:1 reference, 2026-07-17):
-                                 Frame seek + Start/End range + Trim + fps readout. -->
-                            <TextBlock Text="Frame" FontSize="10" Foreground="#9A9A9A" VerticalAlignment="Center" Margin="0,0,4,0" />
+                                <Style x:Key="TransportToggle" TargetType="ToggleButton">
+                                    <Setter Property="Width" Value="26" />
+                                    <Setter Property="Height" Value="24" />
+                                    <Setter Property="Padding" Value="0" />
+                                    <Setter Property="Margin" Value="1,0" />
+                                    <Setter Property="Background" Value="#FF3D3D3D" />
+                                    <Setter Property="BorderThickness" Value="0" />
+                                    <Setter Property="Foreground" Value="#FFBFBFBF" />
+                                    <Setter Property="Cursor" Value="Hand" />
+                                    <Setter Property="Focusable" Value="False" />
+                                    <Setter Property="Template">
+                                        <Setter.Value>
+                                            <ControlTemplate TargetType="ToggleButton">
+                                                <Border x:Name="bd"
+                                                        Background="{TemplateBinding Background}"
+                                                        CornerRadius="2"
+                                                        SnapsToDevicePixels="True">
+                                                    <ContentPresenter HorizontalAlignment="Center"
+                                                                      VerticalAlignment="Center" />
+                                                </Border>
+                                                <ControlTemplate.Triggers>
+                                                    <Trigger Property="IsMouseOver" Value="True">
+                                                        <Setter TargetName="bd" Property="Background" Value="#FF4D4D4D" />
+                                                    </Trigger>
+                                                    <Trigger Property="IsChecked" Value="True">
+                                                        <Setter TargetName="bd" Property="Background" Value="{DynamicResource SystemAccentColorBrush}" />
+                                                    </Trigger>
+                                                    <MultiTrigger>
+                                                        <MultiTrigger.Conditions>
+                                                            <Condition Property="IsChecked" Value="True" />
+                                                            <Condition Property="IsMouseOver" Value="True" />
+                                                        </MultiTrigger.Conditions>
+                                                        <Setter TargetName="bd" Property="Background" Value="{DynamicResource SystemAccentColorPrimaryBrush}" />
+                                                    </MultiTrigger>
+                                                </ControlTemplate.Triggers>
+                                            </ControlTemplate>
+                                        </Setter.Value>
+                                    </Setter>
+                                </Style>
+                                <Style x:Key="TransportIcon" TargetType="Path">
+                                    <Setter Property="Fill" Value="#FFBFBFBF" />
+                                    <Setter Property="Stretch" Value="Uniform" />
+                                    <Setter Property="Width" Value="14" />
+                                    <Setter Property="Height" Value="12" />
+                                    <Setter Property="SnapsToDevicePixels" Value="True" />
+                                </Style>
+                        </Grid.Resources>
+
+                        <ScrollViewer x:Name="TransportScroll"
+                                      VerticalScrollBarVisibility="Disabled"
+                                      HorizontalScrollBarVisibility="Auto"
+                                      VerticalAlignment="Center"
+                                      Focusable="False"
+                                      Padding="0">
+                            <ScrollViewer.Resources>
+                                <Style TargetType="ScrollBar">
+                                    <Setter Property="Height" Value="0" />
+                                    <Setter Property="Width" Value="0" />
+                                    <Setter Property="Opacity" Value="0" />
+                                </Style>
+                            </ScrollViewer.Resources>
+                            <Grid MinWidth="{Binding ActualWidth, ElementName=TransportBarGrid}">
+                                <StackPanel Orientation="Horizontal"
+                                            HorizontalAlignment="Center"
+                                            VerticalAlignment="Center">
+
+                            <!-- Playback -->
+                            <Button Style="{StaticResource TransportBtn}"
+                                    Click="OnTimelineGoToStart"
+                                    ToolTip="Jump to start (Home)">
+                                <!-- |◀ -->
+                                <Path Style="{StaticResource TransportIcon}"
+                                      Data="M2,2 L2,10 L3.2,10 L3.2,2 Z M12,2 L4.2,6 L12,10 Z" />
+                            </Button>
+                            <Button Style="{StaticResource TransportBtn}"
+                                    Click="OnTimelinePrevKeyframe"
+                                    ToolTip="Previous keyframe (↑)">
+                                <!-- ◆◀ -->
+                                <Path Style="{StaticResource TransportIcon}" Width="16"
+                                      Data="M3.2,6 L5.5,3.7 L7.8,6 L5.5,8.3 Z M14,2 L6.5,6 L14,10 Z" />
+                            </Button>
+                            <Button Style="{StaticResource TransportBtn}"
+                                    Click="OnTimelinePrevFrame"
+                                    ToolTip="Previous frame (,)">
+                                <!-- ◀ -->
+                                <Path Style="{StaticResource TransportIcon}" Width="10"
+                                      Data="M10,2 L3,6 L10,10 Z" />
+                            </Button>
+                            <Button x:Name="PlayPauseBtn"
+                                    Style="{StaticResource TransportBtn}"
+                                    Click="OnTimelinePlayPause"
+                                    ToolTip="Play / pause (Space)">
+                                <Grid Width="12" Height="12">
+                                    <Path x:Name="PlayIconPath"
+                                          Fill="#FFBFBFBF" Stretch="Uniform"
+                                          Width="10" Height="12"
+                                          Data="M2,1 L11,6 L2,11 Z"
+                                          HorizontalAlignment="Center" VerticalAlignment="Center" />
+                                    <Path x:Name="PauseIconPath"
+                                          Fill="#FFBFBFBF" Stretch="Uniform"
+                                          Width="10" Height="12"
+                                          Data="M2,1.5 L4.2,1.5 L4.2,10.5 L2,10.5 Z M7.8,1.5 L10,1.5 L10,10.5 L7.8,10.5 Z"
+                                          HorizontalAlignment="Center" VerticalAlignment="Center"
+                                          Visibility="Collapsed" />
+                                </Grid>
+                            </Button>
+                            <Button Style="{StaticResource TransportBtn}"
+                                    Click="OnTimelineNextFrame"
+                                    ToolTip="Next frame (.)">
+                                <!-- ▶ -->
+                                <Path Style="{StaticResource TransportIcon}" Width="10"
+                                      Data="M2,2 L9,6 L2,10 Z" />
+                            </Button>
+                            <Button Style="{StaticResource TransportBtn}"
+                                    Click="OnTimelineNextKeyframe"
+                                    ToolTip="Next keyframe (↓)">
+                                <!-- ▶◆ -->
+                                <Path Style="{StaticResource TransportIcon}" Width="16"
+                                      Data="M2,2 L9.5,6 L2,10 Z M12.2,6 L14.5,3.7 L16.8,6 L14.5,8.3 Z" />
+                            </Button>
+                            <Button Style="{StaticResource TransportBtn}"
+                                    Click="OnTimelineGoToEnd"
+                                    ToolTip="Jump to end (End)">
+                                <!-- ▶| -->
+                                <Path Style="{StaticResource TransportIcon}"
+                                      Data="M2,2 L9.8,6 L2,10 Z M10.8,2 L12,2 L12,10 L10.8,10 Z" />
+                            </Button>
+
+                            <Border Width="8" />
+
+                            <!-- Loop / snap -->
+                            <ToggleButton Style="{StaticResource TransportToggle}"
+                                          IsChecked="{Binding TimelineLoop, Mode=OneWay}"
+                                          Click="OnTimelineLoopToggle"
+                                          ToolTip="Loop playback (/)">
+                                <!-- rectangular loop arrows -->
+                                <Path Style="{StaticResource TransportIcon}" Width="14" Height="12"
+                                      Data="M3,4 L9,4 L9,2.2 L12.5,4.8 L9,7.4 L9,5.6 L4.2,5.6 L4.2,8 L3,8 Z M11,8 L5,8 L5,9.8 L1.5,7.2 L5,4.6 L5,6.4 L9.8,6.4 L9.8,4 L11,4 Z" />
+                            </ToggleButton>
+                            <ToggleButton Style="{StaticResource TransportToggle}"
+                                          IsChecked="{Binding TimelineSnapEnabled, Mode=TwoWay}"
+                                          Click="OnTimelineSnapClick"
+                                          ToolTip="Snap edits to whole frames">
+                                <!-- filmstrip -->
+                                <Path Style="{StaticResource TransportIcon}" Width="14" Height="12"
+                                      Data="M1.5,2.5 L12.5,2.5 L12.5,9.5 L1.5,9.5 Z M1.5,2.5 L1.5,9.5 M4,2.5 L4,9.5 M7,2.5 L7,9.5 M10,2.5 L10,9.5 M2.2,3.5 L3.2,3.5 M2.2,5.5 L3.2,5.5 M2.2,7.5 L3.2,7.5 M10.8,3.5 L11.8,3.5 M10.8,5.5 L11.8,5.5 M10.8,7.5 L11.8,7.5"
+                                      Fill="Transparent" Stroke="#FFBFBFBF" StrokeThickness="1" />
+                            </ToggleButton>
+
+                            <Border Width="8" />
+
+                            <!-- Frame counter (C4D-style chip) -->
                             <TextBox Style="{StaticResource FrameNumBox}"
                                      Text="{Binding TimelineCurrentFrame, Mode=OneWay}"
-                                     Width="52" KeyDown="OnFrameBoxCommit" Margin="0,0,8,0"
-                                     ToolTip="Type a frame and press Enter to jump there" />
-                            <!-- Start / End / Trim range fields kept (user request
-                                 2026-07-17). fps readout, delete/duplicate buttons
-                                 and status chips removed; delete/duplicate live in
-                                 the ⋯ menu (Del / Ctrl+D hotkeys unchanged). -->
-                            <TextBlock Text="Start" FontSize="10" Foreground="#D98E2B" VerticalAlignment="Center" Margin="0,0,4,0" />
-                            <TextBox Style="{StaticResource FrameNumBox}"
-                                     Text="{Binding TrimStartFrame, Mode=TwoWay}"
-                                     Width="48" Margin="0,0,6,0" />
-                            <TextBlock Text="End" FontSize="10" Foreground="#D98E2B" VerticalAlignment="Center" Margin="0,0,4,0" />
-                            <TextBox Style="{StaticResource FrameNumBox}"
-                                     Text="{Binding TrimEndFrame, Mode=TwoWay}"
-                                     Width="48" Margin="0,0,4,0" />
-                            <ui:Button Click="OnTrimRangeClick" Appearance="Secondary" Padding="7,3" Margin="0,0,8,0"
-                                       ToolTip="Trim the clip to the Start–End frame range (undoable, rebases to 0)">
-                                <StackPanel Orientation="Horizontal">
-                                    <ui:SymbolIcon Symbol="Cut24" FontSize="12" Margin="0,0,4,0" />
-                                    <TextBlock Text="Trim" FontSize="11" />
-                                </StackPanel>
-                            </ui:Button>
-                            <Border Width="1" Height="18" Background="#FF454545" Margin="0,0,6,0" />
-                            <ToggleButton IsChecked="{Binding TimelineSnapEnabled, Mode=TwoWay}"
-                                          Click="OnTimelineSnapClick"
-                                          Padding="7,3" Margin="0,0,4,0"
-                                          ToolTip="Snap edits to whole frames (hold Shift to bypass)">
-                                <TextBlock Text="Snap" FontSize="11" />
-                            </ToggleButton>
-                            <ToggleButton IsChecked="{Binding TimelineLoop, Mode=OneWay}"
-                                          Click="OnTimelineLoopToggle"
-                                          Padding="7,3" Margin="0,0,4,0"
-                                          ToolTip="Loop playback (/)">
-                                <TextBlock Text="Loop" FontSize="11" />
-                            </ToggleButton>
-                            <ui:Button Click="OnTimelineDeleteSelection" Appearance="Secondary" Padding="7,3" Margin="0,0,4,0"
-                                       ToolTip="Delete selection (Del)">
-                                <TextBlock Text="Delete" FontSize="11" />
-                            </ui:Button>
-                            <ui:Button Click="OnTimelineDuplicateSelection" Appearance="Secondary" Padding="7,3" Margin="0,0,4,0"
-                                       ToolTip="Duplicate selection (Ctrl+D)">
-                                <TextBlock Text="Duplicate" FontSize="11" />
-                            </ui:Button>
-                            <ui:Button Click="OnTimelineFrameSelected" Appearance="Secondary" Padding="7,3" Margin="0,0,4,0"
-                                       ToolTip="Frame selected keys in the timeline">
-                                <TextBlock Text="Frame" FontSize="11" />
-                            </ui:Button>
-                            <ui:Button Click="OnTimelineFitAll" Appearance="Secondary" Padding="7,3" Margin="0,0,4,0"
-                                       ToolTip="Fit whole animation in the timeline">
-                                <TextBlock Text="Fit" FontSize="11" />
-                            </ui:Button>
-                            <ui:Button Click="OnTimelineSetInClick" Appearance="Secondary" Padding="7,3" Margin="0,0,4,0"
-                                       ToolTip="Trim start to playhead (I)">
-                                <TextBlock Text="In" FontSize="11" />
-                            </ui:Button>
-                            <ui:Button Click="OnTimelineSetOutClick" Appearance="Secondary" Padding="7,3" Margin="0,0,4,0"
-                                       ToolTip="Trim end to playhead (O)">
-                                <TextBlock Text="Out" FontSize="11" />
-                            </ui:Button>
-                            <ui:Button Click="OnTimelineSplitClick" Appearance="Secondary" Padding="7,3" Margin="0,0,4,0"
-                                       ToolTip="Split clip at playhead">
-                                <TextBlock Text="Split" FontSize="11" />
-                            </ui:Button>
-                            <ui:Button Click="OnClearAll" Appearance="Secondary" Padding="7,3" Margin="0,0,0,0"
-                                       ToolTip="Clear clips, library, keyframes, and pose (Shift+Del). Model stays.">
-                                <TextBlock Text="Clear" FontSize="11" />
-                            </ui:Button>
-                        </StackPanel>
+                                     MinWidth="48"
+                                     Width="56"
+                                     KeyDown="OnFrameBoxCommit"
+                                     ToolTip="Current frame — type a number and press Enter" />
 
-                        <!-- Right: status, filter, shortcuts tip -->
-                        <StackPanel Grid.Column="1"
-                                    Orientation="Horizontal"
-                                    HorizontalAlignment="Right"
+                            <Border Width="8" />
+
+                            <!-- Keying -->
+                            <Button Style="{StaticResource TransportBtn}"
+                                    Click="OnAddKeyframe"
+                                    ToolTip="Insert keyframe (K)">
+                                <!-- ◇ -->
+                                <Path Style="{StaticResource TransportIcon}" Width="11" Height="11"
+                                      Data="M5.5,1 L10,5.5 L5.5,10 L1,5.5 Z"
+                                      Fill="Transparent" Stroke="#FFBFBFBF" StrokeThickness="1.2" />
+                            </Button>
+                            <ToggleButton x:Name="AutoKeyToggle"
+                                          Width="26" Height="24" Margin="1,0" Padding="0"
+                                          BorderThickness="0" Focusable="False" Cursor="Hand"
+                                          IsChecked="False"
+                                          Checked="OnAutoKeyToggled"
+                                          Unchecked="OnAutoKeyToggled"
+                                          ToolTip="Auto keyframe (armed when red) — posing a bone records a key at the playhead">
+                                <ToggleButton.Template>
+                                    <ControlTemplate TargetType="ToggleButton">
+                                        <Border x:Name="bd" Background="#FF545454" CornerRadius="4">
+                                            <TextBlock Text="A" FontSize="11" FontWeight="SemiBold"
+                                                       Foreground="#FFBFBFBF"
+                                                       HorizontalAlignment="Center" VerticalAlignment="Center" />
+                                        </Border>
+                                        <ControlTemplate.Triggers>
+                                            <Trigger Property="IsMouseOver" Value="True">
+                                                <Setter TargetName="bd" Property="Background" Value="#FF656565" />
+                                            </Trigger>
+                                            <Trigger Property="IsChecked" Value="True">
+                                                <Setter TargetName="bd" Property="Background" Value="#FFBD4A4A" />
+                                            </Trigger>
+                                        </ControlTemplate.Triggers>
+                                    </ControlTemplate>
+                                </ToggleButton.Template>
+                            </ToggleButton>
+                            <Button Style="{StaticResource TransportBtn}"
+                                    Click="OnTimelineCutKeys"
+                                    ToolTip="Split at playhead — cuts the selected bone's lane (nothing selected = all lanes) into two pieces; drag either piece or record keys into the gap">
+                                <TextBlock Text="&#x2702;" FontSize="13" Foreground="#FFBFBFBF"
+                                           HorizontalAlignment="Center" VerticalAlignment="Center" />
+                            </Button>
+                            <Button Style="{StaticResource TransportBtn}"
+                                    Click="OnTimelineMoreClick"
+                                    ToolTip="Keying / timeline options">
+                                <Button.ContextMenu>
+                                    <ContextMenu>
+                                        <MenuItem Header="Split at playhead" Click="OnTimelineSplitClick" />
+                                        <MenuItem Header="Frame selection" Click="OnTimelineFrameSelected" />
+                                        <MenuItem Header="Fit whole animation" Click="OnTimelineFitAll" />
+                                        <Separator />
+                                        <MenuItem Header="Clear all…" Click="OnClearAll" />
+                                    </ContextMenu>
+                                </Button.ContextMenu>
+                                <Path Style="{StaticResource TransportIcon}" Width="12" Height="12"
+                                      Data="M5.2,1 L6.8,1 L7.2,2.8 L8.6,3.3 L10,2.4 L11.2,3.6 L10.3,5 L10.8,6.4 L12.6,6.8 L12.6,8.4 L10.8,8.8 L10.3,10.2 L11.2,11.6 L10,12.8 L8.6,11.9 L7.2,12.4 L6.8,14.2 L5.2,14.2 L4.8,12.4 L3.4,11.9 L2,12.8 L0.8,11.6 L1.7,10.2 L1.2,8.8 L-0.6,8.4 L-0.6,6.8 L1.2,6.4 L1.7,5 L0.8,3.6 L2,2.4 L3.4,3.3 L4.8,2.8 Z M6,5.2 A2.4,2.4 0 1 1 6,10 A2.4,2.4 0 1 1 6,5.2 Z" />
+                            </Button>
+
+                            <Border Width="8" />
+
+                            <Border Background="#FF4D4D4D"
+                                    CornerRadius="5"
+                                    Height="24"
+                                    VerticalAlignment="Center"
+                                    ToolTip="Playback range (In–Out). Scroll on In/Out to change frames; drag markers on the timeline ruler.">
+                                <StackPanel Orientation="Horizontal">
+                                    <Border Width="28" Height="24"
+                                            ToolTip="Preview range">
+                                        <Path Fill="#FFCCCCCC"
+                                              Stretch="Uniform"
+                                              Width="12" Height="12"
+                                              HorizontalAlignment="Center"
+                                              VerticalAlignment="Center"
+                                              Data="M5.5,0.8 L8.5,0.8 L8.5,2 L9.8,2.4 A6,6 0 1 1 4.2,2.4 L5.5,2 Z M7,4.2 A3.6,3.6 0 1 0 7,11.4 A3.6,3.6 0 1 0 7,4.2 Z M7,5.2 L7,7.6 L8.8,8.6 L9.3,7.8 L7.8,7 L7.8,5.2 Z" />
+                                    </Border>
+                                    <Rectangle Width="1" Fill="#FF363636" Margin="0,3" />
+                                    <StackPanel Orientation="Horizontal"
+                                                VerticalAlignment="Center"
+                                                Margin="8,0,4,0">
+                                        <TextBlock Text="In"
+                                                   FontSize="12"
+                                                   Foreground="#FFCCCCCC"
+                                                   VerticalAlignment="Center"
+                                                   Margin="0,0,4,0" />
+                                        <TextBox Style="{StaticResource FrameRangeInlineBox}"
+                                                 Text="{Binding TrimStartFrame, Mode=TwoWay, UpdateSourceTrigger=LostFocus}"
+                                                 Width="36"
+                                                 Tag="In"
+                                                 ToolTip="In frame. Scroll wheel to nudge. Drag the In marker on the ruler."
+                                                 PreviewMouseWheel="OnTrimInOutWheel"
+                                                 LostFocus="OnTrimInOutLostFocus"
+                                                 KeyDown="OnTrimInOutKeyDown" />
+                                    </StackPanel>
+                                    <Rectangle Width="1" Fill="#FF363636" Margin="0,3" />
+                                    <StackPanel Orientation="Horizontal"
+                                                VerticalAlignment="Center"
+                                                Margin="8,0,8,0">
+                                        <TextBlock Text="Out"
+                                                   FontSize="12"
+                                                   Foreground="#FFCCCCCC"
+                                                   VerticalAlignment="Center"
+                                                   Margin="0,0,4,0" />
+                                        <TextBox Style="{StaticResource FrameRangeInlineBox}"
+                                                 Text="{Binding TrimEndFrame, Mode=TwoWay, UpdateSourceTrigger=LostFocus}"
+                                                 Width="40"
+                                                 Tag="Out"
+                                                 ToolTip="Out frame. Scroll wheel to nudge. Drag the Out marker on the ruler."
+                                                 PreviewMouseWheel="OnTrimInOutWheel"
+                                                 LostFocus="OnTrimInOutLostFocus"
+                                                 KeyDown="OnTrimInOutKeyDown" />
+                                    </StackPanel>
+                                </StackPanel>
+                            </Border>
+
+                            <Border Width="8" />
+
+                            <StackPanel Orientation="Horizontal"
+                                        VerticalAlignment="Center"
+                                        ToolTip="Duration and frame rate">
+                                <ui:NumberBox Value="{Binding TimelineDuration, Mode=TwoWay}"
+                                              Minimum="0.1"
+                                              Maximum="60"
+                                              SmallChange="0.1"
+                                              LargeChange="1"
+                                              Width="56"
+                                              Height="24"
+                                              Padding="4,0"
+                                              ClearButtonEnabled="False"
+                                              SpinButtonPlacementMode="Hidden"
+                                              FontSize="11"
+                                              VerticalAlignment="Center"
+                                              ToolTip="Duration (seconds)" />
+                                <TextBlock Text="s @"
+                                           FontSize="11"
+                                           Foreground="#FF888888"
+                                           VerticalAlignment="Center"
+                                           Margin="4,0,4,0" />
+                                <ui:NumberBox Value="{Binding TimelineFps, Mode=TwoWay}"
+                                              Minimum="1"
+                                              Maximum="120"
+                                              SmallChange="1"
+                                              LargeChange="10"
+                                              Width="44"
+                                              Height="24"
+                                              Padding="4,0"
+                                              ClearButtonEnabled="False"
+                                              SpinButtonPlacementMode="Hidden"
+                                              FontSize="11"
+                                              VerticalAlignment="Center"
+                                              ToolTip="FPS" />
+                            </StackPanel>
+                                </StackPanel>
+                            </Grid>
+                        </ScrollViewer>
+
+                        <!-- Side gutters sit above the scroll host with matching bar chrome
+                             so they don't fight centering, but still stay usable. -->
+                        <StackPanel Orientation="Horizontal"
+                                    HorizontalAlignment="Left"
+                                    VerticalAlignment="Center"
+                                    Background="#FF2B2B2B"
+                                    Margin="2,0,0,0"
+                                    Panel.ZIndex="1">
+                            <!-- Keys | Clips — C4D quicktabs (COLOR_QUICKTAB_*). -->
+                            <Border Background="#FF3D3D3D"
+                                    CornerRadius="2"
+                                    Padding="1"
+                                    Margin="0,0,8,0"
                                     VerticalAlignment="Center">
-                            <!-- Status + import report — moved from the retired sidebar. -->
-                            <TextBlock Text="{Binding StatusText}"
-                                       FontSize="10"
-                                       Foreground="#9A9A9A"
-                                       VerticalAlignment="Center"
-                                       MaxWidth="220"
-                                       TextTrimming="CharacterEllipsis"
-                                       Margin="0,0,8,0" />
+                                <StackPanel Orientation="Horizontal">
+                                    <RadioButton Content="Keys"
+                                                 GroupName="EmoteTimelineMode"
+                                                 Width="48" Height="22"
+                                                 FontSize="11"
+                                                 Padding="0"
+                                                 Focusable="False"
+                                                 Cursor="Hand"
+                                                 IsChecked="{Binding IsDopeSheetMode, Mode=OneWay}"
+                                                 Checked="OnDopeSheetModeClick"
+                                                 ToolTip="Keys — per-bone keyframe diamonds">
+                                        <RadioButton.Style>
+                                            <Style TargetType="RadioButton">
+                                                <Setter Property="Background" Value="Transparent" />
+                                                <Setter Property="Foreground" Value="#FFBFBFBF" />
+                                                <Setter Property="BorderThickness" Value="0" />
+                                                <Setter Property="Template">
+                                                    <Setter.Value>
+                                                        <ControlTemplate TargetType="RadioButton">
+                                                            <Border x:Name="bd"
+                                                                    Background="{TemplateBinding Background}"
+                                                                    CornerRadius="2"
+                                                                    Padding="8,0">
+                                                                <ContentPresenter HorizontalAlignment="Center"
+                                                                                  VerticalAlignment="Center" />
+                                                            </Border>
+                                                            <ControlTemplate.Triggers>
+                                                                <Trigger Property="IsChecked" Value="True">
+                                                                    <Setter TargetName="bd" Property="Background" Value="{DynamicResource SystemAccentColorBrush}" />
+                                                                    <Setter Property="Foreground" Value="#FFF2F2F2" />
+                                                                </Trigger>
+                                                                <Trigger Property="IsMouseOver" Value="True">
+                                                                    <Setter TargetName="bd" Property="Background" Value="#FF4D4D4D" />
+                                                                </Trigger>
+                                                                <MultiTrigger>
+                                                                    <MultiTrigger.Conditions>
+                                                                        <Condition Property="IsChecked" Value="True" />
+                                                                        <Condition Property="IsMouseOver" Value="True" />
+                                                                    </MultiTrigger.Conditions>
+                                                                    <Setter TargetName="bd" Property="Background" Value="{DynamicResource SystemAccentColorPrimaryBrush}" />
+                                                                </MultiTrigger>
+                                                            </ControlTemplate.Triggers>
+                                                        </ControlTemplate>
+                                                    </Setter.Value>
+                                                </Setter>
+                                            </Style>
+                                        </RadioButton.Style>
+                                    </RadioButton>
+                                    <RadioButton Content="Clips"
+                                                 GroupName="EmoteTimelineMode"
+                                                 Width="48" Height="22"
+                                                 FontSize="11"
+                                                 Padding="0"
+                                                 Focusable="False"
+                                                 Cursor="Hand"
+                                                 IsChecked="{Binding IsSequencerMode, Mode=OneWay}"
+                                                 Checked="OnSequencerModeClick"
+                                                 ToolTip="Clips — NLA strip bars. Library imports edit in Keys; Bake as clip to place a strip here.">
+                                        <RadioButton.Style>
+                                            <Style TargetType="RadioButton">
+                                                <Setter Property="Background" Value="Transparent" />
+                                                <Setter Property="Foreground" Value="#FFBFBFBF" />
+                                                <Setter Property="BorderThickness" Value="0" />
+                                                <Setter Property="Template">
+                                                    <Setter.Value>
+                                                        <ControlTemplate TargetType="RadioButton">
+                                                            <Border x:Name="bd"
+                                                                    Background="{TemplateBinding Background}"
+                                                                    CornerRadius="2"
+                                                                    Padding="8,0">
+                                                                <ContentPresenter HorizontalAlignment="Center"
+                                                                                  VerticalAlignment="Center" />
+                                                            </Border>
+                                                            <ControlTemplate.Triggers>
+                                                                <Trigger Property="IsChecked" Value="True">
+                                                                    <Setter TargetName="bd" Property="Background" Value="{DynamicResource SystemAccentColorBrush}" />
+                                                                    <Setter Property="Foreground" Value="#FFF2F2F2" />
+                                                                </Trigger>
+                                                                <Trigger Property="IsMouseOver" Value="True">
+                                                                    <Setter TargetName="bd" Property="Background" Value="#FF4D4D4D" />
+                                                                </Trigger>
+                                                                <MultiTrigger>
+                                                                    <MultiTrigger.Conditions>
+                                                                        <Condition Property="IsChecked" Value="True" />
+                                                                        <Condition Property="IsMouseOver" Value="True" />
+                                                                    </MultiTrigger.Conditions>
+                                                                    <Setter TargetName="bd" Property="Background" Value="{DynamicResource SystemAccentColorPrimaryBrush}" />
+                                                                </MultiTrigger>
+                                                            </ControlTemplate.Triggers>
+                                                        </ControlTemplate>
+                                                    </Setter.Value>
+                                                </Setter>
+                                            </Style>
+                                        </RadioButton.Style>
+                                    </RadioButton>
+                                </StackPanel>
+                            </Border>
                             <TextBlock Text="{Binding SkippedSummary}"
                                        FontSize="10"
                                        Foreground="#FFD23F"
                                        VerticalAlignment="Center"
-                                       Margin="0,0,2,0"
+                                       Margin="4,0,2,0"
                                        Visibility="{Binding HasSkippedBones, Converter={StaticResource BooleanToVisibility}}" />
                             <ui:HyperlinkButton Click="OnShowSkippedReport"
                                                 Content="report"
                                                 FontSize="10"
                                                 Padding="4,0"
-                                                Margin="0,0,8,0"
                                                 Visibility="{Binding HasSkippedBones, Converter={StaticResource BooleanToVisibility}}" />
+                        </StackPanel>
+
+                        <StackPanel Orientation="Horizontal"
+                                    HorizontalAlignment="Right"
+                                    VerticalAlignment="Center"
+                                    Background="#FF2B2B2B"
+                                    Margin="0,0,2,0"
+                                    Panel.ZIndex="1">
                             <ToggleButton x:Name="FilterToggle"
                                           Padding="7,4"
                                           Margin="0,0,6,0"
@@ -1931,7 +2659,7 @@
                 <!-- ── Sequencer body ───────────────────────────────── -->
                 <Border Grid.Row="1"
                         x:Name="TimelineBorder"
-                        Background="#1E1E1E"
+                        Background="#FF2B2B2B"
                         SnapsToDevicePixels="True"
                         SizeChanged="OnTimelineSizeChanged">
                     <Grid>
@@ -1939,20 +2667,21 @@
                             <ColumnDefinition Width="168" />
                             <ColumnDefinition Width="*" />
                         </Grid.ColumnDefinitions>
-                        <!-- After-Effects-style LAYERS timeline (user directive
-                             2026-07-16): ONE view, no Sequencer/DopeSheet modes.
-                             Row 0 = layer bars (clips + summary keys) with the
-                             single ruler; Row 1 = the per-bone key lanes. -->
+                        <!-- Keys (dope) vs Clips (sequencer): one body section
+                             active at a time. Row heights toggled in code
+                             (ApplyTimelineBodyRowHeights) so Clips doesn't
+                             leave a blank * slab under the Keyframes lane. -->
                         <Grid.RowDefinitions>
-                            <RowDefinition Height="Auto" />
-                            <RowDefinition Height="*" />
+                            <RowDefinition x:Name="TimelineBodyClipsRow" Height="Auto" />
+                            <RowDefinition x:Name="TimelineBodyKeysRow" Height="*" />
                         </Grid.RowDefinitions>
 
-                        <!-- Layers gutter -->
+                        <!-- Layers gutter (Clips mode) -->
                         <Border Grid.Row="0" Grid.Column="0"
-                                Background="#252525"
-                                BorderBrush="#FF454545"
-                                BorderThickness="0,0,1,0">
+                                Background="#FF262626"
+                                BorderBrush="#FF363636"
+                                BorderThickness="0,0,1,0"
+                                Visibility="{Binding ShowClipsSection, Converter={StaticResource BooleanToVisibility}}">
                             <Grid>
                                 <Grid.RowDefinitions>
                                     <RowDefinition Height="24" />
@@ -1961,11 +2690,11 @@
                                 </Grid.RowDefinitions>
 
                                 <Border Grid.Row="0"
-                                        Background="#2B2B2B"
-                                        BorderBrush="#FF454545"
+                                        Background="#FF1C1C1C"
+                                        BorderBrush="#FF363636"
                                         BorderThickness="0,0,0,1"
                                         Padding="10,0,0,0">
-                                    <TextBlock Text="Layers"
+                                    <TextBlock Text="Clips"
                                                FontSize="11"
                                                FontWeight="SemiBold"
                                                Foreground="#B0B0B0"
@@ -1973,8 +2702,8 @@
                                 </Border>
 
                                 <Border Grid.Row="1"
-                                        Background="#252525"
-                                        BorderBrush="#FF454545"
+                                        Background="#FF262626"
+                                        BorderBrush="#FF363636"
                                         BorderThickness="0,0,0,1"
                                         Height="34"
                                         Visibility="{Binding ShowClipTrack, Converter={StaticResource BooleanToVisibility}}">
@@ -1983,7 +2712,7 @@
                                             <ColumnDefinition Width="3" />
                                             <ColumnDefinition Width="*" />
                                         </Grid.ColumnDefinitions>
-                                        <Border Grid.Column="0" Background="#4A90C4" />
+                                        <Border Grid.Column="0" Background="{DynamicResource SystemAccentColorBrush}" />
                                         <StackPanel Grid.Column="1"
                                                     Orientation="Horizontal"
                                                     VerticalAlignment="Center"
@@ -2034,8 +2763,10 @@
                             </Grid>
                         </Border>
 
-                        <!-- Ruler + layer bars + playhead -->
-                        <Grid Grid.Row="0" Grid.Column="1">
+                        <!-- Ruler + clip bars + playhead (Clips mode; Keys keeps
+                             a thin shared ruler via the Keys gutter below). -->
+                        <Grid Grid.Row="0" Grid.Column="1"
+                              Visibility="{Binding ShowClipsSection, Converter={StaticResource BooleanToVisibility}}">
                             <Grid.RowDefinitions>
                                 <RowDefinition Height="24" />
                                 <RowDefinition Height="Auto" />
@@ -2044,7 +2775,7 @@
 
                             <Canvas Grid.Row="0"
                                     x:Name="TimelineRulerCanvas"
-                                    Background="#2B2B2B"
+                                    Background="#FF2B2B2B"
                                     ClipToBounds="True"
                                     Focusable="True"
                                     Cursor="Hand"
@@ -2055,7 +2786,7 @@
 
                             <Canvas Grid.Row="1"
                                     x:Name="TimelineStripCanvas"
-                                    Background="#1E1E1E"
+                                    Background="#FF2B2B2B"
                                     ClipToBounds="True"
                                     Focusable="True"
                                     Cursor="Hand"
@@ -2074,6 +2805,7 @@
                                     Focusable="True"
                                     Height="34"
                                     Visibility="{Binding ShowTimelineKeyframes, Converter={StaticResource BooleanToVisibility}}"
+                                    MouseWheel="OnTimelineMouseWheel"
                                     MouseLeftButtonDown="OnTimelineSeekClick"
                                     MouseMove="OnTimelineSeekMove"
                                     MouseLeftButtonUp="OnTimelineSeekUp"
@@ -2086,20 +2818,28 @@
                                     ClipToBounds="True" />
                         </Grid>
 
-                        <!-- Bones section: body-part groups + per-bone key lanes,
-                             always visible under the layer bars (AE-style). -->
+                        <!-- Keys gutter (bone list) -->
                         <Border Grid.Row="1" Grid.Column="0"
-                                Background="#252525"
-                                BorderBrush="#FF454545"
-                                BorderThickness="0,0,1,0">
+                                Background="#FF262626"
+                                BorderBrush="#FF363636"
+                                BorderThickness="0,0,1,0"
+                                Visibility="{Binding ShowKeysSection, Converter={StaticResource BooleanToVisibility}}">
                             <Grid>
                                 <Grid.RowDefinitions>
-                                    <!-- "Bones / Empty" header retired — the panel
-                                         is layers-only now (2026-07-17). -->
-                                    <RowDefinition Height="0" />
+                                    <RowDefinition Height="24" />
                                     <RowDefinition Height="*" />
                                 </Grid.RowDefinitions>
-                                <Border Visibility="Collapsed" />
+                                <Border Grid.Row="0"
+                                        Background="#FF2B2B2B"
+                                        BorderBrush="#FF363636"
+                                        BorderThickness="0,0,0,1"
+                                        Padding="10,0,0,0">
+                                    <TextBlock Text="Keys"
+                                               FontSize="11"
+                                               FontWeight="SemiBold"
+                                               Foreground="#B0B0B0"
+                                               VerticalAlignment="Center" />
+                                </Border>
                                 <!-- ScrollViewer lives INSIDE the ItemsControl template so
                                      VirtualizingStackPanel can recycle row containers. -->
                                 <ItemsControl Grid.Row="1"
@@ -2130,8 +2870,10 @@
                                     </ItemsControl.ItemsPanel>
                                     <ItemsControl.ItemTemplate>
                                         <DataTemplate>
-                                            <!-- Flat AE-style row (1:1 reference, 2026-07-17):
-                                                 drag glyph · eye · mono name "· Rot" · hover lock. -->
+                                            <!-- Tree gutter row: group headers get a rotating
+                                                 chevron + semibold label; bone lanes indent
+                                                 beneath them. "· Rot" is implied — only Pos
+                                                 lanes are called out. -->
                                             <Border Height="22"
                                                     BorderBrush="#2E2E2E"
                                                     BorderThickness="0,0,0,1"
@@ -2153,50 +2895,112 @@
                                                         </Style.Triggers>
                                                     </Style>
                                                 </Border.Style>
-                                                <Grid Margin="2,0,4,0">
+                                                <Grid>
+                                                    <Grid.Style>
+                                                        <Style TargetType="Grid">
+                                                            <!-- Bone lanes indent under their header. -->
+                                                            <Setter Property="Margin" Value="22,0,4,0" />
+                                                            <Style.Triggers>
+                                                                <!-- Standalone lanes (Summary, Root Motion). -->
+                                                                <DataTrigger Binding="{Binding Group}" Value="">
+                                                                    <Setter Property="Margin" Value="6,0,4,0" />
+                                                                </DataTrigger>
+                                                                <DataTrigger Binding="{Binding IsGroupHeader}" Value="True">
+                                                                    <Setter Property="Margin" Value="4,0,4,0" />
+                                                                </DataTrigger>
+                                                            </Style.Triggers>
+                                                        </Style>
+                                                    </Grid.Style>
                                                     <Grid.ColumnDefinitions>
                                                         <ColumnDefinition Width="Auto" />
                                                         <ColumnDefinition Width="Auto" />
                                                         <ColumnDefinition Width="*" />
                                                         <ColumnDefinition Width="Auto" />
                                                     </Grid.ColumnDefinitions>
-                                                    <!-- Layer header: chevron; bone row: drag glyph. -->
+                                                    <!-- Header chevron: ▸ collapsed, rotates to ▾ expanded. -->
                                                     <ToggleButton Grid.Column="0"
-                                                                  Content="›"
-                                                                  Width="18"
-                                                                  Padding="0"
+                                                                  Width="16" Height="22"
+                                                                  Focusable="False"
+                                                                  Cursor="Hand"
                                                                   IsChecked="{Binding IsExpanded, Mode=TwoWay}"
                                                                   Click="OnTimelineTrackExpandClick"
                                                                   Tag="{Binding}"
-                                                                  ToolTip="Expand/collapse layer"
-                                                                  Visibility="{Binding IsGroupHeader, Converter={StaticResource BooleanToVisibility}}" />
-                                                    <TextBlock Grid.Column="0"
-                                                               Text="&#x22EE;"
-                                                               FontSize="10"
-                                                               Foreground="#5A5A5A"
-                                                               VerticalAlignment="Center"
-                                                               Margin="2,0,4,0"
-                                                               Visibility="{Binding IsGroupHeader, Converter={StaticResource InverseBooleanToVisibility}}" />
+                                                                  ToolTip="Expand/collapse"
+                                                                  Visibility="{Binding IsGroupHeader, Converter={StaticResource BooleanToVisibility}}">
+                                                        <ToggleButton.Template>
+                                                            <ControlTemplate TargetType="ToggleButton">
+                                                                <Border Background="Transparent">
+                                                                    <Path x:Name="chev"
+                                                                          Data="M0,0 L4.5,4 L0,8 Z"
+                                                                          Fill="#8F8F8F"
+                                                                          HorizontalAlignment="Center"
+                                                                          VerticalAlignment="Center"
+                                                                          RenderTransformOrigin="0.5,0.5">
+                                                                        <Path.RenderTransform>
+                                                                            <RotateTransform Angle="0" />
+                                                                        </Path.RenderTransform>
+                                                                    </Path>
+                                                                </Border>
+                                                                <ControlTemplate.Triggers>
+                                                                    <Trigger Property="IsChecked" Value="True">
+                                                                        <Setter TargetName="chev" Property="RenderTransform">
+                                                                            <Setter.Value>
+                                                                                <RotateTransform Angle="90" />
+                                                                            </Setter.Value>
+                                                                        </Setter>
+                                                                        <Setter TargetName="chev" Property="Fill" Value="#C8C8C8" />
+                                                                    </Trigger>
+                                                                    <Trigger Property="IsMouseOver" Value="True">
+                                                                        <Setter TargetName="chev" Property="Fill" Value="#E8E8E8" />
+                                                                    </Trigger>
+                                                                </ControlTemplate.Triggers>
+                                                            </ControlTemplate>
+                                                        </ToggleButton.Template>
+                                                    </ToggleButton>
                                                     <ToggleButton Grid.Column="1"
                                                                   Style="{StaticResource MuteEyeToggle}"
                                                                   IsChecked="{Binding IsMuted, Mode=TwoWay}"
                                                                   Click="OnTimelineTrackStateClick"
                                                                   Tag="{Binding}"
-                                                                  Opacity="0.6"
+                                                                  Opacity="0.55"
                                                                   ToolTip="Mute/unmute track"
                                                                   Visibility="{Binding IsGroupHeader, Converter={StaticResource InverseBooleanToVisibility}}" />
-                                                    <StackPanel Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Center" Margin="4,0,4,0">
+                                                    <StackPanel Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Center" Margin="6,0,4,0">
                                                         <TextBlock Text="{Binding DisplayName}"
                                                                    ToolTip="{Binding Name}"
-                                                                   FontFamily="Consolas"
-                                                                   FontSize="10.5"
-                                                                   Foreground="#E0E0E0"
-                                                                   TextTrimming="CharacterEllipsis" />
+                                                                   TextTrimming="CharacterEllipsis">
+                                                            <TextBlock.Style>
+                                                                <Style TargetType="TextBlock">
+                                                                    <Setter Property="FontFamily" Value="Consolas" />
+                                                                    <Setter Property="FontSize" Value="10.5" />
+                                                                    <Setter Property="Foreground" Value="#E0E0E0" />
+                                                                    <Style.Triggers>
+                                                                        <DataTrigger Binding="{Binding IsGroupHeader}" Value="True">
+                                                                            <Setter Property="FontFamily" Value="Segoe UI" />
+                                                                            <Setter Property="FontSize" Value="11" />
+                                                                            <Setter Property="FontWeight" Value="SemiBold" />
+                                                                            <Setter Property="Foreground" Value="#CFCFCF" />
+                                                                        </DataTrigger>
+                                                                    </Style.Triggers>
+                                                                </Style>
+                                                            </TextBlock.Style>
+                                                        </TextBlock>
                                                         <TextBlock Text="{Binding LaneTypeLabel}"
                                                                    FontFamily="Consolas"
                                                                    FontSize="10.5"
                                                                    Foreground="#7A7A7A"
-                                                                   Margin="6,0,0,0" />
+                                                                   Margin="6,0,0,0">
+                                                            <TextBlock.Style>
+                                                                <Style TargetType="TextBlock">
+                                                                    <Style.Triggers>
+                                                                        <!-- Rot is the norm — only call out Pos lanes. -->
+                                                                        <DataTrigger Binding="{Binding LaneTypeLabel}" Value="· Rot">
+                                                                            <Setter Property="Visibility" Value="Collapsed" />
+                                                                        </DataTrigger>
+                                                                    </Style.Triggers>
+                                                                </Style>
+                                                            </TextBlock.Style>
+                                                        </TextBlock>
                                                     </StackPanel>
                                                     <ToggleButton Grid.Column="3"
                                                                   IsChecked="{Binding IsLocked, Mode=TwoWay}"
@@ -2226,19 +3030,17 @@
                             </Grid>
                         </Border>
 
-                        <Grid Grid.Row="1" Grid.Column="1">
+                        <Grid Grid.Row="1" Grid.Column="1"
+                              Visibility="{Binding ShowKeysSection, Converter={StaticResource BooleanToVisibility}}">
                             <Grid.RowDefinitions>
-                                <!-- Dope ruler collapsed to 0 — the layers section
-                                     above owns the single shared time ruler. The
-                                     canvas stays in the tree (code adds render
-                                     layers + identity-checks it for scrubbing). -->
-                                <RowDefinition Height="0" />
+                                <RowDefinition Height="24" />
                                 <RowDefinition Height="*" />
                             </Grid.RowDefinitions>
                             <Canvas x:Name="DopeSheetRulerCanvas"
                                     Grid.Row="0"
-                                    Background="#2B2B2B"
+                                    Background="#FF2B2B2B"
                                     ClipToBounds="True"
+                                    Cursor="Hand"
                                     MouseWheel="OnTimelineMouseWheel"
                                     MouseLeftButtonDown="OnTimelineSeekClick"
                                     MouseMove="OnTimelineSeekMove"
@@ -2265,7 +3067,7 @@
                 <!-- ── Bottom range bar ─────────────────────────────── -->
                 <Border Grid.Row="2"
                         Background="#232323"
-                        BorderBrush="#FF454545"
+                        BorderBrush="#FF363636"
                         BorderThickness="0,1,0,0">
                     <Grid Margin="10,0">
                         <TextBlock Text="{Binding TimelineCurrentFrame, StringFormat='Frame {0}'}"
@@ -2282,7 +3084,7 @@
                                 BorderThickness="1"
                                 CornerRadius="3"
                                 Height="14"
-                                Margin="90,0,200,0"
+                                Margin="90,0,10,0"
                                 VerticalAlignment="Center"
                                 MouseLeftButtonDown="OnNavBarMouseDown"
                                 MouseMove="OnNavBarMouseMove"
@@ -2292,53 +3094,11 @@
                                 <Border x:Name="TimelineNavThumb"
                                         Height="10"
                                         Canvas.Top="1"
-                                        Background="#4A90C4"
+                                        Background="{DynamicResource SystemAccentColorBrush}"
                                         CornerRadius="3"
                                         Opacity="0.35" />
                             </Canvas>
                         </Border>
-                        <StackPanel Orientation="Horizontal"
-                                    HorizontalAlignment="Right"
-                                    VerticalAlignment="Center">
-                            <TextBlock Text="0"
-                                       FontFamily="Consolas"
-                                       FontSize="11"
-                                       Foreground="#888888"
-                                       Margin="0,0,8,0" />
-                            <TextBlock Text="{Binding TimelineTotalFrames}"
-                                       FontFamily="Consolas"
-                                       FontSize="11"
-                                       Foreground="#888888"
-                                       Margin="0,0,12,0" />
-                            <StackPanel Orientation="Horizontal">
-                                <ui:NumberBox Value="{Binding TimelineDuration, Mode=TwoWay}"
-                                              Minimum="0.1"
-                                              Maximum="60"
-                                              SmallChange="0.1"
-                                              LargeChange="1"
-                                              Width="64"
-                                              ClearButtonEnabled="False"
-                                              SpinButtonPlacementMode="Compact"
-                                              FontSize="11"
-                                              Margin="0,0,4,0"
-                                              ToolTip="Duration (seconds)" />
-                                <TextBlock Text="s @"
-                                           FontSize="11"
-                                           Foreground="#666666"
-                                           VerticalAlignment="Center"
-                                           Margin="0,0,4,0" />
-                                <ui:NumberBox Value="{Binding TimelineFps, Mode=TwoWay}"
-                                              Minimum="1"
-                                              Maximum="120"
-                                              SmallChange="1"
-                                              LargeChange="10"
-                                              Width="48"
-                                              ClearButtonEnabled="False"
-                                              SpinButtonPlacementMode="Compact"
-                                              FontSize="11"
-                                              ToolTip="FPS" />
-                            </StackPanel>
-                        </StackPanel>
                     </Grid>
                 </Border>
 

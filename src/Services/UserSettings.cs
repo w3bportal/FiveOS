@@ -1,8 +1,10 @@
 // Copyright (c) 2026 FiveOS. All rights reserved.
 // https://github.com/w3bportal/FiveOS
 
+using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Linq;
 using System.Text.Json;
 
 namespace FiveOS.Services;
@@ -23,6 +25,13 @@ public enum ServerLayout
     /// <summary>Each conversion creates its own &lt;server&gt;/{asset}_resource/
     /// subfolder (mirrors the zip layout, just unzipped).</summary>
     PerAsset = 1,
+}
+
+/// <summary>One chrome document tab persisted across launches.</summary>
+public sealed class WorkspaceSessionTabBlob
+{
+    public string Kind { get; set; } = "Assets";
+    public string? Title { get; set; }
 }
 
 public static class UserSettings
@@ -101,6 +110,10 @@ public static class UserSettings
         /// <see cref="LocalizationService.ResolveDefaultLanguage"/>.</summary>
         public string? Language { get; set; }
 
+        /// <summary>UI accent colour as #RRGGBB. Null = default blue
+        /// (<see cref="ThemeAccent.DefaultColor"/>).</summary>
+        public string? AccentColorHex { get; set; }
+
         /// <summary>Whether the activity rail starts in the expanded
         /// (icon + label) state. Default true = labels visible up front so
         /// new users immediately see what each icon means; hover still
@@ -148,6 +161,16 @@ public static class UserSettings
         /// tool tiles. Users flip it off via its "Show on startup" checkbox.</summary>
         public bool ShowWelcomeOnStartup { get; set; } = true;
 
+        /// <summary>Chrome document tabs from the last session (kinds + titles).
+        /// Restored on launch instead of always opening Assets.</summary>
+        public List<WorkspaceSessionTabBlob>? WorkspaceSessionTabs { get; set; }
+
+        /// <summary>Index into <see cref="WorkspaceSessionTabs"/> that was active.</summary>
+        public int WorkspaceSessionActiveIndex { get; set; }
+
+        /// <summary>Last <see cref="ViewModels.AppView"/> name (e.g. "Props", "Emotes").</summary>
+        public string? LastActiveView { get; set; }
+
         /// <summary>FiveOS Cloud Motion API base URL (e.g. http://localhost:5216).</summary>
         public string? MotionCloudBaseUrl { get; set; }
 
@@ -165,6 +188,40 @@ public static class UserSettings
         /// true; there is NO UI for this. Flip to false in settings.json only if
         /// a re-encode ever misbehaves.</summary>
         public bool MotionOptimizeUpload { get; set; } = true;
+
+        /// <summary>Props editor panel order per stack key
+        /// ("props-left", "props-right"). Values are panel ids.</summary>
+        public Dictionary<string, List<string>>? PanelOrders { get; set; }
+
+        /// <summary>Left inspector column width in the Props editor.</summary>
+        public double PropsSidebarWidth { get; set; }
+
+        /// <summary>Whether the right Layers dock starts collapsed to a strip.</summary>
+        public bool LayersPanelCollapsed { get; set; }
+
+        /// <summary>When true, the PANELS sidebar docks left of the viewport;
+        /// when false (default), it docks on the right.</summary>
+        public bool LayersDockedLeft { get; set; }
+
+        /// <summary>Width of the PANELS sidebar when expanded.</summary>
+        public double LayersPanelWidth { get; set; }
+
+        public double VehiclesLayersWidth { get; set; }
+        public double VehiclesPaintWidth { get; set; }
+        public double VehiclesDetailsHeight { get; set; }
+
+        /// <summary>Optimize tab: width of the compression-options sidebar
+        /// (shown in texture modes only).</summary>
+        public double OptimizeOptionsWidth { get; set; }
+
+        /// <summary>Optimize tab: width of the queue/list column between the
+        /// options sidebar and the preview. 0 = never resized (keep the
+        /// default proportional split).</summary>
+        public double OptimizeQueueWidth { get; set; }
+
+        /// <summary>3D Model tab: height of the animated-keys timeline panel
+        /// (shown in animated-prop mode only).</summary>
+        public double PropsAnimTimelineHeight { get; set; }
     }
 
     private static string Dir => Path.Combine(
@@ -274,6 +331,177 @@ public static class UserSettings
     {
         var b = Read();
         b.TabOrder = new List<string>(keys);
+        Write(b);
+    }
+
+    public static IReadOnlyList<string>? LoadPanelOrder(string stackKey)
+    {
+        if (string.IsNullOrWhiteSpace(stackKey)) return null;
+        var map = Read().PanelOrders;
+        if (map is null || !map.TryGetValue(stackKey, out var list) || list is null || list.Count == 0)
+            return null;
+        return list;
+    }
+
+    public static void SavePanelOrder(string stackKey, IEnumerable<string> ids)
+    {
+        if (string.IsNullOrWhiteSpace(stackKey)) return;
+        var b = Read();
+        b.PanelOrders ??= new Dictionary<string, List<string>>(StringComparer.OrdinalIgnoreCase);
+        b.PanelOrders[stackKey] = new List<string>(ids);
+        Write(b);
+    }
+
+    public static double LoadPropsSidebarWidth() => Read().PropsSidebarWidth;
+
+    public static void SavePropsSidebarWidth(double width)
+    {
+        if (width < 120 || width > 600) return;
+        var b = Read();
+        b.PropsSidebarWidth = width;
+        Write(b);
+    }
+
+    public static bool LoadLayersPanelCollapsed() => Read().LayersPanelCollapsed;
+
+    public static void SaveLayersPanelCollapsed(bool collapsed)
+    {
+        var b = Read();
+        b.LayersPanelCollapsed = collapsed;
+        Write(b);
+    }
+
+    public static bool LoadLayersDockedLeft() => Read().LayersDockedLeft;
+
+    public static void SaveLayersDockedLeft(bool left)
+    {
+        var b = Read();
+        b.LayersDockedLeft = left;
+        Write(b);
+    }
+
+    public static double LoadLayersPanelWidth()
+    {
+        var w = Read().LayersPanelWidth;
+        return w >= 280 && w <= 640 ? w : 340;
+    }
+
+    public static void SaveLayersPanelWidth(double width)
+    {
+        if (width < 280 || width > 640) return;
+        var b = Read();
+        b.LayersPanelWidth = width;
+        Write(b);
+    }
+
+    public static double LoadVehiclesLayersWidth()
+    {
+        var w = Read().VehiclesLayersWidth;
+        return w >= 180 && w <= 480 ? w : 260;
+    }
+
+    public static void SaveVehiclesLayersWidth(double width)
+    {
+        if (width < 180 || width > 480) return;
+        var b = Read();
+        b.VehiclesLayersWidth = width;
+        Write(b);
+    }
+
+    public static double LoadVehiclesPaintWidth()
+    {
+        var w = Read().VehiclesPaintWidth;
+        return w >= 160 && w <= 420 ? w : 220;
+    }
+
+    public static void SaveVehiclesPaintWidth(double width)
+    {
+        if (width < 160 || width > 420) return;
+        var b = Read();
+        b.VehiclesPaintWidth = width;
+        Write(b);
+    }
+
+    public static double LoadVehiclesDetailsHeight()
+    {
+        var h = Read().VehiclesDetailsHeight;
+        return h >= 140 && h <= 560 ? h : 380;
+    }
+
+    public static void SaveVehiclesDetailsHeight(double height)
+    {
+        if (height < 140 || height > 560) return;
+        var b = Read();
+        b.VehiclesDetailsHeight = height;
+        Write(b);
+    }
+
+    public static double LoadOptimizeOptionsWidth()
+    {
+        var w = Read().OptimizeOptionsWidth;
+        return w >= 220 && w <= 520 ? w : 320;
+    }
+
+    public static void SaveOptimizeOptionsWidth(double width)
+    {
+        if (width < 220 || width > 520) return;
+        var b = Read();
+        b.OptimizeOptionsWidth = width;
+        Write(b);
+    }
+
+    /// <summary>Returns 0 when the queue column has never been resized, so the
+    /// caller keeps the default proportional (2*:3*) split.</summary>
+    public static double LoadOptimizeQueueWidth()
+    {
+        var w = Read().OptimizeQueueWidth;
+        return w >= 200 && w <= 900 ? w : 0;
+    }
+
+    public static void SaveOptimizeQueueWidth(double width)
+    {
+        if (width < 200 || width > 900) return;
+        var b = Read();
+        b.OptimizeQueueWidth = width;
+        Write(b);
+    }
+
+    public static double LoadPropsAnimTimelineHeight()
+    {
+        var h = Read().PropsAnimTimelineHeight;
+        return h >= 90 && h <= 420 ? h : 156;
+    }
+
+    public static void SavePropsAnimTimelineHeight(double height)
+    {
+        if (height < 90 || height > 420) return;
+        var b = Read();
+        b.PropsAnimTimelineHeight = height;
+        Write(b);
+    }
+
+    // ─── Workspace chrome session (open tabs + last view) ─────────────
+
+    public static IReadOnlyList<WorkspaceSessionTabBlob> LoadWorkspaceSessionTabs()
+        => Read().WorkspaceSessionTabs ?? (IReadOnlyList<WorkspaceSessionTabBlob>)Array.Empty<WorkspaceSessionTabBlob>();
+
+    public static int LoadWorkspaceSessionActiveIndex() => Read().WorkspaceSessionActiveIndex;
+
+    public static string? LoadLastActiveView() => Read().LastActiveView;
+
+    public static void SaveWorkspaceSession(
+        IEnumerable<WorkspaceSessionTabBlob> tabs,
+        int activeIndex,
+        string? activeView)
+    {
+        var b = Read();
+        b.WorkspaceSessionTabs = tabs.Select(t => new WorkspaceSessionTabBlob
+        {
+            Kind = t.Kind,
+            Title = t.Title,
+        }).ToList();
+        b.WorkspaceSessionActiveIndex = activeIndex;
+        b.LastActiveView = string.IsNullOrWhiteSpace(activeView) ? null : activeView;
         Write(b);
     }
 
@@ -543,6 +771,17 @@ public static class UserSettings
     {
         var b = Read();
         b.Language = string.IsNullOrWhiteSpace(code) ? null : code;
+        Write(b);
+    }
+
+    // ─── Theme accent ─────────────────────────────────────────────────
+
+    public static string? LoadAccentColorHex() => Read().AccentColorHex;
+
+    public static void SaveAccentColorHex(string? hex)
+    {
+        var b = Read();
+        b.AccentColorHex = string.IsNullOrWhiteSpace(hex) ? null : hex.Trim();
         Write(b);
     }
 

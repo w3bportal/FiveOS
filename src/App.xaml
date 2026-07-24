@@ -11,22 +11,11 @@
             <ResourceDictionary.MergedDictionaries>
                 <ui:ThemesDictionary Theme="Dark" />
                 <ui:ControlsDictionary />
+
+                <ResourceDictionary Source="Themes/FiveOSCharcoal.xaml" />
+                <ResourceDictionary Source="Themes/C4DMenu.xaml" />
             </ResourceDictionary.MergedDictionaries>
 
-            <!-- Theme: FiveOS is locked to genuine Fluent DARK (MainWindow ctor:
-                 ApplicationThemeManager.Apply(Dark)). We deliberately DO NOT
-                 override wpf-ui's Fluent brushes here anymore. The old block that
-                 lived here forced a flat "VS Code Dark+" palette + a fixed accent
-                 onto every control, which read as a generic dark IDE. Genuine
-                 Fluent dark surfaces + the Windows system accent now flow
-                 straight through. -->
-
-            <!-- Tooltips across the app — short delay so the inline hints we
-                 ship on every interactive control feel responsive, long
-                 ShowDuration so multi-sentence explanations stay open long
-                 enough to read. Defaults are 0.4s delay / 5s duration; the
-                 first is sluggish for power users, the second too short for
-                 anything past one line. -->
             <Style TargetType="{x:Type ToolTip}">
                 <Setter Property="MaxWidth" Value="320" />
             </Style>
@@ -44,15 +33,13 @@
             <conv:BooleanToVisibilityConverter x:Key="BooleanToVisibility" />
             <conv:InverseBooleanToVisibilityConverter x:Key="InverseBooleanToVisibility" />
             <conv:InverseBooleanConverter x:Key="InverseBoolean" />
+            <conv:NullToVisibilityConverter x:Key="NullToVisibility" />
             <conv:StringEqualsMultiConverter x:Key="StringEquals" />
             <conv:PathToImageSourceConverter x:Key="PathToImageSource" />
             <conv:FileExistsToBoolConverter x:Key="FileExistsToBool" />
             <conv:FileMissingToVisibilityConverter x:Key="FileMissingToVisibility" />
-            <conv:HexToColorConverter x:Key="HexColor" />
             <conv:MaterialPresetIsConverter x:Key="MaterialPresetIs" />
 
-            <!-- VM → View mapping for tab content. ContentControl in MainWindow
-                 resolves the right UserControl by matching DataType. -->
             <DataTemplate DataType="{x:Type vm:OptimizeViewModel}">
                 <views:OptimizeView />
             </DataTemplate>

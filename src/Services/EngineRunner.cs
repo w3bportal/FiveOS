@@ -51,6 +51,10 @@ public sealed class EngineRunner
         // copy stream/* into its staging tree before the temp workdir
         // is cleaned up.
         bool RouteToPack = false,
+        // Layers-outliner group the staged prop should join when routed
+        // to the pack session (null = loose top-level layer, exported
+        // separately). Only meaningful when RouteToPack is true.
+        string? PackGroup = null,
         // Per-part visual material override, keyed by the part's source
         // (mesh) name. Empty / unset entries default to the engine's
         // standard shader pick. Drives both the RAGE shader written into
@@ -79,7 +83,11 @@ public sealed class EngineRunner
         bool AutoSpin = false,
         string SpinAxis = "Z",
         double SpinSeconds = 4.0,
-        bool SpinReverse = false);
+        bool SpinReverse = false,
+        /// <summary>Optional JSON path of authored rotation keys
+        /// ([{t,rx,ry,rz},...]). When set with AnimatedProp, the engine
+        /// builds the .ycd from these keys instead of auto-spin / source clip.</summary>
+        string? AnimKeysPath = null);
 
     public sealed record ConvertOutcome(
         bool Success,
@@ -227,6 +235,11 @@ public sealed class EngineRunner
             args.Add(req.SpinSeconds.ToString(System.Globalization.CultureInfo.InvariantCulture));
             if (req.SpinReverse) args.Add("--spin-reverse");
         }
+        if (!string.IsNullOrWhiteSpace(req.AnimKeysPath) && File.Exists(req.AnimKeysPath))
+        {
+            args.Add("--anim-keys");
+            args.Add(req.AnimKeysPath);
+        }
         args.Add("--glass-opacity");
         args.Add(req.GlassOpacity.ToString("0.###", System.Globalization.CultureInfo.InvariantCulture));
 
@@ -332,7 +345,7 @@ public sealed class EngineRunner
     {
         try
         {
-            var entry = PropPackSession.Current.AddFromResourceDir(resourceDir, req.AssetName);
+            var entry = PropPackSession.Current.AddFromResourceDir(resourceDir, req.AssetName, req.PackGroup);
             if (entry is null)
             {
                 return new ConvertOutcome(false, null, OutputMode.Pack, log.ToString(),
@@ -498,5 +511,130 @@ public sealed class EngineRunner
             var cand = Path.Combine(dir, $"{name}-{n}{ext}");
             if (!File.Exists(cand) && !Directory.Exists(cand)) return cand;
         }
+    }
+
+    public sealed record RetextureOutcome(bool Success, string? ResourceDir, string Log, string? Error);
+
+    public async Task<RetextureOutcome> RunRetextureAsync(
+        string sourcePath,
+        string baseYdrPath,
+        string assetName,
+        string outputDir,
+        IReadOnlyDictionary<string, string> partDiffuse,
+        IReadOnlyCollection<string>? excludeMeshes = null,
+        IReadOnlyDictionary<string, string>? partMaterials = null,
+        double glassOpacity = 0.6,
+        Action<string>? onLog = null,
+        CancellationToken cancel = default)
+    {
+        if (!IsEngineAvailable())
+            return new RetextureOutcome(false, null, "",
+                $"Engine binary not found at {EnginePath}.");
+
+        Directory.CreateDirectory(outputDir);
+        var workDir = Path.Combine(Path.GetTempPath(), "FiveOS", "retex-" + Guid.NewGuid().ToString("N")[..8]);
+        Directory.CreateDirectory(workDir);
+
+        var mapPath = Path.Combine(workDir, "part-diffuse.json");
+        var payload = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var kv in partDiffuse)
+        {
+            if (string.IsNullOrWhiteSpace(kv.Key) || string.IsNullOrWhiteSpace(kv.Value))
+                continue;
+            if (!File.Exists(kv.Value)) continue;
+            payload[kv.Key] = kv.Value;
+        }
+        if (payload.Count == 0)
+            return new RetextureOutcome(false, null, "", "No valid texture files for this variant.");
+
+        File.WriteAllText(mapPath, System.Text.Json.JsonSerializer.Serialize(payload));
+
+        var args = new List<string>
+        {
+            "retexture",
+            sourcePath,
+            "--base-ydr", baseYdrPath,
+            "-o", outputDir,
+            "--name", assetName,
+            "--part-diffuse", mapPath,
+            "--glass-opacity", glassOpacity.ToString("0.###", System.Globalization.CultureInfo.InvariantCulture),
+        };
+        if (excludeMeshes != null && excludeMeshes.Count > 0)
+        {
+            args.Add("--exclude-mesh");
+            args.Add(string.Join(",", excludeMeshes));
+        }
+        if (partMaterials != null)
+        {
+            foreach (var kv in partMaterials)
+            {
+                if (string.IsNullOrEmpty(kv.Key) || string.IsNullOrEmpty(kv.Value)) continue;
+                args.Add("--part-mat");
+                args.Add($"{kv.Key}={kv.Value}");
+            }
+        }
+
+        var psi = new ProcessStartInfo
+        {
+            FileName = EnginePath,
+            WorkingDirectory = workDir,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            UseShellExecute = false,
+            CreateNoWindow = true,
+        };
+        foreach (var a in args) psi.ArgumentList.Add(a);
+
+        var log = new StringBuilder();
+        using var proc = new Process { StartInfo = psi, EnableRaisingEvents = true };
+        proc.OutputDataReceived += (_, e) =>
+        {
+            if (e.Data == null) return;
+            log.AppendLine(e.Data);
+            onLog?.Invoke(e.Data);
+        };
+        proc.ErrorDataReceived += (_, e) =>
+        {
+            if (e.Data == null) return;
+            log.AppendLine("[err] " + e.Data);
+            onLog?.Invoke(e.Data);
+        };
+
+        try
+        {
+            proc.Start();
+            proc.BeginOutputReadLine();
+            proc.BeginErrorReadLine();
+            await proc.WaitForExitAsync(cancel);
+        }
+        catch (OperationCanceledException)
+        {
+            try { if (!proc.HasExited) proc.Kill(entireProcessTree: true); } catch { }
+            return new RetextureOutcome(false, null, log.ToString(), "Cancelled.");
+        }
+        catch (Exception ex)
+        {
+            return new RetextureOutcome(false, null, log.ToString(),
+                $"Failed to launch retexture: {ex.Message}");
+        }
+        finally
+        {
+            try { Directory.Delete(workDir, recursive: true); } catch { }
+        }
+
+        if (proc.ExitCode != 0)
+        {
+            var tail = log.Length > 1500 ? log.ToString()[^1500..] : log.ToString();
+            return new RetextureOutcome(false, null, log.ToString(),
+                $"Retexture exit code {proc.ExitCode}." +
+                (string.IsNullOrWhiteSpace(tail) ? "" : "\n" + tail.Trim()));
+        }
+
+        var resourceDir = Path.Combine(outputDir, $"{assetName}_resource");
+        if (!Directory.Exists(resourceDir))
+            return new RetextureOutcome(false, null, log.ToString(),
+                $"Retexture succeeded but no resource folder at {resourceDir}.");
+
+        return new RetextureOutcome(true, resourceDir, log.ToString(), null);
     }
 }

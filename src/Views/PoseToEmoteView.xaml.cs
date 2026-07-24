@@ -12,6 +12,7 @@ using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Controls.Primitives;
+using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Media.Animation;
 using System.Windows.Threading;
@@ -48,6 +49,9 @@ public partial class PoseToEmoteView : UserControl
     private volatile bool _ycdImportBusy;
     private int _importClipRequestId;
     private readonly Dictionary<int, TaskCompletionSource<string?>> _importClipWaiters = new();
+    private int _timelineCmdRequestId;
+    private readonly Dictionary<int, TaskCompletionSource<JsonElement?>> _timelineCmdWaiters = new();
+    private bool _emoteTabSwitchBusy;
     // Animation Library — cached extract of the selected dictionary +
     // generation counter so rapid clip clicks don't apply stale imports.
     private byte[]? _animLibDictBytes;
@@ -99,6 +103,9 @@ public partial class PoseToEmoteView : UserControl
         InitializeComponent();
         DataContext = _vm;
         Focusable = true;
+        ThemeAccent.Changed += OnThemeAccentChanged;
+        SyncTimelineAccentBrushes();
+        SyncTrimRangeToDuration();
 #if FIVEOS_MOTION
         InitializeMotionHub();
 #endif
@@ -107,6 +114,7 @@ public partial class PoseToEmoteView : UserControl
         // the control is live (non-blocking).
         Loaded += (_, _) =>
         {
+            ApplyTimelineBodyRowHeights();
             if (_vm.IsAnimLibraryOpen)
                 _ = EnsureAnimLibraryLoadedAsync();
         };
@@ -123,6 +131,7 @@ public partial class PoseToEmoteView : UserControl
             ScheduleRedrawTimeline();
         };
         _timelineCtl.Changed += ScheduleRedrawTimeline;
+        AttachTimelineMiddleMouseNav();
         _trimSyncTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(40) };
         _trimSyncTimer.Tick += async (_, _) =>
         {
@@ -137,6 +146,14 @@ public partial class PoseToEmoteView : UserControl
         // edit; cheap enough).
         _vm.PropertyChanged += (s, ev) =>
         {
+            if (ev.PropertyName is nameof(PoseToEmoteViewModel.UndoDepth)
+                                or nameof(PoseToEmoteViewModel.RedoDepth)
+                                or nameof(PoseToEmoteViewModel.CanUndo)
+                                or nameof(PoseToEmoteViewModel.CanRedo))
+            {
+                HistoryChanged?.Invoke(this, EventArgs.Empty);
+            }
+
             // Body-calibration sliders re-solve the cached retarget live.
             if (ev.PropertyName is nameof(PoseToEmoteViewModel.CalibrationEnabled)
                                 or nameof(PoseToEmoteViewModel.CalibrationClearance)
@@ -147,34 +164,49 @@ public partial class PoseToEmoteView : UserControl
                 return;
             }
 
-            // Outliner selection state. The viewer-driven and
-            // user-click paths both funnel through _vm.SelectedBone; we
-            // mirror it onto each entry's IsSelected so the tree row
-            // can highlight, and auto-expand the group containing the
-            // newly-selected bone (otherwise clicking on the viewport
-            // marker would highlight a row that's hidden behind a
-            // collapsed region).
-            if (ev.PropertyName == nameof(PoseToEmoteViewModel.SelectedBone))
+            // Outliner selection state. Single-select still funnels through
+            // SelectedBone; multi-select (context menu / Shift-pick) paints
+            // via ApplyOutlinerBoneHighlight and leaves SelectedBone as the
+            // primary. Don't wipe a multi-highlight when only primary moves.
+            if (ev.PropertyName == nameof(PoseToEmoteViewModel.SelectedBone)
+                && _suppressSelectionEcho == 0)
             {
                 var sel = _vm.SelectedBone;
+                int selectedCount = 0;
                 foreach (var b in _vm.Bones)
+                    if (b.IsSelected) selectedCount++;
+                if (selectedCount <= 1)
                 {
-                    var should = ReferenceEquals(b, sel);
-                    if (b.IsSelected != should) b.IsSelected = should;
+                    foreach (var b in _vm.Bones)
+                    {
+                        var should = ReferenceEquals(b, sel);
+                        if (b.IsSelected != should) b.IsSelected = should;
+                    }
+                }
+                else if (sel != null && !sel.IsSelected)
+                {
+                    sel.IsSelected = true;
                 }
                 if (sel != null)
                 {
-                    var grp = _vm.BoneGroups.FirstOrDefault(g => g.Name == sel.Group);
-                    if (grp != null && !grp.IsExpanded) grp.IsExpanded = true;
+                    foreach (var rig in _vm.Rigs)
+                    {
+                        var grp = rig.BoneGroups.FirstOrDefault(g => g.Name == sel.Group);
+                        if (grp != null && !grp.IsExpanded) grp.IsExpanded = true;
+                    }
                 }
             }
 
             // Push duration/fps edits from the NumberBoxes down to the JS
             // timeline state so it stays the source of truth for playback.
-            if (_webViewReady && ev.PropertyName == nameof(PoseToEmoteViewModel.TimelineDuration))
+            if (ev.PropertyName == nameof(PoseToEmoteViewModel.TimelineDuration))
             {
-                var d = _vm.TimelineDuration.ToString("0.###", System.Globalization.CultureInfo.InvariantCulture);
-                _ = Viewport.CoreWebView2.ExecuteScriptAsync($"window.poseSetDuration && window.poseSetDuration({d})");
+                SyncTrimRangeToDuration();
+                if (_webViewReady)
+                {
+                    var d = _vm.TimelineDuration.ToString("0.###", System.Globalization.CultureInfo.InvariantCulture);
+                    _ = Viewport.CoreWebView2.ExecuteScriptAsync($"window.poseSetDuration && window.poseSetDuration({d})");
+                }
             }
             else if (_webViewReady && ev.PropertyName == nameof(PoseToEmoteViewModel.TimelineClipTrackVisible))
             {
@@ -185,9 +217,11 @@ public partial class PoseToEmoteView : UserControl
             {
                 RedrawTimeline();
             }
-            else if (_webViewReady && ev.PropertyName == nameof(PoseToEmoteViewModel.TimelineFps))
+            else if (ev.PropertyName == nameof(PoseToEmoteViewModel.TimelineFps))
             {
-                _ = Viewport.CoreWebView2.ExecuteScriptAsync($"window.poseSetFps && window.poseSetFps({_vm.TimelineFps})");
+                SyncTrimRangeToDuration();
+                if (_webViewReady)
+                    _ = Viewport.CoreWebView2.ExecuteScriptAsync($"window.poseSetFps && window.poseSetFps({_vm.TimelineFps})");
             }
             // Movement mode → preview travel. In Place / Upper-body hold the ped
             // centred; Root Motion slides it along the clip's baked mover so the
@@ -197,6 +231,17 @@ public partial class PoseToEmoteView : UserControl
                 bool travel = _vm.Movement == Services.EmoteMovement.RootMotion;
                 _ = Viewport.CoreWebView2.ExecuteScriptAsync(
                     $"window.poseSetRootMotionPreview && window.poseSetRootMotionPreview({(travel ? "true" : "false")})");
+                PushRootMotionScaleToViewer();
+                PushFootPlantToViewer();
+            }
+            else if (_webViewReady && ev.PropertyName == nameof(PoseToEmoteViewModel.RootMotionScale))
+            {
+                PushRootMotionScaleToViewer();
+            }
+            else if (_webViewReady && (ev.PropertyName == nameof(PoseToEmoteViewModel.FootPlantEnabled)
+                                      || ev.PropertyName == nameof(PoseToEmoteViewModel.FootPlantIntensity)))
+            {
+                PushFootPlantToViewer();
             }
 
             // Inspector → JS push: secondary-motion toggle + intensity
@@ -301,7 +346,14 @@ public partial class PoseToEmoteView : UserControl
                 case nameof(PoseToEmoteViewModel.TimelineFps):
                 case nameof(PoseToEmoteViewModel.TimelineZoom):
                 case nameof(PoseToEmoteViewModel.TimelineScrollOffset):
+                case nameof(PoseToEmoteViewModel.TrimStartFrame):
+                case nameof(PoseToEmoteViewModel.TrimEndFrame):
                     ScheduleRedrawTimeline();
+                    if (ev.PropertyName is nameof(PoseToEmoteViewModel.TrimStartFrame)
+                        or nameof(PoseToEmoteViewModel.TrimEndFrame)
+                        or nameof(PoseToEmoteViewModel.TimelineDuration)
+                        or nameof(PoseToEmoteViewModel.TimelineFps))
+                        PushPreviewRangeToViewer();
                     break;
             }
         };
@@ -348,6 +400,10 @@ public partial class PoseToEmoteView : UserControl
     /// default after warming Emotes off-screen during startup.</summary>
     public event Action? ViewerFirstReady;
     private bool _firstReadyFired;
+    /// <summary>One-shot: auto-load GTA male only on first Emotes boot.
+    /// Must not re-fire when a new Untitled tab clears HasRig, or + would
+    /// immediately refill the viewport with the default ped.</summary>
+    private bool _defaultEmoteRigBootstrapped;
 
     public void PreloadViewer()
     {
@@ -356,6 +412,36 @@ public partial class PoseToEmoteView : UserControl
         try { _ = InitWebViewAsync(); }
         catch (Exception ex) { Services.FosLogger.Warn("pose", "PreloadViewer failed", ex); }
     }
+
+    /// <summary>Release the Edge process tree and cancel background work.
+    /// Content-keyed ViewerPose folders are kept on disk for fast reopen;
+    /// <see cref="Services.CacheService"/> prunes older copies.</summary>
+    public void Teardown()
+    {
+        try { ThemeAccent.Changed -= OnThemeAccentChanged; } catch { /* */ }
+        try
+        {
+            if (Viewport?.CoreWebView2 != null)
+                Viewport.CoreWebView2.WebMessageReceived -= OnViewerMessage;
+        }
+        catch { /* */ }
+
+        try { _animLibScanCts?.Cancel(); } catch { /* */ }
+        try { _animLibScanCts?.Dispose(); } catch { /* */ }
+        _animLibScanCts = null;
+
+        try { Viewport?.Dispose(); } catch { /* already gone */ }
+        _webViewReady = false;
+        _viewerReady = false;
+    }
+
+    private void OnThemeAccentChanged(object? sender, EventArgs e) =>
+        Dispatcher.Invoke(() =>
+        {
+            SyncTimelineAccentBrushes();
+            PushAccentToViewer();
+            ScheduleRedrawTimeline();
+        });
 
     private async Task InitWebViewAsync()
     {
@@ -427,11 +513,12 @@ public partial class PoseToEmoteView : UserControl
     private void PushAccentToViewer()
     {
         if (!_webViewReady) return;
-        if (System.Windows.Application.Current?.TryFindResource("SystemAccentColorBrush") is not SolidColorBrush brush) return;
-        var c = brush.Color;
+        var c = ThemeAccent.Current;
+        if (System.Windows.Application.Current?.TryFindResource("SystemAccentColorBrush") is SolidColorBrush brush)
+            c = brush.Color;
         var hex = $"#{c.R:X2}{c.G:X2}{c.B:X2}";
         _ = Viewport.CoreWebView2.ExecuteScriptAsync(
-            $"document.documentElement.style.setProperty('--pose-accent','{hex}')");
+            $"(function(h){{var r=document.documentElement.style;r.setProperty('--pose-accent',h);r.setProperty('--vscode-accent',h);}})('{hex}')");
     }
 
     // ─── Boot-splash drop ─────────────────────────────────────────────
@@ -500,6 +587,7 @@ public partial class PoseToEmoteView : UserControl
                     if (_pendingModelUrl is { } url)
                     {
                         _pendingModelUrl = null;
+                        _defaultEmoteRigBootstrapped = true;
                         _vm.ViewerLoadingCaption = "Loading model...";
                         if (url.StartsWith("gta:", StringComparison.Ordinal))
                         {
@@ -512,18 +600,27 @@ public partial class PoseToEmoteView : UserControl
                             _ = LoadInViewerAsync(url);
                         }
                     }
-                    else if (!_vm.HasRig)
+                    else if (!_vm.HasRig && !_defaultEmoteRigBootstrapped)
                     {
                         // Default-load the synthetic male freemode rig on
                         // first viewer ready, so the Pose tab opens onto a
                         // posable model instead of the empty state. Skipped
-                        // if the user already kicked off their own load
-                        // before the ready message arrived (handled above).
+                        // on later clears (new Untitled tab) — those stay
+                        // empty until the user picks a rig.
+                        _defaultEmoteRigBootstrapped = true;
                         _vm.LoadedModelPath = "GTA Male (synthetic skeleton)";
                         _vm.StatusText = "Loading synthetic GTA male skeleton...";
                         _vm.ViewerLoadingCaption = "Loading default skeleton...";
                         _ = Viewport.CoreWebView2.ExecuteScriptAsync(
                             "window.loadGtaSkeleton && window.loadGtaSkeleton('male')");
+                    }
+                    else if (!_vm.HasRig)
+                    {
+                        // Empty Untitled tab (or cleared session) — keep the
+                        // grid clean, no Assets drop-zone, no auto-reload.
+                        _ = Viewport.CoreWebView2.ExecuteScriptAsync(
+                            "window.clearEmoteTab && window.clearEmoteTab()");
+                        _vm.IsViewerLoading = false;
                     }
                     else
                     {
@@ -547,6 +644,7 @@ public partial class PoseToEmoteView : UserControl
 
                 case "pose-mode-entered":
                     Services.FosLogger.Info("pose", "viewer: pose-mode-entered (rig ready) — Emotes tab now opens instantly");
+                    PushPreviewRangeToViewer();
                     if (!_firstReadyFired)
                     {
                         _firstReadyFired = true;
@@ -697,6 +795,7 @@ public partial class PoseToEmoteView : UserControl
                         }
                         _vm.HasRig = _vm.Bones.Count > 0;
                         _vm.NotifyBonesChanged();
+                        SyncActiveEmoteTitleFromModel();
                         // Keep the status line clean on load (user "keep only
                         // essential"); the FK/IK how-to lives in the ? shortcuts
                         // tooltip and Pose Settings. Status still shows real
@@ -722,6 +821,9 @@ public partial class PoseToEmoteView : UserControl
                             $"window.poseSetOnionSkin && window.poseSetOnionSkin({onion});" +
                             $"window.poseSetIkMode && window.poseSetIkMode({ikOn});" +
                             $"window.poseSetFootLock && window.poseSetFootLock({footOn})");
+                        PushSecondaryMotionToViewer();
+                        PushRootMotionScaleToViewer();
+                        PushFootPlantToViewer();
                         // Clear any prior clip drive dots until a new map arrives.
                         foreach (var bone in _vm.Bones)
                         {
@@ -822,27 +924,39 @@ public partial class PoseToEmoteView : UserControl
                     {
                         if (!doc.RootElement.TryGetProperty("index", out var iEl)) return;
                         var i = iEl.GetInt32();
-                        if (i >= 0 && i < _vm.Bones.Count)
+                        // Keep the viewer's ORDER (primary = last) — Ctrl+click
+                        // toggling in the outliner replays this list.
+                        var ordered = new List<int>();
+                        var multi = new HashSet<int>();
+                        if (doc.RootElement.TryGetProperty("indices", out var idxs)
+                            && idxs.ValueKind == System.Text.Json.JsonValueKind.Array)
                         {
-                            // Hard-suppress every SelectionChanged that
-                            // fires synchronously off the SelectedBone
-                            // assignment below. Belt-and-braces alongside
-                            // _lastPushedBoneIndex: even if a CollectionView
-                            // refresh sneaks in multiple SelectionChanged
-                            // events (each with a different .Index than
-                            // _lastPushedBoneIndex), the flag drops them
-                            // all on the floor and prevents echoing
-                            // selectPoseBone back into the viewer.
-                            _suppressSelectionEcho++;
-                            try
+                            foreach (var el in idxs.EnumerateArray())
                             {
-                                _lastPushedBoneIndex = i;
-                                _vm.SelectedBone = _vm.Bones[i];
+                                if (el.ValueKind == System.Text.Json.JsonValueKind.Number
+                                    && multi.Add(el.GetInt32()))
+                                    ordered.Add(el.GetInt32());
                             }
-                            finally
-                            {
-                                _suppressSelectionEcho--;
-                            }
+                        }
+                        if (multi.Count == 0 && i >= 0) { multi.Add(i); ordered.Add(i); }
+                        _boneSelectionOrder.Clear();
+                        _boneSelectionOrder.AddRange(ordered);
+
+                        _suppressSelectionEcho++;
+                        try
+                        {
+                            _lastPushedBoneIndex = i;
+                            ApplyOutlinerBoneHighlight(multi);
+                            SyncTimelineRowHighlightToBoneSelection(multi);
+                            var picked = FindBoneBySkeletonIndex(i);
+                            if (picked != null)
+                                _vm.SelectedBone = picked;
+                            else if (multi.Count == 0)
+                                _vm.SelectedBone = null;
+                        }
+                        finally
+                        {
+                            _suppressSelectionEcho--;
                         }
                     });
                     break;
@@ -852,18 +966,11 @@ public partial class PoseToEmoteView : UserControl
                     {
                         if (!doc.RootElement.TryGetProperty("index", out var iEl)) return;
                         var i = iEl.GetInt32();
-                        if (i < 0 || i >= _vm.Bones.Count) return;
-                        // Per-frame guard: only flip IsModified the first
-                        // time the bone moves. Re-firing NotifyBonesChanged
-                        // every frame triggers CollectionView refresh
-                        // (IsLiveGroupingRequested=True), which in turn
-                        // re-fires ListBox.SelectionChanged — which would
-                        // bounce a selectPoseBone call back into the JS
-                        // viewer mid-drag and yank the gizmo around. The
-                        // "gizmo glitches between bones" symptom.
-                        if (!_vm.Bones[i].IsModified)
+                        var moved = FindBoneBySkeletonIndex(i);
+                        if (moved == null) return;
+                        if (!moved.IsModified)
                         {
-                            _vm.Bones[i].IsModified = true;
+                            moved.IsModified = true;
                             _vm.NotifyBonesChanged();
                         }
                     });
@@ -882,6 +989,11 @@ public partial class PoseToEmoteView : UserControl
                 // the hotkey asks rather than clearing on its own.
                 case "pose-clear-all-requested":
                     Dispatcher.Invoke(() => _ = ClearAllAsync());
+                    break;
+
+                // Viewer K → host record so Outliner selection sparse-keys.
+                case "request-add-keyframe":
+                    Dispatcher.Invoke(() => OnAddKeyframe(this, new RoutedEventArgs()));
                     break;
 
                 case "pose-timeline-update":
@@ -903,28 +1015,34 @@ public partial class PoseToEmoteView : UserControl
                             if (rev <= _timelineStateRevApplied) return;
                             _timelineStateRevApplied = rev;
                         }
+                        bool structural = false;
                         // Re-sync C# state from the JS source-of-truth.
                         if (rootUpd.TryGetProperty("time", out var tEl))
                             _vm.TimelineTime = tEl.GetDouble();
                         if (rootUpd.TryGetProperty("duration", out var dEl))
-                            _vm.TimelineDuration = dEl.GetDouble();
+                        {
+                            var d = dEl.GetDouble();
+                            if (System.Math.Abs(d - _vm.TimelineDuration) > 1e-9) structural = true;
+                            _vm.TimelineDuration = d;
+                        }
                         if (rootUpd.TryGetProperty("fps", out var fEl))
-                            _vm.TimelineFps = fEl.GetInt32();
-                        // Keep the transport's Start/End range boxes in sync
-                        // with the clip length (End follows a new duration).
-                        var totalF = (int)System.Math.Round(_vm.TimelineDuration * System.Math.Max(1, _vm.TimelineFps));
-                        if (_vm.TrimEndFrame <= 0 || _vm.TrimEndFrame > totalF) _vm.TrimEndFrame = totalF;
-                        if (_vm.TrimStartFrame < 0 || _vm.TrimStartFrame >= totalF) _vm.TrimStartFrame = 0;
+                        {
+                            var f = fEl.GetInt32();
+                            if (f != _vm.TimelineFps) structural = true;
+                            _vm.TimelineFps = f;
+                        }
+                        SyncTrimRangeToDuration();
                         if (rootUpd.TryGetProperty("playing", out var pEl))
                             _vm.TimelinePlaying = pEl.GetBoolean();
                         if (rootUpd.TryGetProperty("loop", out var lEl))
                             _vm.TimelineLoop = lEl.GetBoolean();
                         if (rootUpd.TryGetProperty("keyframes", out var kEl))
-                        {
-                            RebuildKeyframeMarkers(kEl);
-                        }
+                            structural |= RebuildKeyframeMarkers(kEl);
+                        MarkActiveEmoteDirty();
                         UpdatePlayButtonVisual();
-                        ScheduleRedrawTimeline();
+                        // Playhead moves via TimelineTime PropertyChanged — only
+                        // full-redraw when keys/duration/fps actually changed.
+                        if (structural) ScheduleRedrawTimeline();
                     }), DispatcherPriority.Background);
                     break;
                 }
@@ -1002,6 +1120,29 @@ public partial class PoseToEmoteView : UserControl
                             _vm.StatusText = mEl.GetString() ?? "";
                     });
                     break;
+
+                case "host-timeline-command-result":
+                {
+                    if (!doc.RootElement.TryGetProperty("requestId", out var tidEl)
+                        || !tidEl.TryGetInt32(out var tid))
+                        break;
+                    string? captureJson = null;
+                    if (doc.RootElement.TryGetProperty("capture", out var capEl)
+                        && capEl.ValueKind is JsonValueKind.Object or JsonValueKind.Array)
+                        captureJson = capEl.GetRawText();
+                    lock (_timelineCmdWaiters)
+                    {
+                        if (_timelineCmdWaiters.Remove(tid, out var tcs))
+                        {
+                            // Prefer capture blob; else pass whole root for callers that inspect ok/op.
+                            if (captureJson != null)
+                                tcs.TrySetResult(JsonDocument.Parse(captureJson).RootElement.Clone());
+                            else
+                                tcs.TrySetResult(doc.RootElement.Clone());
+                        }
+                    }
+                    break;
+                }
 
                 case "import-keyframe-clip-result":
                     if (doc.RootElement.TryGetProperty("requestId", out var reqEl))
@@ -1292,6 +1433,9 @@ case "prop-loaded":
             track.DisplayName = TimelineTrackRow.IsSpecialTrack(track)
                 ? track.Name
                 : TimelineTrackRow.FriendlyName(track.Name);
+            // Hand-recorded lane sits under the bone's clip lane — label it.
+            if (track.Id.StartsWith("bone-keys-user:", StringComparison.Ordinal))
+                track.DisplayName += " · keys";
             if (!TimelineTrackRow.IsSpecialTrack(track))
             {
                 var (group, _) = BoneGroupClassifier.Classify(track.Name);
@@ -1330,6 +1474,8 @@ case "prop-loaded":
                 key.Time = keyElement.TryGetProperty("time", out var time) ? time.GetDouble() : 0;
                 key.Ease = keyElement.TryGetProperty("ease", out var ease)
                     ? ease.GetString() ?? "auto" : "auto";
+                key.Src = keyElement.TryGetProperty("src", out var srcEl)
+                    ? srcEl.GetString() ?? "clip" : "clip";
                 key.IsSelected = _timelineSelection.Contains(
                     new TimelineItemRef(TimelineItemKind.Keyframe, keyId));
             }
@@ -1345,7 +1491,247 @@ case "prop-loaded":
         }
 
         RebuildDopeDisplayTracks();
+        ReconcileSelectedPiece();
+        SyncTrimRangeToDuration();
         ScheduleRedrawTimeline();
+    }
+
+    /// <summary>Re-derive the selected piece after a snapshot rebuilt the
+    /// lanes (deleteKeys/splitAt/moveKeys/undo all echo this way); cleared
+    /// when its keys are gone. Kept silent — no status-text changes.</summary>
+    private void ReconcileSelectedPiece()
+    {
+        if (_selectedPiece is not { } sel) return;
+        if (sel.TrackId.StartsWith("group:", StringComparison.Ordinal))
+        {
+            var header = _vm.DopeDisplayTracks.FirstOrDefault(t =>
+                t.IsGroupHeader && string.Equals(t.Id, sel.TrackId, StringComparison.Ordinal));
+            var mid = (sel.T0 + sel.T1) / 2;
+            if (header != null && ResolvePieceAt(header, mid) is { } piece)
+            {
+                double t0 = double.MaxValue, t1 = double.MinValue;
+                var ids = new HashSet<string>(StringComparer.Ordinal);
+                foreach (var k in piece.Keys)
+                {
+                    ids.Add(k.Id);
+                    if (k.Time < t0) t0 = k.Time;
+                    if (k.Time > t1) t1 = k.Time;
+                }
+                _selectedPiece = new DopePieceSelection(sel.TrackId, ids, piece.BoneNames, t0, t1);
+            }
+            else
+            {
+                ClearSelectedPiece(redraw: false);
+            }
+            return;
+        }
+        var track = _vm.TimelineTracks.FirstOrDefault(t =>
+            string.Equals(t.Id, sel.TrackId, StringComparison.Ordinal));
+        var anchor = track?.Keys.FirstOrDefault(k => sel.KeyIds.Contains(k.Id));
+        if (track is null || anchor is null)
+        {
+            ClearSelectedPiece(redraw: false);
+            return;
+        }
+        var seg = SegmentKeysAround(track, anchor);
+        _selectedPiece = new DopePieceSelection(
+            track.Id,
+            seg.Select(k => k.Id).ToHashSet(StringComparer.Ordinal),
+            sel.BoneNames,
+            seg[0].Time,
+            seg[^1].Time);
+    }
+
+    private int _lastTrimTotalFrames;
+
+    private void SyncTrimRangeToDuration()
+    {
+        var totalF = System.Math.Max(1, _vm.TimelineTotalFrames);
+        if (_lastTrimTotalFrames <= 0)
+        {
+            // First sync only — seed full clip. Later duration changes keep
+            // a user-set Out unless it was tracking the old full length.
+            _vm.TrimStartFrame = 0;
+            _vm.TrimEndFrame = totalF;
+        }
+        else if (_vm.TrimEndFrame == _lastTrimTotalFrames)
+        {
+            _vm.TrimEndFrame = totalF;
+        }
+        else if (_vm.TrimEndFrame > totalF)
+        {
+            _vm.TrimEndFrame = totalF;
+        }
+
+        if (_vm.TrimStartFrame < 0) _vm.TrimStartFrame = 0;
+        if (_vm.TrimStartFrame >= totalF)
+            _vm.TrimStartFrame = System.Math.Max(0, totalF - 1);
+        if (_vm.TrimEndFrame <= _vm.TrimStartFrame)
+            _vm.TrimEndFrame = System.Math.Min(totalF, _vm.TrimStartFrame + 1);
+
+        _lastTrimTotalFrames = totalF;
+        PushPreviewRangeToViewer();
+    }
+
+    private void SetTrimInFrame(int frame)
+    {
+        var totalF = System.Math.Max(1, _vm.TimelineTotalFrames);
+        frame = System.Math.Clamp(frame, 0, System.Math.Max(0, totalF - 1));
+        if (frame >= _vm.TrimEndFrame)
+            _vm.TrimEndFrame = System.Math.Min(totalF, frame + 1);
+        if (_vm.TrimStartFrame != frame)
+            _vm.TrimStartFrame = frame;
+        else
+        {
+            ScheduleRedrawTimeline();
+            PushPreviewRangeToViewer();
+        }
+    }
+
+    private void SetTrimOutFrame(int frame)
+    {
+        var totalF = System.Math.Max(1, _vm.TimelineTotalFrames);
+        frame = System.Math.Clamp(frame, 1, totalF);
+        if (frame <= _vm.TrimStartFrame)
+            _vm.TrimStartFrame = System.Math.Max(0, frame - 1);
+        if (_vm.TrimEndFrame != frame)
+            _vm.TrimEndFrame = frame;
+        else
+        {
+            ScheduleRedrawTimeline();
+            PushPreviewRangeToViewer();
+        }
+    }
+
+    private void OnTrimInOutWheel(object sender, System.Windows.Input.MouseWheelEventArgs e)
+    {
+        if (sender is not System.Windows.Controls.TextBox tb) return;
+        e.Handled = true;
+        var step = e.Delta > 0 ? 1 : -1;
+        if (System.Windows.Input.Keyboard.Modifiers.HasFlag(System.Windows.Input.ModifierKeys.Shift))
+            step *= 10;
+        var isIn = string.Equals(tb.Tag as string, "In", StringComparison.Ordinal);
+        if (isIn) SetTrimInFrame(_vm.TrimStartFrame + step);
+        else SetTrimOutFrame(_vm.TrimEndFrame + step);
+        tb.Text = (isIn ? _vm.TrimStartFrame : _vm.TrimEndFrame).ToString();
+        _vm.StatusText = $"Playback range In {_vm.TrimStartFrame} → Out {_vm.TrimEndFrame}";
+    }
+
+    private void OnTrimInOutKeyDown(object sender, System.Windows.Input.KeyEventArgs e)
+    {
+        if (e.Key != System.Windows.Input.Key.Enter) return;
+        CommitTrimInOutBox(sender as System.Windows.Controls.TextBox);
+        System.Windows.Input.Keyboard.ClearFocus();
+        e.Handled = true;
+    }
+
+    private void OnTrimInOutLostFocus(object sender, RoutedEventArgs e) =>
+        CommitTrimInOutBox(sender as System.Windows.Controls.TextBox);
+
+    private void CommitTrimInOutBox(System.Windows.Controls.TextBox? tb)
+    {
+        if (tb is null) return;
+        if (!int.TryParse(tb.Text.Trim(), out var frame))
+        {
+            tb.Text = string.Equals(tb.Tag as string, "In", StringComparison.Ordinal)
+                ? _vm.TrimStartFrame.ToString()
+                : _vm.TrimEndFrame.ToString();
+            return;
+        }
+        if (string.Equals(tb.Tag as string, "In", StringComparison.Ordinal))
+            SetTrimInFrame(frame);
+        else
+            SetTrimOutFrame(frame);
+        tb.Text = string.Equals(tb.Tag as string, "In", StringComparison.Ordinal)
+            ? _vm.TrimStartFrame.ToString()
+            : _vm.TrimEndFrame.ToString();
+    }
+
+    /// <summary>In–Out preview window in seconds (Blender playback range).</summary>
+    private void GetPlaybackRangeTimes(out double startSec, out double endSec)
+    {
+        var fps = System.Math.Max(1, _vm.TimelineFps);
+        var dur = System.Math.Max(0.001, _vm.TimelineDuration);
+        var totalF = System.Math.Max(1, (int)System.Math.Round(dur * fps));
+        var inF = System.Math.Clamp(_vm.TrimStartFrame, 0, System.Math.Max(0, totalF - 1));
+        var outF = System.Math.Clamp(_vm.TrimEndFrame, inF + 1, totalF);
+        startSec = inF / (double)fps;
+        endSec = outF / (double)fps;
+        if (endSec <= startSec)
+            endSec = System.Math.Min(dur, startSec + 1.0 / fps);
+    }
+
+    /// <summary>Keep the viewer looping / stopping inside the In–Out window.</summary>
+    private void PushPreviewRangeToViewer()
+    {
+        if (!_webViewReady) return;
+        GetPlaybackRangeTimes(out var s, out var e);
+        var sArg = s.ToString("0.###", System.Globalization.CultureInfo.InvariantCulture);
+        var eArg = e.ToString("0.###", System.Globalization.CultureInfo.InvariantCulture);
+        _ = Viewport.CoreWebView2.ExecuteScriptAsync(
+            $"window.poseSetPreviewRange && window.poseSetPreviewRange({sArg}, {eArg})");
+    }
+
+    /// <summary>Blender-style In–Out wash: dark outside, slight lift inside,
+    /// thin edge markers. Drawn under grid/keys on dope + sequencer layers.</summary>
+    private void DrawPlaybackRangeHighlight(DrawingContext dc, double width, double height,
+                                            Func<double, double> timeToX)
+    {
+        if (width < 10 || height < 2) return;
+        GetPlaybackRangeTimes(out var t0, out var t1);
+        var x0 = timeToX(t0);
+        var x1 = timeToX(t1);
+
+        if (x0 > 0)
+        {
+            var leftW = System.Math.Min(width, System.Math.Max(0, x0));
+            if (leftW > 0.5)
+                dc.DrawRectangle(PlaybackRangeOutsideBrush, null, new Rect(0, 0, leftW, height));
+        }
+
+        var insideL = System.Math.Max(0, x0);
+        var insideR = System.Math.Min(width, x1);
+        if (insideR > insideL + 0.5)
+            dc.DrawRectangle(PlaybackRangeInsideBrush, null,
+                new Rect(insideL, 0, insideR - insideL, height));
+
+        if (x1 < width)
+        {
+            var rightL = System.Math.Max(0, x1);
+            var rightW = width - rightL;
+            if (rightW > 0.5)
+                dc.DrawRectangle(PlaybackRangeOutsideBrush, null, new Rect(rightL, 0, rightW, height));
+        }
+
+        // Blender-like In/Out caps on the ruler strip.
+        DrawRangeHandle(dc, x0, height, PlaybackRangeInBrush, inward: true);
+        DrawRangeHandle(dc, x1, height, PlaybackRangeOutBrush, inward: false);
+    }
+
+    private static void DrawRangeHandle(DrawingContext dc, double x, double height, Brush fill, bool inward)
+    {
+        if (x < -8 || double.IsNaN(x)) return;
+        dc.DrawLine(PlaybackRangeMarkerPen, new Point(x, 0), new Point(x, height));
+        var geo = new StreamGeometry();
+        using (var ctx = geo.Open())
+        {
+            if (inward)
+            {
+                ctx.BeginFigure(new Point(x, 0), true, true);
+                ctx.LineTo(new Point(x + 7, 0), true, false);
+                ctx.LineTo(new Point(x + 7, 9), true, false);
+                ctx.LineTo(new Point(x, 12), true, false);
+            }
+            else
+            {
+                ctx.BeginFigure(new Point(x, 0), true, true);
+                ctx.LineTo(new Point(x - 7, 0), true, false);
+                ctx.LineTo(new Point(x - 7, 9), true, false);
+                ctx.LineTo(new Point(x, 12), true, false);
+            }
+        }
+        geo.Freeze();
+        dc.DrawGeometry(fill, null, geo);
     }
 
     private static string JsonElementId(JsonElement parent, string property)
@@ -1371,6 +1757,7 @@ case "prop-loaded":
         // user clicks fast enough that the WebView2 hasn't started its
         // init yet, kick it off here so the load isn't dropped.
         if (!_webViewReady) await InitWebViewAsync();
+        await EnsureFreshTabForImportAsync();
         await LoadModelAsync(dlg.FileName);
     }
 
@@ -1400,6 +1787,7 @@ case "prop-loaded":
         _vm.BoneGroups.Clear();
         _vm.NotifyBonesChanged();
         _vm.StatusText = "Loading " + Path.GetFileName(path) + "...";
+        SyncActiveEmoteTitleFromModel();
 
         var url = "https://pose-viewer.local/user-pose-model" + ext;
         if (_viewerReady) await LoadInViewerAsync(url);
@@ -1419,8 +1807,16 @@ case "prop-loaded":
         await Viewport.CoreWebView2.ExecuteScriptAsync("window.resetPose && window.resetPose()");
     }
 
-    private async void OnLoadGtaMale(object sender, RoutedEventArgs e) => await LoadGtaPresetAsync("male");
-    private async void OnLoadGtaFemale(object sender, RoutedEventArgs e) => await LoadGtaPresetAsync("female");
+    private async void OnLoadGtaMale(object sender, RoutedEventArgs e)
+    {
+        await EnsureFreshTabForImportAsync();
+        await LoadGtaPresetAsync("male");
+    }
+    private async void OnLoadGtaFemale(object sender, RoutedEventArgs e)
+    {
+        await EnsureFreshTabForImportAsync();
+        await LoadGtaPresetAsync("female");
+    }
 
     // Pose-preset handlers were removed in v10 -- the hardcoded
     // axis-angle quaternions didn't match the freemode bind orientation
@@ -1472,6 +1868,7 @@ case "prop-loaded":
         _vm.BoneGroups.Clear();
         _vm.NotifyBonesChanged();
         _vm.StatusText = "Loading synthetic GTA " + variant + " skeleton...";
+        SyncActiveEmoteTitleFromModel();
 
         if (_viewerReady)
         {
@@ -1521,14 +1918,16 @@ case "prop-loaded":
 
     private async void OnTimelineGoToStart(object sender, RoutedEventArgs e)
     {
-        await SeekTimelineAsync(0);
-        _vm.StatusText = "Playhead → start.";
+        GetPlaybackRangeTimes(out var inT, out _);
+        await SeekTimelineAsync(inT);
+        _vm.StatusText = "Playhead → In.";
     }
 
     private async void OnTimelineGoToEnd(object sender, RoutedEventArgs e)
     {
-        await SeekTimelineAsync(_vm.TimelineDuration);
-        _vm.StatusText = "Playhead → end.";
+        GetPlaybackRangeTimes(out _, out var outT);
+        await SeekTimelineAsync(outT);
+        _vm.StatusText = "Playhead → Out.";
     }
 
     private async void OnTimelinePrevFrame(object sender, RoutedEventArgs e)
@@ -1545,6 +1944,24 @@ case "prop-loaded":
         _vm.StatusText = $"Frame {_vm.TimelineCurrentFrame}.";
     }
 
+    private async void OnTimelinePrevKeyframe(object sender, RoutedEventArgs e)
+    {
+        var allTimes = _vm.TimelineTracks.SelectMany(x => x.Keys)
+            .Select(x => x.Time).Distinct().OrderBy(x => x).ToArray();
+        var target = allTimes.LastOrDefault(x => x < _vm.TimelineTime - 1e-4, _vm.TimelineTime);
+        await SeekTimelineAsync(target);
+        _vm.StatusText = $"Keyframe → frame {_vm.TimelineCurrentFrame}.";
+    }
+
+    private async void OnTimelineNextKeyframe(object sender, RoutedEventArgs e)
+    {
+        var allTimes = _vm.TimelineTracks.SelectMany(x => x.Keys)
+            .Select(x => x.Time).Distinct().OrderBy(x => x).ToArray();
+        var target = allTimes.FirstOrDefault(x => x > _vm.TimelineTime + 1e-4, _vm.TimelineTime);
+        await SeekTimelineAsync(target);
+        _vm.StatusText = $"Keyframe → frame {_vm.TimelineCurrentFrame}.";
+    }
+
     private async void OnTimelineLoopToggle(object sender, RoutedEventArgs e)
     {
         if (!_webViewReady) { _vm.StatusText = "Viewer not ready."; return; }
@@ -1553,31 +1970,59 @@ case "prop-loaded":
         _vm.StatusText = _vm.TimelineLoop ? "Loop off…" : "Loop on…";
     }
 
+    /// <summary>A toggle: viewer-side auto-key records a sparse user key
+    /// whenever a bone edit commits (default ON — matches viewer default).</summary>
+    private void OnAutoKeyToggled(object sender, RoutedEventArgs e)
+    {
+        if (!_webViewReady) return;
+        var on = AutoKeyToggle?.IsChecked == true;
+        _ = Viewport.CoreWebView2.ExecuteScriptAsync(
+            $"window.poseSetAutoKey && window.poseSetAutoKey({(on ? "true" : "false")})");
+        _vm.StatusText = on
+            ? "Auto-key ON — posing a bone records a key at the playhead."
+            : "Auto-key OFF — use ◇ to record keys manually.";
+    }
+
     private async void OnAddKeyframe(object sender, RoutedEventArgs e)
     {
         if (!_webViewReady) { _vm.StatusText = "Viewer not ready."; return; }
-        var selected = _vm.TimelineTracks.Where(x => x.IsSelected).Select(x => x.Id).ToArray();
-        if (selected.Length > 0)
+        var selectedBones = _vm.Bones.Where(b => b.IsSelected).Select(b => b.Index).ToArray();
+        if (selectedBones.Length == 0)
         {
-            // Bone rows selected → key just those tracks.
-            await SendTimelineCommandAsync("addKey", selected,
+            selectedBones = _vm.TimelineTracks
+                .Where(x => x.IsSelected && !x.IsGroupHeader && !TimelineTrackRow.IsSpecialTrack(x))
+                .Select(x => _vm.Bones.FirstOrDefault(b =>
+                    string.Equals(b.Name, x.Name, StringComparison.OrdinalIgnoreCase))?.Index)
+                .Where(i => i is >= 0)
+                .Select(i => i!.Value)
+                .Distinct()
+                .ToArray();
+        }
+        if (selectedBones.Length > 0)
+        {
+            var ids = selectedBones.Select(i => $"bone:{i}").ToArray();
+            await SendTimelineCommandAsync("addKey", ids,
                 new { time = _vm.TimelineTime, fullPose = false });
-            _vm.StatusText = $"Keyframe set on {selected.Length} track(s) at {_vm.TimelineTimecodeLabel}.";
+            _vm.StatusText =
+                $"Keyframe set on {selectedBones.Length} bone(s) at {_vm.TimelineTimecodeLabel}.";
         }
         else
         {
-            // Full-pose record: ALWAYS the proven poseAddKeyframe path — it
-            // snapshots the pose, stores the key AND echoes the timeline
-            // update that makes the diamond appear. (The unified layers
-            // timeline briefly routed this through the 'addKey fullPose'
-            // dope op, which records silently with no visible result.)
-            await Viewport.CoreWebView2.ExecuteScriptAsync(
-                "window.poseAddKeyframe && window.poseAddKeyframe()");
-            _vm.StatusText = $"Keyframe set at {_vm.TimelineTimecodeLabel}.";
+            var selectedTracks = _vm.TimelineTracks.Where(x => x.IsSelected).Select(x => x.Id).ToArray();
+            if (selectedTracks.Length > 0)
+            {
+                await SendTimelineCommandAsync("addKey", selectedTracks,
+                    new { time = _vm.TimelineTime, fullPose = false });
+                _vm.StatusText = $"Keyframe set on {selectedTracks.Length} track(s) at {_vm.TimelineTimecodeLabel}.";
+            }
+            else
+            {
+                await SendTimelineCommandAsync("addKey", new[] { "track-pose-keys" },
+                    new { time = _vm.TimelineTime, fullPose = true });
+                _vm.StatusText = $"Keyframe set at {_vm.TimelineTimecodeLabel}.";
+            }
         }
-        // Redraw only — the poseAddKeyframe echo already updates the summary
-        // lane, and a full document snapshot here (47 tracks × N keys) was a
-        // measurable hitch on every record press.
+        await SendTimelineCommandAsync("requestSnapshot");
         ScheduleRedrawTimeline();
     }
 
@@ -1602,10 +2047,10 @@ case "prop-loaded":
         double s = System.Math.Max(0, _vm.TrimStartFrame) / (double)fps;
         double en = System.Math.Max(_vm.TrimStartFrame + 1, _vm.TrimEndFrame) / (double)fps;
         await SendTimelineCommandAsync("trimRange", null, new { start = s, end = en });
-        // Range boxes re-sync from the echoed (shorter) duration.
         _vm.TrimStartFrame = 0;
         _vm.TrimEndFrame = 0;
         _ = SendTimelineCommandAsync("requestSnapshot");
+        SyncTrimRangeToDuration();
         _vm.StatusText = "Trimmed to range.";
     }
 
@@ -1652,8 +2097,9 @@ case "prop-loaded":
     /// canvas-based timeline computes positions itself at draw time
     /// from Time + the live canvas width, so we don't need to
     /// pre-bake them here. Kept the collection for the animated-chip
-    /// + skipped-bones tracking and external consumers.</summary>
-    private void RebuildKeyframeMarkers(JsonElement kEl)
+    /// + skipped-bones tracking and external consumers.
+    /// Returns true when membership/order/ease changed (caller should redraw).</summary>
+    private bool RebuildKeyframeMarkers(JsonElement kEl)
     {
         // Fresh marker state supersedes any bar-drag preview span.
         _barPreviewStart = _barPreviewEnd = -1;
@@ -1664,6 +2110,7 @@ case "prop-loaded":
             byId.TryAdd(existing.Id, existing);
         var live = new HashSet<string>(StringComparer.Ordinal);
         var order = new List<KeyframeMarker>();
+        bool contentChanged = false;
         foreach (var t in kEl.EnumerateArray())
         {
             string id;
@@ -1688,6 +2135,12 @@ case "prop-loaded":
             {
                 marker = new KeyframeMarker { Id = id };
                 byId[id] = marker;
+                contentChanged = true;
+            }
+            else if (System.Math.Abs(marker.Time - time) > 1e-9
+                     || !string.Equals(marker.Ease, ease, StringComparison.Ordinal))
+            {
+                contentChanged = true;
             }
             marker.Time = time;
             marker.Ease = ease;
@@ -1705,14 +2158,30 @@ case "prop-loaded":
         }
         if (!same)
         {
+            contentChanged = true;
             _vm.TimelineKeyframes.Clear();
             foreach (var marker in order) _vm.TimelineKeyframes.Add(marker);
         }
         for (int i = _vm.TimelineKeyframes.Count - 1; i >= 0; i--)
+        {
             if (!live.Contains(_vm.TimelineKeyframes[i].Id))
+            {
+                contentChanged = true;
                 _vm.TimelineKeyframes.RemoveAt(i);
-        InvalidateDopeVisibleTracks();
+            }
+        }
+        // Only rebuild the Keys gutter when it's empty / summary-only.
+        // Calling RebuildDopeDisplayTracks on every echo Clear()+Add's every
+        // bone row and freezes the ItemsControl after a dense import.
+        bool summaryOnly = _vm.DopeDisplayTracks.Count == 0
+            || (_vm.DopeDisplayTracks.Count == 1
+                && string.Equals(_vm.DopeDisplayTracks[0].Id, "summary", StringComparison.Ordinal));
+        if (summaryOnly && (_vm.TimelineTracks.Count == 0 || _vm.DopeDisplayTracks.Count == 0))
+            RebuildDopeDisplayTracks();
+        else if (contentChanged)
+            InvalidateDopeVisibleTracks();
         _vm.NotifyAnimatedChipChanged();
+        return contentChanged;
     }
 
     // ════════════════════════════════════════════════════════════════
@@ -1729,53 +2198,105 @@ case "prop-loaded":
 
     private const double TIMELINE_PADDING_X = TimelineController.PaddingX;
 
-    // Brand accents — these aren't theme brushes because they're the
-    // FiveOS orange used app-wide (matches the IsAnimatedExport chip,
-    // the selected-joint highlight, the SectionHeader accent rail).
-    // Everything is frozen: these are drawn thousands of times per frame
-    // by the retained render layers, and unfrozen Freezables carry
-    // per-use change-tracking cost.
+    // Timeline paints: frozen neutrals + live accent brushes (ThemeAccent).
+    // Playhead / clip bars used to hardcode C4D indigo and ignored Settings.
     private static Brush Rgb(byte r, byte g, byte b) { var br = new SolidColorBrush(Color.FromRgb(r, g, b)); br.Freeze(); return br; }
     private static Brush Argb(byte a, byte r, byte g, byte b) { var br = new SolidColorBrush(Color.FromArgb(a, r, g, b)); br.Freeze(); return br; }
     private static Pen FrozenPen(Brush stroke, double thickness) { var p = new Pen(stroke, thickness); p.Freeze(); return p; }
 
-    // Reference-style dope lanes (2026-07-17, matched to the user's mock):
-    // FAT saturated bars filling most of the row — alternating blue/orange —
-    // with uniform orange endpoint dots and NO baselines behind them. Dense
-    // per-frame runs get the bar; sparse hand-set keys stay as diamonds.
-    private static readonly Brush DopeBarOrange = Rgb(0xC8, 0x86, 0x0F);
-    private static readonly Brush DopeBarBlue = Rgb(0x3D, 0x6E, 0xC8);
-    private static readonly Brush DopeDot = Rgb(0xFF, 0xB6, 0x27);
+    private static readonly Brush DopeDot = Rgb(0xFF, 0xE5, 0x65);       // MARKER
+    private static readonly Brush TimelineKfFillBrush    = Rgb(0xE6, 0x5C, 0x5C); // KEYFRAMEDOT_ANIMATED
+    // Selected lane band — same hue as the gutter row highlight (#334A6A),
+    // translucent so grid/bars stay readable underneath.
+    private static readonly Brush DopeRowSelectedBrush = Argb(0x66, 0x33, 0x4A, 0x6A);
+    // Hand-recorded pieces — green, so user animation reads as its own
+    // layer distinct from imported clip bars.
+    private static readonly Brush DopeBarUser = Rgb(0x5F, 0xB8, 0x6A);
+    // Piece seam: dark outline + inset so two pieces flush after a split
+    // still read as separate clips at any zoom.
+    private static readonly Pen DopeBarSeamPen = FrozenPen(Argb(0xC8, 0x15, 0x15, 0x15), 1.25);
+    // Row orientation: subtle band on odd rows (AE-style) instead of the
+    // old alternating BAR colors that made the sheet read as a barcode.
+    private static readonly Brush DopeRowBandBrush = Argb(0x0C, 0xFF, 0xFF, 0xFF);
+    // Group rows are the primary tracks — slightly darker background.
+    private static readonly Brush DopeGroupRowBrush = Argb(0x3C, 0x00, 0x00, 0x00);
+    // Selected piece: white glaze over the bar + accent outline (pen is
+    // built lazily from the live accent brush).
+    private static readonly Brush DopePieceSelectedFill = Argb(0x2E, 0xFF, 0xFF, 0xFF);
 
-    private static readonly Brush TimelineKfFillBrush    = Rgb(0xFF, 0xAA, 0x33);
-    private static readonly Brush TimelinePlayheadBrush  = Rgb(0xE8, 0x45, 0x45);
-    private static readonly Brush TimelinePlayheadBadgeBrush = Rgb(0xE8, 0x45, 0x45);
+    // Accent-driven (mutated by SyncTimelineAccentBrushes — not frozen).
+    private readonly SolidColorBrush _dopeBarAccent = new(ThemeAccent.DefaultColor);
+    private readonly SolidColorBrush _dopeBarAccentAlt = new(Color.FromRgb(0xA8, 0xB0, 0xC1));
+    private readonly SolidColorBrush _timelinePlayheadBrush = new(ThemeAccent.DefaultColor);
+    private readonly SolidColorBrush _stripFillBaked = new(ThemeAccent.DefaultColor);
+    private readonly SolidColorBrush _stripFillImported = new(ThemeAccent.DefaultColor);
+    private readonly SolidColorBrush _stripBorderBrush = new(ThemeAccent.DefaultColor);
 
-    // Cascadeur-style sequencer palette
-    private static readonly Brush TimelineMajorTickBrush = Rgb(0xC8, 0xC8, 0xC8);
-    private static readonly Brush TimelineMinorTickBrush = Rgb(0x55, 0x55, 0x55);
-    private static readonly Brush TimelineLabelBrush     = Rgb(0xD0, 0xD0, 0xD0);
-    private static readonly Brush TimelineTrackLineBrush = Rgb(0x38, 0x38, 0x38);
-    private static readonly Brush TimelineGridBrush      = Rgb(0x33, 0x33, 0x33);
-    private static readonly Brush TimelineKfStrokeBrush  = Rgb(0xF5, 0xF6, 0xFB);
+    private Brush DopeBarOrange => _dopeBarAccentAlt;
+    private Brush DopeBarBlue => _dopeBarAccent;
+    private Brush TimelinePlayheadBrush => _timelinePlayheadBrush;
+    private Brush TimelinePlayheadBadgeBrush => _timelinePlayheadBrush;
+    private Brush StripFillBrushBaked => _stripFillBaked;
+    private Brush StripFillBrushImported => _stripFillImported;
+    private Brush StripBorderBrush => _stripBorderBrush;
+
+    private void SyncTimelineAccentBrushes()
+    {
+        var c = ThemeAccent.Current;
+        static Color Mix(Color a, Color b, double t) => Color.FromRgb(
+            (byte)(a.R + (b.R - a.R) * t),
+            (byte)(a.G + (b.G - a.G) * t),
+            (byte)(a.B + (b.B - a.B) * t));
+        var bright = Mix(c, Colors.White, 0.18);
+        var deep = Mix(c, Colors.Black, 0.18);
+        var muted = Mix(c, Color.FromRgb(0x40, 0x40, 0x48), 0.35);
+        var alt = Mix(c, Color.FromRgb(0xC8, 0xCC, 0xD4), 0.55);
+        _timelinePlayheadBrush.Color = bright;
+        _dopeBarAccent.Color = muted;
+        _dopeBarAccentAlt.Color = alt;
+        _stripFillBaked.Color = muted;
+        _stripFillImported.Color = bright;
+        _stripBorderBrush.Color = deep;
+        if (_playheadLine is not null) _playheadLine.Stroke = _timelinePlayheadBrush;
+        if (_playheadArrow is not null) _playheadArrow.Fill = _timelinePlayheadBrush;
+        if (_playheadBadge is not null) _playheadBadge.Background = _timelinePlayheadBrush;
+        if (_dopePlayheadLine is not null) _dopePlayheadLine.Stroke = _timelinePlayheadBrush;
+        if (_dopePlayheadArrow is not null) _dopePlayheadArrow.Fill = _timelinePlayheadBrush;
+    }
+
+    // COLOR_CTIMELINE_GRID* / TEXT
+    private static readonly Brush TimelineMajorTickBrush = Rgb(0xA6, 0xA6, 0xA6);
+    private static readonly Brush TimelineMinorTickBrush = Rgb(0x3D, 0x3D, 0x3D);
+    private static readonly Brush TimelineLabelBrush     = Rgb(0xA6, 0xA6, 0xA6);
+    private static readonly Brush TimelineTrackLineBrush = Rgb(0x36, 0x36, 0x36);
+    private static readonly Brush TimelineGridBrush      = Rgb(0x24, 0x24, 0x24);
+    private static readonly Brush TimelineKfStrokeBrush  = Rgb(0xE6, 0xE6, 0xE6);
 
     // Pens + text resources for the DrawingContext-rendered layers.
     // Alpha is baked into the grid pens (the old per-element Opacity).
     private static readonly Pen TimelineMajorTickPen   = FrozenPen(TimelineMajorTickBrush, 1);
     private static readonly Pen TimelineMinorTickPen   = FrozenPen(TimelineMinorTickBrush, 1);
-    private static readonly Pen DopeMajorGridPen       = FrozenPen(Argb(115, 0xC8, 0xC8, 0xC8), 1);    // 0.45 opacity
-    private static readonly Pen DopeMinorGridPen       = FrozenPen(Argb(51, 0x33, 0x33, 0x33), 0.5);   // 0.20 opacity
-    private static readonly Pen DopeRowBaselinePen     = FrozenPen(Rgb(0x34, 0x34, 0x34), 1);
+    private static readonly Pen DopeMajorGridPen       = FrozenPen(Argb(140, 0x3D, 0x3D, 0x3D), 1);    // GRIDMAIN
+    private static readonly Pen DopeMinorGridPen       = FrozenPen(Argb(90, 0x24, 0x24, 0x24), 0.5);  // GRID
+
+    // Blender-style playback range (In–Out): translucent dim outside so
+    // grid / keys stay readable; green/orange caps mark In and Out.
+    private static readonly Brush PlaybackRangeOutsideBrush = Argb(0x66, 0x00, 0x00, 0x00);
+    private static readonly Brush PlaybackRangeInsideBrush  = Argb(0x22, 0x6A, 0x6A, 0x72);
+    private static readonly Pen   PlaybackRangeMarkerPen    = FrozenPen(Argb(0xEE, 0xC0, 0xC0, 0xC0), 2);
+    private static readonly Brush PlaybackRangeInBrush      = Rgb(0x6A, 0xC4, 0x6A);
+    private static readonly Brush PlaybackRangeOutBrush     = Rgb(0xE0, 0x7A, 0x5A);
+    private static readonly Pen DopeRowBaselinePen     = FrozenPen(Rgb(0x36, 0x36, 0x36), 1);
     private static readonly Pen TimelineTrackLinePen   = FrozenPen(TimelineTrackLineBrush, 1);
     private static readonly Pen TimelineKfStrokePen    = FrozenPen(TimelineKfStrokeBrush, 1);
-    private static readonly Pen TimelineKfSelectedPen  = FrozenPen(TimelinePlayheadBrush, 2);
+    private static readonly Pen TimelineKfSelectedPen  = FrozenPen(Rgb(0xFF, 0xA5, 0x3F), 2); // TEXT_SELECTED
     private static readonly FontFamily TimelineFontFamily = new("Consolas");
     private static readonly Typeface TimelineTypeface = new(TimelineFontFamily,
         FontStyles.Normal, FontWeights.Normal, FontStretches.Normal);
 
     private System.Windows.Shapes.Line? _playheadLine;
+    private System.Windows.Shapes.Polygon? _playheadArrow;
     private Border? _playheadBadge;
-    private TextBlock? _playheadFrameLabel;
 
     private double TimelineCanvasWidth
     {
@@ -1832,20 +2353,123 @@ case "prop-loaded":
         var canvas = sender as FrameworkElement ?? TimelineStripCanvas;
         if (canvas is null) return;
         var pos = e.GetPosition(canvas);
-        var anchorTime = _timelineCtl.XToTime(pos.X, _vm.TimelineDuration, canvas.ActualWidth);
-        // Standard 3D-app convention (user directive 2026-07-17): plain wheel
-        // ZOOMS at the cursor (works over the layer bars AND the dope-sheet
-        // lanes); Shift/Ctrl+wheel pans the timeline horizontally.
+        var anchorTime = _timelineCtl.XToTimeRaw(pos.X, _vm.TimelineDuration, canvas.ActualWidth);
+        // Blender 2D-editor convention: plain wheel zooms at the cursor,
+        // Ctrl+wheel pans the timeline horizontally, Shift+wheel scrolls the
+        // dope-sheet rows vertically (falls back to horizontal pan on
+        // surfaces without rows).
         var mods = System.Windows.Input.Keyboard.Modifiers;
-        bool pan = mods.HasFlag(System.Windows.Input.ModifierKeys.Shift)
-                || mods.HasFlag(System.Windows.Input.ModifierKeys.Control);
-        if (!pan)
-            _timelineCtl.ZoomAt(e.Delta, anchorTime, _vm.TimelineDuration);
-        else
+        bool shift = mods.HasFlag(System.Windows.Input.ModifierKeys.Shift);
+        bool ctrl = mods.HasFlag(System.Windows.Input.ModifierKeys.Control);
+        if (shift && ReferenceEquals(canvas, DopeSheetCanvas) && DopeSheetTrackScroller is { } rows)
+            rows.ScrollToVerticalOffset(rows.VerticalOffset - (e.Delta / 120.0) * 44);
+        else if (shift || ctrl)
             _timelineCtl.ScrollByTime(-(e.Delta / 120.0) * VisibleTimelineDuration * 0.08, _vm.TimelineDuration);
+        else
+            _timelineCtl.ZoomAt(e.Delta, anchorTime, _vm.TimelineDuration);
         PushTimelineControllerToVm();
         ScheduleRedrawTimeline();
         e.Handled = true;
+    }
+
+    // ── Blender-style middle-mouse navigation ─────────────────────────
+    // MMB drag pans (dope sheet also pans rows vertically); Ctrl+MMB drag
+    // zooms around the grab point. Hooked with handledEventsToo so the
+    // left-button seek/drag handlers on the same canvases can't starve us.
+
+    private FrameworkElement? _tlMmbCanvas;
+    private bool _tlMmbZooming;
+    private System.Windows.Point _tlMmbLast;
+    private double _tlMmbAnchorTime;
+    private System.Windows.Input.Cursor? _tlMmbPrevCursor;
+
+    private void AttachTimelineMiddleMouseNav()
+    {
+        foreach (var c in new FrameworkElement?[]
+        {
+            TimelineRulerCanvas, TimelineStripCanvas, TimelineTrackCanvas,
+            DopeSheetRulerCanvas, DopeSheetCanvas,
+        })
+        {
+            if (c is null) continue;
+            c.AddHandler(MouseDownEvent,
+                new System.Windows.Input.MouseButtonEventHandler(OnTimelineMiddleDown), true);
+            c.AddHandler(MouseMoveEvent,
+                new System.Windows.Input.MouseEventHandler(OnTimelineMiddleMove), true);
+            c.AddHandler(MouseUpEvent,
+                new System.Windows.Input.MouseButtonEventHandler(OnTimelineMiddleUp), true);
+            c.LostMouseCapture += OnTimelineMiddleLostCapture;
+        }
+    }
+
+    private void OnTimelineMiddleDown(object sender, System.Windows.Input.MouseButtonEventArgs e)
+    {
+        if (e.ChangedButton != System.Windows.Input.MouseButton.Middle) return;
+        // Don't fight an in-progress left-button scrub/drag.
+        if (e.LeftButton == System.Windows.Input.MouseButtonState.Pressed) return;
+        if (sender is not FrameworkElement canvas) return;
+        SyncTimelineControllerFromVm();
+        _tlMmbCanvas = canvas;
+        _tlMmbZooming = System.Windows.Input.Keyboard.Modifiers
+            .HasFlag(System.Windows.Input.ModifierKeys.Control);
+        _tlMmbLast = e.GetPosition(canvas);
+        _tlMmbAnchorTime = _timelineCtl.XToTimeRaw(_tlMmbLast.X, _vm.TimelineDuration, canvas.ActualWidth);
+        _tlMmbPrevCursor = canvas.Cursor;
+        canvas.Cursor = _tlMmbZooming
+            ? System.Windows.Input.Cursors.SizeWE
+            : System.Windows.Input.Cursors.ScrollAll;
+        canvas.CaptureMouse();
+        e.Handled = true;
+    }
+
+    private void OnTimelineMiddleMove(object sender, System.Windows.Input.MouseEventArgs e)
+    {
+        if (_tlMmbCanvas is not { } canvas || !ReferenceEquals(sender, canvas)) return;
+        var pos = e.GetPosition(canvas);
+        var dx = pos.X - _tlMmbLast.X;
+        var dy = pos.Y - _tlMmbLast.Y;
+        _tlMmbLast = pos;
+        if (dx == 0 && dy == 0) return;
+        SyncTimelineControllerFromVm();
+        if (_tlMmbZooming)
+        {
+            // Blender Ctrl+MMB: drag right zooms in, left zooms out.
+            _timelineCtl.ZoomBy(System.Math.Exp(dx * 0.008), _tlMmbAnchorTime, _vm.TimelineDuration);
+        }
+        else
+        {
+            // Content follows the mouse.
+            var usable = System.Math.Max(1, _timelineCtl.UsableWidth(canvas.ActualWidth));
+            _timelineCtl.ScrollByTime(-dx / usable * VisibleTimelineDuration, _vm.TimelineDuration);
+            if (ReferenceEquals(canvas, DopeSheetCanvas) && DopeSheetTrackScroller is { } rows)
+                rows.ScrollToVerticalOffset(rows.VerticalOffset - dy);
+        }
+        PushTimelineControllerToVm();
+        ScheduleRedrawTimeline();
+        e.Handled = true;
+    }
+
+    private void OnTimelineMiddleUp(object sender, System.Windows.Input.MouseButtonEventArgs e)
+    {
+        if (e.ChangedButton != System.Windows.Input.MouseButton.Middle) return;
+        if (_tlMmbCanvas is not { } canvas) return;
+        e.Handled = true;
+        canvas.ReleaseMouseCapture();
+        EndTimelineMiddleNav();
+    }
+
+    private void OnTimelineMiddleLostCapture(object sender, System.Windows.Input.MouseEventArgs e)
+    {
+        if (_tlMmbCanvas != null && ReferenceEquals(sender, _tlMmbCanvas))
+            EndTimelineMiddleNav();
+    }
+
+    private void EndTimelineMiddleNav()
+    {
+        if (_tlMmbCanvas is { } canvas)
+            canvas.Cursor = _tlMmbPrevCursor;
+        _tlMmbCanvas = null;
+        _tlMmbPrevCursor = null;
     }
 
     private async Task SyncStripRangeToViewerAsync(TimelineStrip strip)
@@ -1887,14 +2511,18 @@ case "prop-loaded":
 
     private void RedrawTimeline()
     {
-        // Unified layers timeline: layer bars AND per-bone lanes are both
-        // always visible, so redraw both sections.
-        if (TimelineRulerCanvas is null) return;
-        DrawTimelineRuler();
-        DrawTimelineStrips();
-        DrawTimelineTrack();
-        DrawTimelinePlayhead();
-        DrawDopeSheet();
+        if (_vm.IsSequencerMode)
+        {
+            if (TimelineRulerCanvas is null) return;
+            DrawTimelineRuler();
+            DrawTimelineStrips();
+            DrawTimelineTrack();
+            DrawTimelinePlayhead();
+        }
+        else if (_vm.IsDopeSheetMode)
+        {
+            DrawDopeSheet();
+        }
         UpdateTimelineNavBar();
     }
 
@@ -1908,16 +2536,22 @@ case "prop-loaded":
         var trackW = System.Math.Max(0, TimelineNavBar.ActualWidth - 2);
         if (trackW < 10) return;
         var dur = System.Math.Max(0.001, _vm.TimelineDuration);
-        var vis = System.Math.Min(dur, VisibleTimelineDuration);
-        var frac = vis / dur;
+        var vis = VisibleTimelineDuration;
+        var minS = _timelineCtl.MinScroll(dur);
+        var maxS = _timelineCtl.MaxScroll(dur);
+        var span = System.Math.Max(0.0001, maxS - minS);
+        // Thumb size = visible / (clip + pads).
+        var viewSpan = dur + 2 * TimelineController.ViewPad(dur);
+        var frac = System.Math.Clamp(vis / viewSpan, 0.05, 1);
         var w = System.Math.Min(trackW, System.Math.Max(24, trackW * frac));
-        var range = System.Math.Max(0.0001, dur - vis);
-        var x = trackW <= w ? 0 : System.Math.Clamp(_timelineCtl.ScrollOffset / range, 0, 1) * (trackW - w);
+        var x = trackW <= w
+            ? 0
+            : System.Math.Clamp((_timelineCtl.ScrollOffset - minS) / span, 0, 1) * (trackW - w);
         System.Windows.Controls.Canvas.SetLeft(TimelineNavThumb, x);
         TimelineNavThumb.Width = w;
-        var zoomedIn = frac < 0.999;
-        TimelineNavThumb.Opacity = zoomedIn ? 0.85 : 0.3;
-        TimelineNavBar.Cursor = zoomedIn ? System.Windows.Input.Cursors.Hand : System.Windows.Input.Cursors.Arrow;
+        var canPan = span > 1e-6;
+        TimelineNavThumb.Opacity = canPan ? 0.85 : 0.3;
+        TimelineNavBar.Cursor = canPan ? System.Windows.Input.Cursors.Hand : System.Windows.Input.Cursors.Arrow;
     }
 
     private void OnNavBarMouseDown(object sender, System.Windows.Input.MouseButtonEventArgs e)
@@ -1925,17 +2559,18 @@ case "prop-loaded":
         if (TimelineNavBar is null || TimelineNavThumb is null) return;
         SyncTimelineControllerFromVm();
         var dur = System.Math.Max(0.001, _vm.TimelineDuration);
-        var vis = System.Math.Min(dur, VisibleTimelineDuration);
-        if (vis / dur >= 0.999) return;   // zoomed out — inert
+        var minS = _timelineCtl.MinScroll(dur);
+        var maxS = _timelineCtl.MaxScroll(dur);
+        var span = System.Math.Max(0.0001, maxS - minS);
+        if (span < 1e-6) return;
         var trackW = System.Math.Max(1, TimelineNavBar.ActualWidth - 2);
         var thumbW = TimelineNavThumb.Width;
         var pos = e.GetPosition(TimelineNavBar).X;
         var thumbX = System.Windows.Controls.Canvas.GetLeft(TimelineNavThumb);
         if (pos < thumbX || pos > thumbX + thumbW)
         {
-            // Jump: center the window at the clicked position.
             var frac = System.Math.Clamp((pos - thumbW / 2) / System.Math.Max(1, trackW - thumbW), 0, 1);
-            _vm.TimelineScrollOffset = frac * (dur - vis);
+            _vm.TimelineScrollOffset = minS + frac * span;
             SyncTimelineControllerFromVm();
             ScheduleRedrawTimeline();
         }
@@ -1950,13 +2585,15 @@ case "prop-loaded":
     {
         if (!_navDragging || TimelineNavBar is null || TimelineNavThumb is null) return;
         var dur = System.Math.Max(0.001, _vm.TimelineDuration);
-        var vis = System.Math.Min(dur, VisibleTimelineDuration);
+        var minS = _timelineCtl.MinScroll(dur);
+        var maxS = _timelineCtl.MaxScroll(dur);
+        var span = System.Math.Max(0.0001, maxS - minS);
         var trackW = System.Math.Max(1, TimelineNavBar.ActualWidth - 2);
         var thumbW = TimelineNavThumb.Width;
         var usable = System.Math.Max(1, trackW - thumbW);
         var dx = e.GetPosition(TimelineNavBar).X - _navDragStartX;
         _vm.TimelineScrollOffset = System.Math.Clamp(
-            _navDragStartOffset + dx / usable * (dur - vis), 0, System.Math.Max(0, dur - vis));
+            _navDragStartOffset + dx / usable * span, minS, maxS);
         SyncTimelineControllerFromVm();
         ScheduleRedrawTimeline();
     }
@@ -1970,21 +2607,50 @@ case "prop-loaded":
 
     private void OnSequencerModeClick(object sender, RoutedEventArgs e)
     {
-        if (sender is System.Windows.Controls.Primitives.ToggleButton toggle)
-            toggle.IsChecked = true;
+        if (_vm.TimelineMode == TimelineEditorMode.Sequencer) return;
         _vm.TimelineMode = TimelineEditorMode.Sequencer;
-        _vm.StatusText = "Sequencer — edit whole animation clips.";
-        ScheduleRedrawTimeline();
+        ApplyTimelineBodyRowHeights();
+        _vm.StatusText = _vm.Strips.Count == 0 && _vm.TimelineKeyframes.Count > 0
+            ? "Clips shows strip bars. Your animation is editable in Keys."
+            : "";
+        // Wait a layout pass so the Clips canvases have real size before draw.
+        Dispatcher.BeginInvoke(new Action(() =>
+        {
+            TimelineBorder?.UpdateLayout();
+            RedrawTimeline();
+        }), DispatcherPriority.Loaded);
     }
 
     private async void OnDopeSheetModeClick(object sender, RoutedEventArgs e)
     {
-        if (sender is System.Windows.Controls.Primitives.ToggleButton toggle)
-            toggle.IsChecked = true;
+        if (_vm.TimelineMode == TimelineEditorMode.DopeSheet) return;
         _vm.TimelineMode = TimelineEditorMode.DopeSheet;
-        _vm.StatusText = "Dope Sheet — edit per-bone keys.";
+        ApplyTimelineBodyRowHeights();
+        _vm.StatusText = "";
         await SendTimelineCommandAsync("requestSnapshot");
-        ScheduleRedrawTimeline();
+        Dispatcher.BeginInvoke(new Action(() =>
+        {
+            TimelineBorder?.UpdateLayout();
+            RedrawTimeline();
+        }), DispatcherPriority.Loaded);
+    }
+
+    /// <summary>Clips content is Auto-height; Keys needs the leftover *. When
+    /// Clips is active, collapse the Keys row so it doesn't leave a blank
+    /// slab under the Keyframes lane.</summary>
+    private void ApplyTimelineBodyRowHeights()
+    {
+        if (TimelineBodyKeysRow is null || TimelineBodyClipsRow is null) return;
+        if (_vm.IsDopeSheetMode)
+        {
+            TimelineBodyClipsRow.Height = new GridLength(0);
+            TimelineBodyKeysRow.Height = new GridLength(1, GridUnitType.Star);
+        }
+        else
+        {
+            TimelineBodyClipsRow.Height = GridLength.Auto;
+            TimelineBodyKeysRow.Height = new GridLength(0);
+        }
     }
 
     private async Task SendTimelineCommandAsync(
@@ -2006,6 +2672,87 @@ case "prop-loaded":
 
     private async void OnTimelineDeleteSelection(object sender, RoutedEventArgs e) =>
         await DeleteTimelineSelectionAsync();
+
+    /// <summary>Delete the selected piece — the video-editor loop
+    /// (split → click piece → Del).</summary>
+    private async Task DeleteSelectedPieceAsync()
+    {
+        if (_selectedPiece is null || !_webViewReady) return;
+        var ids = _selectedPiece.KeyIds.ToArray();
+        ClearSelectedPiece(redraw: false);
+        await SendTimelineCommandAsync("deleteKeys", ids);
+        await SendTimelineCommandAsync("requestSnapshot");
+        _vm.StatusText = $"Deleted piece ({ids.Length} key{(ids.Length == 1 ? "" : "s")}). Ctrl+Z undoes.";
+    }
+
+    /// <summary>Split at <paramref name="time"/>, scoped to the clicked
+    /// bone lane plus any other selected bone lanes (right-click menu).</summary>
+    private async Task SplitTimelineAtAsync(double time, TimelineTrackRow? contextRow)
+    {
+        if (!_webViewReady) return;
+        if (time <= 1e-4) { _vm.StatusText = "Can't split at frame 0."; return; }
+        var names = _vm.TimelineTracks
+            .Where(x => !x.IsGroupHeader && x.IsSelected && !TimelineTrackRow.IsSpecialTrack(x))
+            .Select(x => x.Name)
+            .ToList();
+        if (contextRow != null && !contextRow.IsGroupHeader
+            && !TimelineTrackRow.IsSpecialTrack(contextRow)
+            && !names.Contains(contextRow.Name))
+            names.Add(contextRow.Name);
+        var boneNames = names.Distinct(StringComparer.Ordinal).ToArray();
+        await SendTimelineCommandAsync("splitAt", payload: new { time, bones = boneNames });
+        _timelineSelection.Clear();
+        await SendTimelineCommandAsync("requestSnapshot");
+        var frame = (int)System.Math.Round(time * System.Math.Max(1, _vm.TimelineFps));
+        _vm.StatusText = boneNames.Length > 0
+            ? $"Split {boneNames.Length} bone(s) at frame {frame} — drag a piece, or record keys into the gap."
+            : $"Split at frame {frame} — drag a piece, or record keys into the gap.";
+    }
+
+    /// <summary>Cut (✂), video-editor style: SPLIT at the playhead — the
+    /// selected bone's lane (nothing selected = all lanes) becomes two
+    /// independent pieces. Nothing else is deleted; keys recorded in the
+    /// gap fill that space and own it.</summary>
+    private async void OnTimelineCutKeys(object sender, RoutedEventArgs e)
+    {
+        if (!_webViewReady) { _vm.StatusText = "Viewer not ready."; return; }
+        if (_vm.TimelineTime <= 1e-4)
+        {
+            _vm.StatusText = "Move the playhead to where you want the split first.";
+            return;
+        }
+        // A selected piece scopes the split to itself (playhead must be
+        // over it — otherwise the cut would land on a different piece).
+        if (_selectedPiece is { } piece)
+        {
+            const double eps = 1e-3;
+            if (_vm.TimelineTime <= piece.T0 + eps || _vm.TimelineTime >= piece.T1 - eps)
+            {
+                _vm.StatusText = "Playhead is outside the selected piece — move it over the piece to split.";
+                return;
+            }
+            await SendTimelineCommandAsync("splitAt",
+                payload: new { time = _vm.TimelineTime, bones = piece.BoneNames });
+            _timelineSelection.Clear();
+            ClearSelectedPiece(redraw: false);
+            await SendTimelineCommandAsync("requestSnapshot");
+            _vm.StatusText = $"Split piece at frame {_vm.TimelineCurrentFrame} — click a half to select it.";
+            return;
+        }
+        // Selected bone lanes scope the split; nothing selected splits all.
+        var boneNames = _vm.TimelineTracks
+            .Where(x => !x.IsGroupHeader && x.IsSelected && !TimelineTrackRow.IsSpecialTrack(x))
+            .Select(x => x.Name)
+            .Distinct(StringComparer.Ordinal)
+            .ToArray();
+        await SendTimelineCommandAsync("splitAt",
+            payload: new { time = _vm.TimelineTime, bones = boneNames });
+        _timelineSelection.Clear();
+        await SendTimelineCommandAsync("requestSnapshot");
+        _vm.StatusText = boneNames.Length > 0
+            ? $"Split {boneNames.Length} bone(s) at frame {_vm.TimelineCurrentFrame} — drag a piece, or record keys into the gap."
+            : $"Split at frame {_vm.TimelineCurrentFrame} — drag a piece, or record keys into the gap.";
+    }
 
     private async Task DeleteTimelineSelectionAsync()
     {
@@ -2058,8 +2805,18 @@ case "prop-loaded":
         {
             case System.Windows.Input.Key.Delete:
             case System.Windows.Input.Key.Back:
-                await DeleteTimelineSelectionAsync();
+                if (_selectedPiece != null) await DeleteSelectedPieceAsync();
+                else await DeleteTimelineSelectionAsync();
                 e.Handled = true;
+                break;
+            case System.Windows.Input.Key.Escape:
+                if (_selectedPiece != null || _timelineSelection.Count > 0)
+                {
+                    ClearSelectedPiece(redraw: false);
+                    _timelineSelection.Clear();
+                    ScheduleRedrawTimeline();
+                    e.Handled = true;
+                }
                 break;
             case System.Windows.Input.Key.Space:
                 await ToggleTimelinePlaybackAsync();
@@ -2084,15 +2841,23 @@ case "prop-loaded":
             // control had focus.
             case System.Windows.Input.Key.Z when ctrl:
                 if (_webViewReady)
+                {
                     await Viewport.CoreWebView2.ExecuteScriptAsync(
                         mods.HasFlag(System.Windows.Input.ModifierKeys.Shift)
                             ? "window.hostRedo && window.hostRedo()"
                             : "window.hostUndo && window.hostUndo()");
+                    // Undo restores viewer state but never re-publishes the
+                    // per-bone lanes — pull a snapshot so the sheet matches.
+                    await SendTimelineCommandAsync("requestSnapshot");
+                }
                 e.Handled = true;
                 break;
             case System.Windows.Input.Key.Y when ctrl:
                 if (_webViewReady)
+                {
                     await Viewport.CoreWebView2.ExecuteScriptAsync("window.hostRedo && window.hostRedo()");
+                    await SendTimelineCommandAsync("requestSnapshot");
+                }
                 e.Handled = true;
                 break;
             case System.Windows.Input.Key.Home:
@@ -2186,13 +2951,7 @@ case "prop-loaded":
         DrawTimelineStrips();
     }
 
-    // Clip fill palette tuned for the dark-navy take-sequencer surface:
-    // imported clips get a salmon-pink fill (matches T1 in the reference
-    // mockup), baked clips get a teal — both fully opaque so they read
-    // sharply on the #161A26 lane background.
-    private static readonly Brush StripFillBrushBaked    = Rgb(0x5B, 0xBF, 0xB5);
-    private static readonly Brush StripFillBrushImported = Rgb(0x4A, 0x90, 0xC4);
-    private static readonly Brush StripBorderBrush       = Rgb(0x2E, 0x5A, 0x80);
+    // C4D clip lanes — fills follow ThemeAccent (see SyncTimelineAccentBrushes).
     private static readonly Brush StripTextBrush         = Rgb(0xFA, 0xFA, 0xFA);
     // Semi-opaque dark wash painted over the fade region. Conveys "this
     // region's weight ramps to zero" without competing with the strip
@@ -2238,20 +2997,39 @@ case "prop-loaded":
         Canvas.SetTop(lane, 4);
         canvas.Children.Add(lane);
 
-        // Vertical frame grid (Cascadeur-style) — visible window only when zoomed
+        // Blender In–Out wash over the clip lane (UIElement path — DrawingContext
+        // highlight lives on the ruler / KF / dope layers).
+        GetPlaybackRangeTimes(out var rangeStart, out var rangeEnd);
+        var rx0 = TimeToTimelineXRaw(rangeStart);
+        var rx1 = TimeToTimelineXRaw(rangeEnd);
+        void AddRangeWash(double x, double ww, Brush fill)
+        {
+            if (ww < 0.5) return;
+            var rect = new System.Windows.Shapes.Rectangle
+            {
+                Width = ww,
+                Height = lane.Height,
+                Fill = fill,
+                IsHitTestVisible = false,
+            };
+            Canvas.SetLeft(rect, x);
+            Canvas.SetTop(rect, 4);
+            canvas.Children.Add(rect);
+        }
+        if (rx0 > 0) AddRangeWash(0, System.Math.Min(w, rx0), PlaybackRangeOutsideBrush);
+        if (rx1 > rx0) AddRangeWash(System.Math.Max(0, rx0), System.Math.Min(w, rx1) - System.Math.Max(0, rx0), PlaybackRangeInsideBrush);
+        if (rx1 < w) AddRangeWash(System.Math.Max(0, rx1), w - System.Math.Max(0, rx1), PlaybackRangeOutsideBrush);
+
+        // Vertical frame grid — continues into the empty pad past the clip.
         var fps = System.Math.Max(1, _vm.TimelineFps);
-        var totalFrames = System.Math.Max(1, (int)System.Math.Round(dur * fps));
         int fStart = (int)System.Math.Floor(scroll * fps);
         int fEnd = (int)System.Math.Ceiling((scroll + vis) * fps);
-        fStart = System.Math.Clamp(fStart, 0, totalFrames);
-        fEnd = System.Math.Clamp(fEnd, 0, totalFrames);
-        int spanFrames = System.Math.Max(1, fEnd - fStart);
         var pxPerFrame = usable / (vis * fps);
         int gridEvery = 1;
         while (gridEvery * pxPerFrame < 6) gridEvery *= 2;
         for (int f = fStart; f <= fEnd; f += gridEvery)
         {
-            double gx = TimeToTimelineX(f / (double)fps);
+            double gx = TimeToTimelineXRaw(f / (double)fps);
             var gridLine = new System.Windows.Shapes.Line
             {
                 X1 = gx, X2 = gx,
@@ -2264,16 +3042,17 @@ case "prop-loaded":
             canvas.Children.Add(gridLine);
         }
 
-        // No strips: the whole clip track — gutter row and this lane — is
-        // collapsed via ShowClipTrack, so there is nothing to draw here.
-        if (_vm.Strips.Count == 0) return;
-
-        if (!_vm.TimelineClipTrackVisible)
+        if (_vm.Strips.Count == 0 || !_vm.TimelineClipTrackVisible)
         {
+            var hintText = !_vm.TimelineClipTrackVisible
+                ? "Clip track hidden — click eye to show"
+                : _vm.TimelineKeyframes.Count > 0
+                    ? "No clip strips — your animation is in Keys (library imports edit there)"
+                    : "No clips — drop from Anim Library, or Bake as clip from Keys";
             var hint = new TextBlock
             {
-                Text = "Clip track hidden — click eye to show",
-                FontSize = 10,
+                Text = hintText,
+                FontSize = 11,
                 Foreground = StripHintTextBrush,
                 IsHitTestVisible = false,
             };
@@ -2529,17 +3308,17 @@ case "prop-loaded":
         var h = canvas.ActualHeight;
         if (w < 10 || h < 5) return;
 
-        var dur = System.Math.Max(0.001, _vm.TimelineDuration);
+        DrawPlaybackRangeHighlight(dc, w, h, TimeToTimelineXRaw);
+
         var fps = System.Math.Max(1, _vm.TimelineFps);
         var vis = VisibleTimelineDuration;
         var scroll = _timelineCtl.ScrollOffset;
         var usable = TimelineUsableWidth;
         var pxPerFrame = usable / (vis * fps);
 
+        // Blender: ticks continue into the empty pad past the clip / In–Out.
         int fStart = (int)System.Math.Floor(scroll * fps);
         int fEnd = (int)System.Math.Ceiling((scroll + vis) * fps);
-        fStart = System.Math.Max(0, fStart);
-        fEnd = System.Math.Min((int)System.Math.Round(dur * fps), fEnd);
 
         int labelEveryN = NiceFrameStep(pxPerFrame, 42);
         if (pxPerFrame >= 16) labelEveryN = 1;
@@ -2561,7 +3340,7 @@ case "prop-loaded":
             {
                 bool major = f % labelEveryN == 0;
                 if (!major && f % tickEveryN != 0) continue;
-                double x = TimeToTimelineX(f / (double)fps);
+                double x = TimeToTimelineXRaw(f / (double)fps);
                 var ctx = major ? majorCtx : minorCtx;
                 ctx.BeginFigure(new Point(x, h - (major ? 10 : 4)), false, false);
                 ctx.LineTo(new Point(x, h), true, false);
@@ -2606,10 +3385,11 @@ case "prop-loaded":
         if (w < 10 || h < 5) return;
         var midY = h / 2.0;
 
-        // MANUAL keys only (user directive 2026-07-17): imported animations are
-        // baked per-frame keys (ease=linear) and must NEVER render as dot spam —
-        // they read as the LAYER bar below instead. Diamonds here are reserved
-        // for keys the user set by hand (◉/K → ease=auto).
+        DrawPlaybackRangeHighlight(dc, w, h, TimeToTimelineXRaw);
+
+        // MANUAL keys → diamonds. Dense imported keys (ease=linear) → one fat
+        // bar spanning first..last so Clips mode isn't a blank lane.
+        double? linearMin = null, linearMax = null;
         var baseline = new StreamGeometry();
         var diamonds = new StreamGeometry();
         var drawnColumns = new HashSet<int>();
@@ -2620,7 +3400,12 @@ case "prop-loaded":
             baseCtx.LineTo(new Point(w - TIMELINE_PADDING_X, midY), true, false);
             foreach (var kf in _vm.TimelineKeyframes)
             {
-                if (string.Equals(kf.Ease, "linear", StringComparison.OrdinalIgnoreCase)) continue;
+                if (string.Equals(kf.Ease, "linear", StringComparison.OrdinalIgnoreCase))
+                {
+                    linearMin = linearMin is null ? kf.Time : System.Math.Min(linearMin.Value, kf.Time);
+                    linearMax = linearMax is null ? kf.Time : System.Math.Max(linearMax.Value, kf.Time);
+                    continue;
+                }
                 var x = TimeToTimelineXRaw(kf.Time);
                 if (x < -8 || x > w + 8) continue;
                 if (!drawnColumns.Add((int)System.Math.Round(x))) continue;
@@ -2633,6 +3418,17 @@ case "prop-loaded":
         baseline.Freeze();
         diamonds.Freeze();
         dc.DrawGeometry(null, TimelineTrackLinePen, baseline);
+        if (linearMin is not null && linearMax is not null)
+        {
+            var x0 = TimeToTimelineXRaw(linearMin.Value);
+            var x1 = TimeToTimelineXRaw(linearMax.Value);
+            if (x1 < x0) (x0, x1) = (x1, x0);
+            var barW = System.Math.Max(8, x1 - x0);
+            dc.DrawRoundedRectangle(
+                DopeBarBlue, null,
+                new Rect(x0, midY - 7, barW, 14),
+                2, 2);
+        }
         dc.DrawGeometry(TimelineKfFillBrush, TimelineKfStrokePen, diamonds);
     }
 
@@ -2697,6 +3493,7 @@ case "prop-loaded":
     private Controls.TimelineRenderLayer? _dopeSheetLayer;   // grid + baselines + key diamonds
     private Controls.TimelineRenderLayer? _dopeRulerLayer;   // frame-number labels
     private System.Windows.Shapes.Line? _dopePlayheadLine;   // cached, X-mutated per tick
+    private System.Windows.Shapes.Polygon? _dopePlayheadArrow;
 
     private void InvalidateDopeVisibleTracks()
     {
@@ -2745,9 +3542,11 @@ case "prop-loaded":
     }
 
     /// <summary>
-    /// Rebuild the Dope Sheet gutter: Summary / Root Motion, then body-part
-    /// groups (collapsed defaults for Fingers/Face/Accessory), hiding empty
-    /// bone tracks unless ShowEmptyTracks is on.
+    /// Rebuild the Keys dope-sheet gutter from real timeline tracks (with
+    /// their key arrays). The previous "driven-bone fat bars" path threw
+    /// away per-bone keys and left users staring at an empty Animation
+    /// layer — this restores Summary / Root Motion / body-part groups
+    /// with actual diamonds.
     /// </summary>
     private void RebuildDopeDisplayTracks()
     {
@@ -2764,6 +3563,8 @@ case "prop-loaded":
                 track.DisplayName = TimelineTrackRow.IsSpecialTrack(track)
                     ? track.Name
                     : TimelineTrackRow.FriendlyName(track.Name);
+                if (track.Id.StartsWith("bone-keys-user:", StringComparison.Ordinal))
+                    track.DisplayName += " · keys";
             }
             if (!TimelineTrackRow.IsSpecialTrack(track) && string.IsNullOrEmpty(track.Group))
             {
@@ -2773,61 +3574,88 @@ case "prop-loaded":
             track.IsFilteredOut = false;
         }
 
-        static bool MatchesFilter(TimelineTrackRow t, string f) =>
-            f.Length == 0
-            || t.Name.Contains(f, StringComparison.OrdinalIgnoreCase)
-            || (t.DisplayName?.Contains(f, StringComparison.OrdinalIgnoreCase) ?? false)
-            || (t.Group?.Contains(f, StringComparison.OrdinalIgnoreCase) ?? false);
+        bool MatchesFilter(TimelineTrackRow t) =>
+            filter.Length == 0
+            || t.Name.Contains(filter, StringComparison.OrdinalIgnoreCase)
+            || (t.DisplayName?.Contains(filter, StringComparison.OrdinalIgnoreCase) ?? false)
+            || (t.Group?.Contains(filter, StringComparison.OrdinalIgnoreCase) ?? false);
 
-        // Reference timeline (final form, 2026-07-17): a LAYER header row plus
-        // one row per DRIVEN bone — every row rendering as a fat span bar (the
-        // user's mock). No per-frame diamonds anywhere; manual keys live on the
-        // Keyframes lane above (ease != linear only). Bone rows are synthesized
-        // from the rig's drive-map, so stale clip-track duplicates can't appear.
-        var display = new List<TimelineTrackRow>(64);
-        if (_vm.TimelineKeyframes.Count > 0 || _vm.Strips.Count > 0)
+        var display = new List<TimelineTrackRow>(Math.Max(16, source.Count));
+
+        // Special lanes first (Summary / Root Motion).
+        foreach (var track in source.Where(TimelineTrackRow.IsSpecialTrack))
         {
-            const string LayerKey = "__layer";
-            if (!_vm.DopeGroupExpanded.TryGetValue(LayerKey, out var layerOpen))
+            if (!showEmpty && !track.HasKeys) continue;
+            if (!MatchesFilter(track)) continue;
+            display.Add(track);
+        }
+
+        // Bone lanes grouped by body part — only tracks that actually have
+        // keys (unless ShowEmptyTracks).
+        var boneTracks = source
+            .Where(t => !TimelineTrackRow.IsSpecialTrack(t))
+            .Where(t => showEmpty || t.HasKeys)
+            .Where(MatchesFilter)
+            .OrderBy(t =>
             {
-                layerOpen = true;   // reference look: rows visible by default
-                _vm.DopeGroupExpanded[LayerKey] = layerOpen;
+                var (_, sort) = BoneGroupClassifier.Classify(t.Name);
+                return sort;
+            })
+            .ThenBy(t => TimelineTrackRow.FriendlyName(t.Name), StringComparer.OrdinalIgnoreCase)
+            // The hand-keys lane rides directly under its bone's clip lane.
+            .ThenBy(t => t.Id.StartsWith("bone-keys-user:", StringComparison.Ordinal) ? 1 : 0)
+            .ToList();
+
+        foreach (var group in boneTracks.GroupBy(t =>
+                     string.IsNullOrEmpty(t.Group) ? "Other" : t.Group))
+        {
+            var groupKey = group.Key;
+            if (!_vm.DopeGroupExpanded.TryGetValue(groupKey, out var open))
+            {
+                // Groups start COLLAPSED — the group row is the primary
+                // editing surface (video-editor track); expand only for
+                // per-bone fine control. Selecting a bone in the viewport
+                // auto-expands its group.
+                open = false;
+                _vm.DopeGroupExpanded[groupKey] = open;
             }
-            var layerName = !string.IsNullOrWhiteSpace(_vm.PrimaryTrackLabel) ? _vm.PrimaryTrackLabel
-                : !string.IsNullOrWhiteSpace(_uncalibratedName) ? _uncalibratedName
-                : "Animation";
+
+            var members = group.ToList();
             display.Add(new TimelineTrackRow
             {
-                Id = "layer:main",
-                Name = layerName,
-                DisplayName = layerName,
-                Group = LayerKey,
+                Id = "group:" + groupKey,
+                Name = groupKey,
+                DisplayName = groupKey,
+                Group = groupKey,
                 IsGroupHeader = true,
-                IsExpanded = layerOpen,
-                HasKeys = true,
+                IsExpanded = open,
+                HasKeys = members.Any(m => m.HasKeys),
                 Depth = 0,
             });
-            if (layerOpen)
+            if (!open) continue;
+            foreach (var bone in members)
             {
-                foreach (var bone in _vm.Bones)
-                {
-                    if (bone is null || !bone.IsDriven) continue;
-                    var friendly = TimelineTrackRow.FriendlyName(bone.Name);
-                    if (filter.Length > 0
-                        && !friendly.Contains(filter, StringComparison.OrdinalIgnoreCase)
-                        && !(bone.Name?.Contains(filter, StringComparison.OrdinalIgnoreCase) ?? false))
-                        continue;
-                    display.Add(new TimelineTrackRow
-                    {
-                        Id = "bone:" + bone.Name,
-                        Name = bone.Name ?? "",
-                        DisplayName = friendly,
-                        Group = LayerKey,
-                        Depth = 1,
-                        HasKeys = true,
-                    });
-                }
+                bone.Depth = 1;
+                display.Add(bone);
             }
+        }
+
+        // Fallback: imported clips sometimes only publish summary times into
+        // TimelineKeyframes (no per-bone tracks yet). Still show those as a
+        // Summary row of diamonds so Keys mode isn't an empty blue bar.
+        if (display.Count == 0 && _vm.TimelineKeyframes.Count > 0)
+        {
+            var summary = new TimelineTrackRow
+            {
+                Id = "summary",
+                Name = "Summary",
+                DisplayName = "Summary",
+                HasKeys = true,
+                Depth = 0,
+            };
+            foreach (var key in _vm.TimelineKeyframes)
+                summary.Keys.Add(key);
+            display.Add(summary);
         }
 
         _vm.DopeDisplayTracks.Clear();
@@ -2858,6 +3686,22 @@ case "prop-loaded":
                 IsHitTestVisible = false,
             };
             DopeSheetPlayheadCanvas.Children.Add(_dopePlayheadLine);
+        }
+        if (_dopePlayheadArrow is null && DopeSheetPlayheadCanvas is not null)
+        {
+            _dopePlayheadArrow = new System.Windows.Shapes.Polygon
+            {
+                Fill = TimelinePlayheadBrush,
+                StrokeThickness = 0,
+                Points = new PointCollection
+                {
+                    new Point(0, 0),
+                    new Point(10, 0),
+                    new Point(5, 8),
+                },
+                IsHitTestVisible = false,
+            };
+            DopeSheetPlayheadCanvas.Children.Add(_dopePlayheadArrow);
         }
     }
 
@@ -2892,6 +3736,11 @@ case "prop-loaded":
         _dopePlayheadLine.X2 = x;
         _dopePlayheadLine.Y1 = 0;
         _dopePlayheadLine.Y2 = playheadCanvas.ActualHeight;
+        if (_dopePlayheadArrow is not null)
+        {
+            Canvas.SetLeft(_dopePlayheadArrow, x - 5);
+            Canvas.SetTop(_dopePlayheadArrow, 0);
+        }
     }
 
     /// <summary>DrawingContext pass for the dope-sheet body: frame grid,
@@ -2906,6 +3755,8 @@ case "prop-loaded":
         var w = canvas.ActualWidth;
         var h = canvas.ActualHeight;
 
+        DrawPlaybackRangeHighlight(dc, w, h, DopeTimeToXRaw);
+
         var fps = System.Math.Max(1, _vm.TimelineFps);
         var visible = VisibleTimelineDuration;
         var first = (int)System.Math.Floor(_timelineCtl.ScrollOffset * fps);
@@ -2918,11 +3769,13 @@ case "prop-loaded":
         using (var majorCtx = majorGrid.Open())
         using (var minorCtx = minorGrid.Open())
         {
-            for (int frame = System.Math.Max(0, first); frame <= last; frame++)
+            for (int frame = first; frame <= last; frame++)
             {
                 bool major = frame % majorEvery == 0;
-                if (!major && pxPerFrame < 6) continue;
-                var x = DopeTimeToX(frame / (double)fps);
+                // Skip minor ticks when they'd densify into a grey wash /
+                // geometry bomb on long mocap clips.
+                if (!major && pxPerFrame < 8) continue;
+                var x = DopeTimeToXRaw(frame / (double)fps);
                 var ctx = major ? majorCtx : minorCtx;
                 ctx.BeginFigure(new Point(x, 0), false, false);
                 ctx.LineTo(new Point(x, h), true, false);
@@ -2936,15 +3789,18 @@ case "prop-loaded":
         var visibleTracks = GetDopeVisibleTracks();
         var verticalOffset = DopeSheetTrackScroller?.VerticalOffset ?? 0;
 
-        // Reference-style lanes (user's mock, 2026-07-17): dense keyed spans →
-        // FAT alternating blue/orange bars with orange endpoint dots, no
-        // baselines. Sparse hand-set keys → diamonds (still grabbable). One
-        // bar per row ≈ 50 shapes total, so redraws stay instant.
+        // Dense baked/mocap lanes → fat bars only (C4D/Blender style).
+        // Diamonds are for sparse hand-keyed frames. Old pixel-gap density
+        // flipped to "sparse" as soon as you zoomed in past ~6px/frame,
+        // then stamped a diamond per frame (~10k shapes) and melted the UI.
         const double barH = 14;
+        const double minDiamondGapPx = 7; // never denser than ~1 diamond / 7px
+        var frameDt = 1.0 / fps;
         var normalKeys = new StreamGeometry();
+        var userKeys = new StreamGeometry();
         var selectedKeys = new StreamGeometry();
-        var drawnColumns = new HashSet<int>();
         using (var normalCtx = normalKeys.Open())
+        using (var userCtx = userKeys.Open())
         using (var selectedCtx = selectedKeys.Open())
         {
             for (int row = 0; row < visibleTracks.Count; row++)
@@ -2952,60 +3808,124 @@ case "prop-loaded":
                 var track = visibleTracks[row];
                 var y = row * DopeRowHeight + DopeRowHeight / 2 - verticalOffset;
                 if (y < -DopeRowHeight || y > h + DopeRowHeight) continue;
+                var rowRect = new Rect(0, y - DopeRowHeight / 2, w, DopeRowHeight);
 
-                if (track.IsGroupHeader || track.Keys.Count == 0)
+                if (track.IsGroupHeader)
                 {
-                    // Reference bars: every layer/bone row spans the animation's
-                    // keyed range — header blue, bone rows alternating.
-                    double lMin = double.MaxValue, lMax = double.MinValue;
-                    if (_barPreviewStart >= 0)
+                    // Group row = a real track: darker background + aggregate
+                    // pieces of every member bone (clip blue, user green on
+                    // top). This is the primary editing surface.
+                    dc.DrawRectangle(DopeGroupRowBrush, null, rowRect);
+                    var (clipSpans, userSpans) = GroupPieceSpans(track.Group);
+                    void DrawSpanPieces(List<(double T0, double T1)> spans, Brush brush)
                     {
-                        // Mid-drag: all bars follow the previewed span.
-                        lMin = DopeTimeToXRaw(_barPreviewStart);
-                        lMax = DopeTimeToXRaw(_barPreviewEnd);
-                    }
-                    else foreach (var kf in _vm.TimelineKeyframes)
-                    {
-                        var x = DopeTimeToXRaw(kf.Time);
-                        if (x < lMin) lMin = x;
-                        if (x > lMax) lMax = x;
-                    }
-                    if (lMax > lMin)
-                    {
-                        var bx0 = System.Math.Max(-6, lMin);
-                        var bx1 = System.Math.Min(w + 6, lMax);
-                        if (bx1 > bx0)
+                        foreach (var s in spans)
                         {
-                            var barBrush = track.IsGroupHeader ? DopeBarBlue
-                                : (row & 1) == 0 ? DopeBarOrange : DopeBarBlue;
-                            dc.DrawRoundedRectangle(barBrush, null,
-                                new Rect(bx0, y - barH / 2, System.Math.Max(4, bx1 - bx0), barH), 3, 3);
-                            if (lMin >= -8) dc.DrawEllipse(DopeDot, null, new Point(lMin, y), 3.2, 3.2);
-                            if (lMax <= w + 8) dc.DrawEllipse(DopeDot, null, new Point(lMax, y), 3.2, 3.2);
+                            var sMinX = DopeTimeToXRaw(s.T0);
+                            var sMaxX = DopeTimeToXRaw(s.T1);
+                            if (sMaxX < sMinX) (sMinX, sMaxX) = (sMaxX, sMinX);
+                            var bx0 = System.Math.Max(-6, sMinX) + 2;
+                            var bx1 = System.Math.Min(w + 6, sMaxX) - 2;
+                            if (bx1 <= bx0) { bx0 -= 2; bx1 += 2; }
+                            if (bx1 <= bx0) continue;
+                            var pieceRect = new Rect(bx0, y - barH / 2, System.Math.Max(4, bx1 - bx0), barH);
+                            var groupPieceSelected = _selectedPiece is { } gs
+                                && string.Equals(gs.TrackId, track.Id, StringComparison.Ordinal)
+                                && gs.T1 >= s.T0 - 1e-3 && gs.T0 <= s.T1 + 1e-3;
+                            dc.DrawRoundedRectangle(brush,
+                                groupPieceSelected ? DopePieceSelectedPen : DopeBarSeamPen,
+                                pieceRect, 3, 3);
+                            if (groupPieceSelected)
+                                dc.DrawRoundedRectangle(DopePieceSelectedFill, null, pieceRect, 3, 3);
+                            if (sMinX >= -8 && sMinX <= w + 8)
+                                dc.DrawEllipse(DopeDot, null, new Point(sMinX, y), 3.2, 3.2);
+                            if (sMaxX >= -8 && sMaxX <= w + 8)
+                                dc.DrawEllipse(DopeDot, null, new Point(sMaxX, y), 3.2, 3.2);
                         }
                     }
+                    DrawSpanPieces(clipSpans, DopeBarBlue);
+                    DrawSpanPieces(userSpans, DopeBarUser);
                     continue;
                 }
 
-                double rMinX = double.MaxValue, rMaxX = double.MinValue;
-                int rVis = 0;
+                // Subtle odd-row band keeps the eye on a lane without the
+                // old alternating bar colors.
+                if ((row & 1) == 1)
+                    dc.DrawRectangle(DopeRowBandBrush, null, rowRect);
+
+                // Selected lane → full-width band matching the gutter row
+                // highlight, so the selection reads across the whole sheet.
+                if (track.IsSelected)
+                    dc.DrawRectangle(DopeRowSelectedBrush, null, rowRect);
+
+                if (track.Keys.Count == 0) continue;
+
+                // Density in TIME (not pixels): near-every-frame / mostly-linear
+                // = baked clip → bar. Pixel gaps alone lied when zoomed in.
+                int keyCount = track.Keys.Count;
+                double tMin = double.MaxValue, tMax = double.MinValue;
+                int linearCount = 0;
                 foreach (var key in track.Keys)
                 {
-                    var x = DopeTimeToXRaw(key.Time);
-                    if (x < -10 || x > w + 10) continue;
-                    rVis++;
-                    if (x < rMinX) rMinX = x;
-                    if (x > rMaxX) rMaxX = x;
+                    if (key.Time < tMin) tMin = key.Time;
+                    if (key.Time > tMax) tMax = key.Time;
+                    if (string.Equals(key.Ease, "linear", StringComparison.OrdinalIgnoreCase))
+                        linearCount++;
                 }
-                bool rowDense = rVis > 2 && (rMaxX - rMinX) / System.Math.Max(1, rVis - 1) < 6;
+                double spanT = System.Math.Max(frameDt, tMax - tMin);
+                double avgDt = keyCount > 1 ? spanT / (keyCount - 1) : spanT;
+                bool rowDense = keyCount >= 8
+                    && (avgDt <= frameDt * 1.75 || linearCount >= keyCount * 3 / 4);
+
+                double rMinX = DopeTimeToXRaw(tMin);
+                double rMaxX = DopeTimeToXRaw(tMax);
+                if (rMaxX < rMinX) (rMinX, rMaxX) = (rMaxX, rMinX);
+
                 if (rowDense)
                 {
-                    var barBrush = (row & 1) == 0 ? DopeBarBlue : DopeBarOrange;
-                    dc.DrawRoundedRectangle(barBrush, null,
-                        new Rect(rMinX, y - barH / 2, System.Math.Max(4, rMaxX - rMinX), barH), 3, 3);
-                    dc.DrawEllipse(DopeDot, null, new Point(rMinX, y), 3.2, 3.2);
-                    dc.DrawEllipse(DopeDot, null, new Point(rMaxX, y), 3.2, 3.2);
-                    // Selected keys still surface as white diamonds on the bar.
+                    // One bar per contiguous SAME-SOURCE run — splits carve
+                    // >2-frame gaps, and hand-recorded keys never merge into
+                    // an imported piece (they're their own green segment).
+                    var gapT = frameDt * 2.0;
+                    var segKeys = track.Keys.OrderBy(k => k.Time).ToList();
+                    int segStart = 0;
+                    for (int i = 1; i <= segKeys.Count; i++)
+                    {
+                        if (i < segKeys.Count
+                            && segKeys[i].Time - segKeys[i - 1].Time <= gapT
+                            && string.Equals(segKeys[i].Src, segKeys[i - 1].Src, StringComparison.Ordinal))
+                            continue;
+                        var firstKey = segKeys[segStart];
+                        var lastKey = segKeys[i - 1];
+                        var sMinX = DopeTimeToXRaw(firstKey.Time);
+                        var sMaxX = DopeTimeToXRaw(lastKey.Time);
+                        var isUserPiece = string.Equals(firstKey.Src, "user", StringComparison.Ordinal);
+                        segStart = i;
+                        if (sMaxX < sMinX) (sMinX, sMaxX) = (sMaxX, sMinX);
+                        // Inset each piece ~2px per side — a split's 2-frame
+                        // gap is sub-pixel when zoomed out, and without the
+                        // seam two pieces look like one uncut bar.
+                        var bx0 = System.Math.Max(-6, sMinX) + 2;
+                        var bx1 = System.Math.Min(w + 6, sMaxX) - 2;
+                        if (bx1 <= bx0) { bx0 -= 2; bx1 += 2; }
+                        if (bx1 <= bx0) continue;
+                        // Id-based match keeps the highlight glued to the
+                        // piece while its key times mutate mid-drag.
+                        var pieceSelected = _selectedPiece is { } sel
+                            && string.Equals(sel.TrackId, track.Id, StringComparison.Ordinal)
+                            && (sel.KeyIds.Contains(firstKey.Id) || sel.KeyIds.Contains(lastKey.Id));
+                        var pieceRect = new Rect(bx0, y - barH / 2, System.Math.Max(4, bx1 - bx0), barH);
+                        dc.DrawRoundedRectangle(isUserPiece ? DopeBarUser : DopeBarBlue,
+                            pieceSelected ? DopePieceSelectedPen : DopeBarSeamPen,
+                            pieceRect, 3, 3);
+                        if (pieceSelected)
+                            dc.DrawRoundedRectangle(DopePieceSelectedFill, null, pieceRect, 3, 3);
+                        if (sMinX >= -8 && sMinX <= w + 8)
+                            dc.DrawEllipse(DopeDot, null, new Point(sMinX, y), 3.2, 3.2);
+                        if (sMaxX >= -8 && sMaxX <= w + 8)
+                            dc.DrawEllipse(DopeDot, null, new Point(sMaxX, y), 3.2, 3.2);
+                    }
+                    // Selected keys still get diamonds so multi-select stays visible.
                     foreach (var key in track.Keys)
                     {
                         if (!key.IsSelected) continue;
@@ -3019,24 +3939,39 @@ case "prop-loaded":
                     continue;
                 }
 
-                drawnColumns.Clear();
+                // Sparse: diamonds, hard-capped to ~one per minDiamondGapPx so
+                // a long sparse track can never fan out into thousands of shapes.
+                int lastBucket = int.MinValue;
                 foreach (var key in track.Keys)
                 {
                     var x = DopeTimeToXRaw(key.Time);
                     if (x < -8 || x > w + 8) continue;
-                    var column = ((int)System.Math.Round(x) << 1) | (key.IsSelected ? 1 : 0);
-                    if (!drawnColumns.Add(column)) continue;
-                    var ctx = key.IsSelected ? selectedCtx : normalCtx;
-                    ctx.BeginFigure(new Point(x, y - 4.5), true, true);
-                    ctx.LineTo(new Point(x + 4.5, y), true, false);
-                    ctx.LineTo(new Point(x, y + 4.5), true, false);
-                    ctx.LineTo(new Point(x - 4.5, y), true, false);
+                    if (key.IsSelected)
+                    {
+                        selectedCtx.BeginFigure(new Point(x, y - 4.5), true, true);
+                        selectedCtx.LineTo(new Point(x + 4.5, y), true, false);
+                        selectedCtx.LineTo(new Point(x, y + 4.5), true, false);
+                        selectedCtx.LineTo(new Point(x - 4.5, y), true, false);
+                        continue;
+                    }
+                    int bucket = (int)(x / minDiamondGapPx);
+                    if (bucket == lastBucket) continue;
+                    lastBucket = bucket;
+                    // Hand-recorded keys stay green everywhere — diamonds too.
+                    var ctxTarget = string.Equals(key.Src, "user", StringComparison.Ordinal)
+                        ? userCtx : normalCtx;
+                    ctxTarget.BeginFigure(new Point(x, y - 4.5), true, true);
+                    ctxTarget.LineTo(new Point(x + 4.5, y), true, false);
+                    ctxTarget.LineTo(new Point(x, y + 4.5), true, false);
+                    ctxTarget.LineTo(new Point(x - 4.5, y), true, false);
                 }
             }
         }
         normalKeys.Freeze();
+        userKeys.Freeze();
         selectedKeys.Freeze();
         dc.DrawGeometry(TimelineKfFillBrush, TimelineKfStrokePen, normalKeys);
+        dc.DrawGeometry(DopeBarUser, TimelineKfStrokePen, userKeys);
         dc.DrawGeometry(Brushes.White, TimelineKfSelectedPen, selectedKeys);
     }
 
@@ -3046,6 +3981,11 @@ case "prop-loaded":
     {
         var canvas = DopeSheetCanvas;
         if (canvas is null || canvas.ActualWidth < 10) return;
+        var ruler = DopeSheetRulerCanvas;
+        var w = ruler?.ActualWidth > 10 ? ruler.ActualWidth : canvas.ActualWidth;
+        var h = ruler?.ActualHeight > 2 ? ruler.ActualHeight : 22;
+        DrawPlaybackRangeHighlight(dc, w, h, DopeTimeToXRaw);
+
         var fps = System.Math.Max(1, _vm.TimelineFps);
         var visible = VisibleTimelineDuration;
         var first = (int)System.Math.Floor(_timelineCtl.ScrollOffset * fps);
@@ -3053,10 +3993,10 @@ case "prop-loaded":
         var pxPerFrame = _timelineCtl.UsableWidth(canvas.ActualWidth) / (visible * fps);
         int majorEvery = NiceFrameStep(pxPerFrame, 48);
         var dpi = VisualTreeHelper.GetDpi(this).PixelsPerDip;
-        for (int frame = System.Math.Max(0, first); frame <= last; frame++)
+        for (int frame = first; frame <= last; frame++)
         {
             if (frame % majorEvery != 0) continue;
-            var x = DopeTimeToX(frame / (double)fps);
+            var x = DopeTimeToXRaw(frame / (double)fps);
             var text = new FormattedText(frame.ToString(),
                 System.Globalization.CultureInfo.InvariantCulture,
                 FlowDirection.LeftToRight, TimelineTypeface, 9, TimelineLabelBrush, dpi);
@@ -3068,8 +4008,34 @@ case "prop-loaded":
     private bool _dopePointerMoved;
     private System.Windows.Shapes.Rectangle? _dopeMarquee;
     private KeyframeMarker? _dopeDragKey;
+    private TimelineTrackRow? _dopeDragTrack;
+    private TimelineTrackRow? _barDragTrack;
     private Dictionary<string, double>? _dopeDragOriginalTimes;
     private KeyframeMarker? _dopeHoverKey;
+
+    /// <summary>Clean CLICK on a lane (key or bar, no drag movement) →
+    /// select its bone through the shared selection, same as a gutter-row
+    /// click. Ctrl/Shift toggles it in the multi-selection.</summary>
+    private void SelectBoneLaneFromTimeline(TimelineTrackRow? row)
+    {
+        if (row is null || row.IsGroupHeader || TimelineTrackRow.IsSpecialTrack(row)) return;
+        if (_suppressSelectionEcho > 0 || !_webViewReady) return;
+        var bone = _vm.Bones.FirstOrDefault(b =>
+            string.Equals(b.Name, row.Name, StringComparison.OrdinalIgnoreCase));
+        if (bone is null) return;
+        var mods = System.Windows.Input.Keyboard.Modifiers;
+        if (mods.HasFlag(System.Windows.Input.ModifierKeys.Control)
+            || mods.HasFlag(System.Windows.Input.ModifierKeys.Shift))
+        {
+            var next = new List<int>(_boneSelectionOrder);
+            if (!next.Remove(bone.Index)) next.Add(bone.Index);
+            _ = PushOutlinerBoneSelectionAsync(next);
+        }
+        else
+        {
+            _ = PushOutlinerBoneSelectionAsync(new List<int> { bone.Index });
+        }
+    }
 
     /// <summary>Mathematical key hit-test against the same layout the render
     /// layer draws (row = y band, key = nearest x within ±8 px). Replaces the
@@ -3091,12 +4057,181 @@ case "prop-loaded":
         if (track.IsGroupHeader) return null;
         KeyframeMarker? best = null;
         double bestDistance = 8;
+        KeyframeMarker? bestSelected = null;
+        double bestSelectedDistance = 8;
         foreach (var key in track.Keys)
         {
             var distance = System.Math.Abs(DopeTimeToXRaw(key.Time) - p.X);
             if (distance <= bestDistance) { bestDistance = distance; best = key; }
+            if (key.IsSelected && distance <= bestSelectedDistance)
+            { bestSelectedDistance = distance; bestSelected = key; }
         }
-        return best is null ? null : (track, best);
+        // Prefer a selected key within reach: on dense lanes the baked
+        // neighbours sit sub-pixel from the diamond the user is aiming at,
+        // and nearest-only made a recorded key practically ungrabbable.
+        var chosen = bestSelected ?? best;
+        return chosen is null ? null : (track, chosen);
+    }
+
+    /// <summary>Same density rule as the renderer: a near-every-frame /
+    /// mostly-linear lane is a baked bar, not a diamond field.</summary>
+    private bool IsDenseDopeRow(TimelineTrackRow track)
+    {
+        int keyCount = track.Keys.Count;
+        if (keyCount < 8) return false;
+        var fps = System.Math.Max(1, _vm.TimelineFps);
+        var frameDt = 1.0 / fps;
+        double tMin = double.MaxValue, tMax = double.MinValue;
+        int linearCount = 0;
+        foreach (var key in track.Keys)
+        {
+            if (key.Time < tMin) tMin = key.Time;
+            if (key.Time > tMax) tMax = key.Time;
+            if (string.Equals(key.Ease, "linear", StringComparison.OrdinalIgnoreCase))
+                linearCount++;
+        }
+        double spanT = System.Math.Max(frameDt, tMax - tMin);
+        double avgDt = keyCount > 1 ? spanT / (keyCount - 1) : spanT;
+        return avgDt <= frameDt * 1.75 || linearCount >= keyCount * 3 / 4;
+    }
+
+    /// <summary>Contiguous run of keys around <paramref name="anchor"/>,
+    /// bounded by split gaps (> 2 frames) — the draggable "piece".</summary>
+    private List<KeyframeMarker> SegmentKeysAround(TimelineTrackRow track, KeyframeMarker anchor)
+    {
+        var ordered = track.Keys.OrderBy(k => k.Time).ToList();
+        var gapT = PieceGapT;
+        var idx = ordered.FindIndex(k => ReferenceEquals(k, anchor));
+        if (idx < 0) return ordered;
+        bool Linked(KeyframeMarker a, KeyframeMarker b) =>
+            b.Time - a.Time <= gapT
+            && string.Equals(a.Src, b.Src, StringComparison.Ordinal);
+        var lo = idx;
+        while (lo > 0 && Linked(ordered[lo - 1], ordered[lo])) lo--;
+        var hi = idx;
+        while (hi < ordered.Count - 1 && Linked(ordered[hi], ordered[hi + 1])) hi++;
+        return ordered.GetRange(lo, hi - lo + 1);
+    }
+
+    // ── Pieces: the video-editor unit of the dope sheet ───────────────
+    // A piece = contiguous same-source key run (gap ≤ 2 frames). Group
+    // rows aggregate their member bones' keys into group-level pieces.
+    // The selected piece can be dragged, deleted (Del), and split (✂).
+
+    private const double PieceGapFrames = 2.0;
+    private double PieceGapT => PieceGapFrames / System.Math.Max(1, _vm.TimelineFps);
+
+    private sealed record DopePieceSelection(
+        string TrackId,
+        HashSet<string> KeyIds,
+        string[] BoneNames,
+        double T0,
+        double T1);
+
+    private DopePieceSelection? _selectedPiece;
+    private Pen? _dopePieceSelectedPen;
+    private Pen DopePieceSelectedPen =>
+        _dopePieceSelectedPen ??= new Pen(TimelinePlayheadBrush, 2.5);
+
+    private void SetSelectedPiece(TimelineTrackRow track, IReadOnlyList<KeyframeMarker> keys, string[] boneNames)
+    {
+        if (keys.Count == 0 || TimelineTrackRow.IsSpecialTrack(track)) return;
+        double t0 = double.MaxValue, t1 = double.MinValue;
+        var ids = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var k in keys)
+        {
+            ids.Add(k.Id);
+            if (k.Time < t0) t0 = k.Time;
+            if (k.Time > t1) t1 = k.Time;
+        }
+        _selectedPiece = new DopePieceSelection(track.Id, ids, boneNames, t0, t1);
+        _vm.StatusText = "Piece selected — drag to move, Del to delete, ✂ to split at playhead.";
+        _dopeSheetLayer?.InvalidateVisual();
+    }
+
+    private void ClearSelectedPiece(bool redraw = true)
+    {
+        if (_selectedPiece is null) return;
+        _selectedPiece = null;
+        if (redraw) _dopeSheetLayer?.InvalidateVisual();
+    }
+
+    private List<TimelineTrackRow> GroupMemberRows(string group) =>
+        _vm.TimelineTracks
+            .Where(t => !t.IsGroupHeader && !TimelineTrackRow.IsSpecialTrack(t)
+                        && string.Equals(t.Group, group, StringComparison.Ordinal))
+            .ToList();
+
+    /// <summary>Contiguous spans of a sorted-or-unsorted time list (gap ≤
+    /// 2 frames joins). The group row's aggregate pieces.</summary>
+    private List<(double T0, double T1)> SegmentSpans(List<double> times)
+    {
+        var spans = new List<(double, double)>();
+        if (times.Count == 0) return spans;
+        times.Sort();
+        var gapT = PieceGapT;
+        double t0 = times[0], prev = times[0];
+        for (int i = 1; i <= times.Count; i++)
+        {
+            if (i < times.Count && times[i] - prev <= gapT) { prev = times[i]; continue; }
+            spans.Add((t0, prev));
+            if (i < times.Count) { t0 = times[i]; prev = times[i]; }
+        }
+        return spans;
+    }
+
+    private (List<(double T0, double T1)> Clip, List<(double T0, double T1)> User)
+        GroupPieceSpans(string group)
+    {
+        var clipTimes = new List<double>();
+        var userTimes = new List<double>();
+        foreach (var m in GroupMemberRows(group))
+            foreach (var k in m.Keys)
+                (string.Equals(k.Src, "user", StringComparison.Ordinal) ? userTimes : clipTimes)
+                    .Add(k.Time);
+        return (SegmentSpans(clipTimes), SegmentSpans(userTimes));
+    }
+
+    /// <summary>The piece under (row, time). Bone rows: the contiguous run
+    /// around the nearest key. Group rows: the aggregate span (green user
+    /// pieces win when overlapping — they draw on top) with EVERY member
+    /// bone's keys inside it.</summary>
+    private (List<KeyframeMarker> Keys, string[] BoneNames)? ResolvePieceAt(TimelineTrackRow row, double time)
+    {
+        var eps = PieceGapT;
+        if (row.IsGroupHeader)
+        {
+            var (clip, user) = GroupPieceSpans(row.Group);
+            (double T0, double T1)? span = null;
+            var userPiece = false;
+            foreach (var s in user)
+                if (time >= s.T0 - eps && time <= s.T1 + eps) { span = s; userPiece = true; break; }
+            if (span is null)
+                foreach (var s in clip)
+                    if (time >= s.T0 - eps && time <= s.T1 + eps) { span = s; break; }
+            if (span is null) return null;
+            var keys = new List<KeyframeMarker>();
+            var names = new HashSet<string>(StringComparer.Ordinal);
+            foreach (var m in GroupMemberRows(row.Group))
+                foreach (var k in m.Keys)
+                {
+                    if (k.Time < span.Value.T0 - 1e-4 || k.Time > span.Value.T1 + 1e-4) continue;
+                    if (string.Equals(k.Src, "user", StringComparison.Ordinal) != userPiece) continue;
+                    keys.Add(k);
+                    names.Add(m.Name);
+                }
+            return keys.Count == 0 ? null : (keys, names.ToArray());
+        }
+        if (TimelineTrackRow.IsSpecialTrack(row) || row.Keys.Count == 0) return null;
+        KeyframeMarker? nearest = null;
+        var best = double.MaxValue;
+        foreach (var k in row.Keys)
+        {
+            var d = System.Math.Abs(k.Time - time);
+            if (d < best) { best = d; nearest = k; }
+        }
+        if (nearest is null || best > eps) return null;
+        return (SegmentKeysAround(row, nearest), new[] { row.Name });
     }
 
     /// <summary>Keyed span (first..last keyframe, seconds) of the loaded
@@ -3120,15 +4255,34 @@ case "prop-loaded":
         var position = e.GetPosition(canvas);
 
         // A press on a key starts a key drag (with the old per-diamond
-        // selection semantics); anywhere else starts the marquee.
+        // selection semantics); a press on a dense baked bar away from any
+        // selected key slides the WHOLE lane; anywhere else starts the
+        // marquee. Lane/bone selection is NOT touched here — dragging must
+        // never light the lane band; a clean click selects on mouse-up.
         if (HitTestDopeKey(position) is { } hit && !hit.Track.IsLocked)
         {
-            if (!System.Windows.Input.Keyboard.Modifiers.HasFlag(System.Windows.Input.ModifierKeys.Control))
-                foreach (var track in _vm.TimelineTracks) track.IsSelected = ReferenceEquals(track, hit.Track);
-            else
-                hit.Track.IsSelected = !hit.Track.IsSelected;
-            var item = new TimelineItemRef(TimelineItemKind.Keyframe, hit.Key.Id);
+            _dopeDragTrack = hit.Track;
             var mods = System.Windows.Input.Keyboard.Modifiers;
+            var withModifier = mods.HasFlag(System.Windows.Input.ModifierKeys.Control)
+                            || mods.HasFlag(System.Windows.Input.ModifierKeys.Shift);
+            if (!withModifier && !hit.Key.IsSelected && IsDenseDopeRow(hit.Track))
+            {
+                // Dense bar grab → SELECT the piece and drag it (split gaps
+                // bound it), not the whole lane.
+                var seg = SegmentKeysAround(hit.Track, hit.Key);
+                SetSelectedPiece(hit.Track, seg, new[] { hit.Track.Name });
+                _dopeDragKey = hit.Key;
+                _dopePointerStart = position;
+                _dopePointerMoved = false;
+                _dopeDragOriginalTimes = seg.ToDictionary(k => k.Id, k => k.Time);
+                _timelineInteraction = TimelineInteractionState.DraggingKeys;
+                canvas.CaptureMouse();
+                e.Handled = true;
+                return;
+            }
+            // Precise key surgery — piece selection gets out of the way.
+            ClearSelectedPiece();
+            var item = new TimelineItemRef(TimelineItemKind.Keyframe, hit.Key.Id);
             if (mods.HasFlag(System.Windows.Input.ModifierKeys.Control)) _timelineSelection.Toggle(item);
             else if (mods.HasFlag(System.Windows.Input.ModifierKeys.Shift)) _timelineSelection.Add(item);
             else if (!_timelineSelection.Contains(item)) _timelineSelection.SelectOnly(item);
@@ -3145,59 +4299,44 @@ case "prop-loaded":
             return;
         }
 
-        // A press on a lane BAR slides the whole animation in time; a press
-        // on an endpoint dot trims that edge (2026-07-17 user request).
+        // GROUP-ROW pieces: press selects the aggregate piece and starts a
+        // drag of every member key inside it — the group row behaves like a
+        // video-editor track. (Replaces the old whole-animation bar-slide.)
         SyncTimelineControllerFromVm();
-        if (DopeKeyframeSpan() is { } span)
         {
             var vOff = DopeSheetTrackScroller?.VerticalOffset ?? 0;
             var rowIdx = (int)((position.Y + vOff) / DopeRowHeight);
             var rows = GetDopeVisibleTracks();
-            if (rowIdx >= 0 && rowIdx < rows.Count &&
-                (rows[rowIdx].IsGroupHeader || rows[rowIdx].Keys.Count == 0))
+            if (rowIdx >= 0 && rowIdx < rows.Count && rows[rowIdx].IsGroupHeader)
             {
-                var x0 = DopeTimeToXRaw(span.Start);
-                var x1 = DopeTimeToXRaw(span.End);
-                var mode = BarDragMode.None;
-                var trimEnd = false;
-                if (System.Math.Abs(position.X - x0) <= 7) { mode = BarDragMode.Trim; }
-                else if (System.Math.Abs(position.X - x1) <= 7) { mode = BarDragMode.Trim; trimEnd = true; }
-                else if (position.X > x0 && position.X < x1) mode = BarDragMode.Move;
-                if (mode != BarDragMode.None)
+                var header = rows[rowIdx];
+                var t = _timelineCtl.XToTimeRaw(position.X, _vm.TimelineDuration, canvas.ActualWidth);
+                if (ResolvePieceAt(header, t) is { } piece)
                 {
-                    // Clicking a bone-row bar highlights that bone in the
-                    // viewport — same select path as its gutter row.
-                    if (rows[rowIdx].Id.StartsWith("bone:", StringComparison.Ordinal) && _webViewReady)
+                    SetSelectedPiece(header, piece.Keys, piece.BoneNames);
+                    KeyframeMarker? anchorKey = null;
+                    var bestD = double.MaxValue;
+                    foreach (var k in piece.Keys)
                     {
-                        var bone = _vm.Bones.FirstOrDefault(b =>
-                            string.Equals(b.Name, rows[rowIdx].Name, StringComparison.Ordinal));
-                        if (bone != null)
-                        {
-                            _vm.SelectedBone = bone;
-                            if (bone.Index != _lastPushedBoneIndex)
-                            {
-                                _lastPushedBoneIndex = bone.Index;
-                                _ = Viewport.CoreWebView2.ExecuteScriptAsync(
-                                    $"window.selectPoseBone && window.selectPoseBone({bone.Index})");
-                            }
-                        }
+                        var d = System.Math.Abs(k.Time - t);
+                        if (d < bestD) { bestD = d; anchorKey = k; }
                     }
-                    _barDragMode = mode;
-                    _barDragTrimEnd = trimEnd;
-                    _barDragOrigStart = span.Start;
-                    _barDragOrigEnd = span.End;
-                    _barPreviewStart = span.Start;
-                    _barPreviewEnd = span.End;
+                    _dopeDragKey = anchorKey;
+                    _dopeDragTrack = header;
                     _dopePointerStart = position;
                     _dopePointerMoved = false;
-                    _timelineInteraction = TimelineInteractionState.DraggingStrips;
+                    _dopeDragOriginalTimes = piece.Keys.ToDictionary(k => k.Id, k => k.Time);
+                    _timelineInteraction = TimelineInteractionState.DraggingKeys;
                     canvas.CaptureMouse();
                     e.Handled = true;
                     return;
                 }
+                ClearSelectedPiece();
             }
         }
 
+        // Empty-space press → marquee; piece selection gets out of the way.
+        ClearSelectedPiece();
         // Sweep any stale marquee first — redraws no longer clear the
         // canvas children, so a capture lost mid-drag must not leak one.
         if (_dopeMarquee is not null) canvas.Children.Remove(_dopeMarquee);
@@ -3237,6 +4376,19 @@ case "prop-loaded":
             foreach (var key in _vm.TimelineTracks.SelectMany(t => t.Keys))
                 if (_dopeDragOriginalTimes.TryGetValue(key.Id, out var original))
                     key.Time = System.Math.Clamp(original + dt, 0, _vm.TimelineDuration);
+            // Keep the selected-piece bounds glued to the drag so the
+            // group-row highlight travels with the bar.
+            if (_selectedPiece is { } dragSel && _dopeDragOriginalTimes.Count > 0)
+            {
+                double lo = double.MaxValue, hi = double.MinValue;
+                foreach (var t0 in _dopeDragOriginalTimes.Values)
+                { if (t0 < lo) lo = t0; if (t0 > hi) hi = t0; }
+                _selectedPiece = dragSel with
+                {
+                    T0 = System.Math.Clamp(lo + dt, 0, _vm.TimelineDuration),
+                    T1 = System.Math.Clamp(hi + dt, 0, _vm.TimelineDuration),
+                };
+            }
             _dopeSheetLayer?.InvalidateVisual();
             e.Handled = true;
             return;
@@ -3313,26 +4465,23 @@ case "prop-loaded":
                     canvas.Cursor = null;
                 }
             }
-            // Bar affordances: SizeWE over an endpoint dot (trim), SizeAll
-            // over the bar body (slide in time). Recomputed per move — the
-            // hover-key change guard above can't see bar transitions.
-            if (hit is null && DopeKeyframeSpan() is { } hoverSpan)
+            // Piece affordance: SizeAll over a group-row piece (drag it);
+            // bone-lane bars already get SizeWE from the key hover above.
+            if (hit is null)
             {
-                System.Windows.Input.Cursor? barCursor = null;
+                System.Windows.Input.Cursor? pieceCursor = null;
                 var vOff = DopeSheetTrackScroller?.VerticalOffset ?? 0;
                 var rowIdx = (int)((pos.Y + vOff) / DopeRowHeight);
                 var rows = GetDopeVisibleTracks();
-                if (rowIdx >= 0 && rowIdx < rows.Count &&
-                    (rows[rowIdx].IsGroupHeader || rows[rowIdx].Keys.Count == 0))
+                if (rowIdx >= 0 && rowIdx < rows.Count && rows[rowIdx].IsGroupHeader)
                 {
-                    var x0 = DopeTimeToXRaw(hoverSpan.Start);
-                    var x1 = DopeTimeToXRaw(hoverSpan.End);
-                    if (System.Math.Abs(pos.X - x0) <= 7 || System.Math.Abs(pos.X - x1) <= 7)
-                        barCursor = System.Windows.Input.Cursors.SizeWE;
-                    else if (pos.X > x0 && pos.X < x1)
-                        barCursor = System.Windows.Input.Cursors.SizeAll;
+                    var t = _timelineCtl.XToTimeRaw(pos.X, _vm.TimelineDuration, canvas.ActualWidth);
+                    var (clipSpans, userSpans) = GroupPieceSpans(rows[rowIdx].Group);
+                    var eps = PieceGapT;
+                    if (clipSpans.Concat(userSpans).Any(s => t >= s.T0 - eps && t <= s.T1 + eps))
+                        pieceCursor = System.Windows.Input.Cursors.SizeAll;
                 }
-                canvas.Cursor = barCursor;
+                canvas.Cursor = pieceCursor;
             }
         }
     }
@@ -3352,7 +4501,12 @@ case "prop-loaded":
                     .ToArray();
                 await SendTimelineCommandAsync("moveKeys", moves.Select(x => x.id), new { moves });
             }
+            else if (!_dopePointerMoved)
+            {
+                SelectBoneLaneFromTimeline(_dopeDragTrack);
+            }
             _dopeDragKey = null;
+            _dopeDragTrack = null;
             _dopeDragOriginalTimes = null;
             _timelineInteraction = TimelineInteractionState.Idle;
             RedrawTimeline();
@@ -3393,9 +4547,12 @@ case "prop-loaded":
             }
             else
             {
+                // Clean click on the bar (no slide/trim) → select its bone.
+                SelectBoneLaneFromTimeline(_barDragTrack);
                 _barPreviewStart = _barPreviewEnd = -1;
                 RedrawTimeline();
             }
+            _barDragTrack = null;
             e.Handled = true;
             return;
         }
@@ -3430,6 +4587,15 @@ case "prop-loaded":
         else
         {
             _timelineSelection.Clear();
+            // One-click bone highlight: a click anywhere on a lane — even
+            // the empty area between keys — selects its bone. Seek still
+            // happens, matching the old click-to-scrub behavior.
+            SyncTimelineControllerFromVm();
+            var vOff = DopeSheetTrackScroller?.VerticalOffset ?? 0;
+            var rowIdx = (int)((end.Y + vOff) / DopeRowHeight);
+            var rowsUnder = GetDopeVisibleTracks();
+            if (rowIdx >= 0 && rowIdx < rowsUnder.Count)
+                SelectBoneLaneFromTimeline(rowsUnder[rowIdx]);
             await SetTimelineTimeAsync(DopeXToTime(end.X));
         }
         _timelineInteraction = TimelineInteractionState.Idle;
@@ -3440,26 +4606,92 @@ case "prop-loaded":
     private void OnDopeSheetRightUp(object sender, System.Windows.Input.MouseButtonEventArgs e)
     {
         if (sender is not Canvas canvas) return;
-        if (HitTestDopeKey(e.GetPosition(canvas)) is not { } hit) return;
-        var item = new TimelineItemRef(TimelineItemKind.Keyframe, hit.Key.Id);
-        if (!_timelineSelection.Contains(item)) _timelineSelection.SelectOnly(item);
-        var menu = new ContextMenu();
-        foreach (var (id, label) in new[]
+        var position = e.GetPosition(canvas);
+        SyncTimelineControllerFromVm();
+        var clickTime = DopeXToTime(position.X);
+        var frame = (int)System.Math.Round(clickTime * System.Math.Max(1, _vm.TimelineFps));
+
+        TimelineTrackRow? rowUnder = null;
         {
-            ("auto", "Auto"), ("linear", "Linear"), ("in", "Ease In"),
-            ("out", "Ease Out"), ("hold", "Hold"),
-        })
-        {
-            var option = new MenuItem { Header = label, IsChecked = hit.Key.Ease == id };
-            option.Click += async (_, _) =>
-                await SendTimelineCommandAsync("setEase",
-                    _timelineSelection.Items.Select(x => x.Id), new { ease = id });
-            menu.Items.Add(option);
+            var vOff = DopeSheetTrackScroller?.VerticalOffset ?? 0;
+            var rowIdx = (int)((position.Y + vOff) / DopeRowHeight);
+            var rows = GetDopeVisibleTracks();
+            if (rowIdx >= 0 && rowIdx < rows.Count) rowUnder = rows[rowIdx];
         }
-        menu.Items.Add(new Separator());
-        var delete = new MenuItem { Header = "Delete selected keys" };
-        delete.Click += async (_, _) => await DeleteTimelineSelectionAsync();
-        menu.Items.Add(delete);
+        var hit = HitTestDopeKey(position);
+
+        // PIECE context (a bar — group row or dense bone lane away from a
+        // selected key) → piece actions only. KEY context (sparse key or a
+        // selected diamond) → the ease/key menu.
+        (List<KeyframeMarker> Keys, string[] BoneNames)? piece = null;
+        TimelineTrackRow? pieceRow = null;
+        if (rowUnder is { IsGroupHeader: true })
+        {
+            piece = ResolvePieceAt(rowUnder, clickTime);
+            pieceRow = rowUnder;
+        }
+        else if (hit is { } barHit && !barHit.Key.IsSelected && IsDenseDopeRow(barHit.Track))
+        {
+            piece = (SegmentKeysAround(barHit.Track, barHit.Key), new[] { barHit.Track.Name });
+            pieceRow = barHit.Track;
+        }
+
+        var menu = new ContextMenu();
+        if (piece is { } p && pieceRow != null)
+        {
+            SetSelectedPiece(pieceRow, p.Keys, p.BoneNames);   // highlight = menu context
+            var ids = p.Keys.Select(k => k.Id).ToArray();
+            var boneNames = p.BoneNames;
+
+            var split = new MenuItem { Header = $"Split here (frame {frame})" };
+            split.Click += async (_, _) =>
+            {
+                ClearSelectedPiece(redraw: false);
+                await SendTimelineCommandAsync("splitAt",
+                    payload: new { time = clickTime, bones = boneNames });
+                await SendTimelineCommandAsync("requestSnapshot");
+                _vm.StatusText = $"Split at frame {frame} — click a half to select it.";
+            };
+            menu.Items.Add(split);
+
+            var deletePiece = new MenuItem { Header = $"Delete piece ({ids.Length} keys)" };
+            deletePiece.Click += async (_, _) =>
+            {
+                ClearSelectedPiece(redraw: false);
+                await SendTimelineCommandAsync("deleteKeys", ids);
+                await SendTimelineCommandAsync("requestSnapshot");
+                _vm.StatusText = $"Deleted piece ({ids.Length} keys). Ctrl+Z undoes.";
+            };
+            menu.Items.Add(deletePiece);
+        }
+        else if (hit is { } keyHit)
+        {
+            var item = new TimelineItemRef(TimelineItemKind.Keyframe, keyHit.Key.Id);
+            if (!_timelineSelection.Contains(item)) _timelineSelection.SelectOnly(item);
+            foreach (var (id, label) in new[]
+            {
+                ("auto", "Auto"), ("linear", "Linear"), ("in", "Ease In"),
+                ("out", "Ease Out"), ("hold", "Hold"),
+            })
+            {
+                var option = new MenuItem { Header = label, IsChecked = keyHit.Key.Ease == id };
+                option.Click += async (_, _) =>
+                    await SendTimelineCommandAsync("setEase",
+                        _timelineSelection.Items.Select(x => x.Id), new { ease = id });
+                menu.Items.Add(option);
+            }
+            menu.Items.Add(new Separator());
+            var split = new MenuItem { Header = $"Split here (frame {frame})" };
+            split.Click += async (_, _) => await SplitTimelineAtAsync(clickTime, keyHit.Track);
+            menu.Items.Add(split);
+            var delete = new MenuItem { Header = "Delete selected keys" };
+            delete.Click += async (_, _) => await DeleteTimelineSelectionAsync();
+            menu.Items.Add(delete);
+        }
+        else
+        {
+            return;
+        }
         menu.PlacementTarget = canvas;
         menu.Placement = System.Windows.Controls.Primitives.PlacementMode.MousePoint;
         menu.IsOpen = true;
@@ -3542,26 +4774,36 @@ case "prop-loaded":
             e.Handled = true;
             return;
         }
-        // Timeline bone row → highlight that bone in the viewport (same select
-        // path as the outliner rows). 2026-07-17 user request.
-        if (selected.Id.StartsWith("bone:", StringComparison.Ordinal)
+        var modifiers = System.Windows.Input.Keyboard.Modifiers;
+        var additive = modifiers.HasFlag(System.Windows.Input.ModifierKeys.Control)
+                    || modifiers.HasFlag(System.Windows.Input.ModifierKeys.Shift);
+
+        // Timeline bone row → the same ONE selection as the outliner and
+        // viewport (2026-07-17 user request). Plain click replaces it;
+        // Ctrl/Shift+click toggles the bone in the multi-selection. Row
+        // highlights re-sync from the pose-bone-selected echo. Bone lanes
+        // are "not special" rows — snapshot echoes rewrite the bone: Ids.
+        if (!TimelineTrackRow.IsSpecialTrack(selected)
             && _webViewReady && _suppressSelectionEcho == 0)
         {
             var bone = _vm.Bones.FirstOrDefault(b => string.Equals(b.Name, selected.Name, StringComparison.Ordinal));
             if (bone != null)
             {
-                _vm.SelectedBone = bone;
-                if (bone.Index != _lastPushedBoneIndex)
+                if (additive)
                 {
-                    _lastPushedBoneIndex = bone.Index;
-                    _ = Viewport.CoreWebView2.ExecuteScriptAsync(
-                        $"window.selectPoseBone && window.selectPoseBone({bone.Index})");
+                    var next = new List<int>(_boneSelectionOrder);
+                    if (!next.Remove(bone.Index)) next.Add(bone.Index);
+                    _ = PushOutlinerBoneSelectionAsync(next);
+                    e.Handled = true;
+                    return;
                 }
+                _vm.SelectedBone = bone;
+                // ALWAYS replace-push — same-index guards go stale when the
+                // viewer changes selection without a host push (IK picks).
+                _ = PushOutlinerBoneSelectionAsync(new List<int> { bone.Index });
             }
         }
-        var modifiers = System.Windows.Input.Keyboard.Modifiers;
-        if (modifiers.HasFlag(System.Windows.Input.ModifierKeys.Control) ||
-            modifiers.HasFlag(System.Windows.Input.ModifierKeys.Shift))
+        if (additive)
             selected.IsSelected = !selected.IsSelected;
         else
         {
@@ -3571,6 +4813,10 @@ case "prop-loaded":
                 if (!track.IsGroupHeader)
                     track.IsSelected = ReferenceEquals(track, selected);
         }
+        // Repaint the sheet so the selected-lane band follows immediately
+        // (rows without a viewer echo — Summary/Root Motion — never redraw
+        // otherwise).
+        ScheduleRedrawTimeline();
         e.Handled = true;
     }
 
@@ -3637,7 +4883,6 @@ case "prop-loaded":
         var h = canvas.ActualHeight;
         if (w < 10 || h < 5) return;
         var x = TimeToTimelineX(_vm.TimelineTime);
-        var frame = _vm.TimelineCurrentFrame;
 
         if (_playheadLine is null)
         {
@@ -3650,42 +4895,36 @@ case "prop-loaded":
             };
             canvas.Children.Add(_playheadLine);
         }
-        if (_playheadBadge is null)
+        if (_playheadArrow is null)
         {
-            _playheadFrameLabel = new TextBlock
+            // Downward triangle handle (Blender-style), centered on the line.
+            _playheadArrow = new System.Windows.Shapes.Polygon
             {
-                FontFamily = TimelineFontFamily,
-                FontSize = 9,
-                FontWeight = FontWeights.Bold,
-                Foreground = Brushes.White,
-                HorizontalAlignment = HorizontalAlignment.Center,
-                VerticalAlignment = VerticalAlignment.Center,
+                Fill = TimelinePlayheadBrush,
+                StrokeThickness = 0,
+                Points = new PointCollection
+                {
+                    new Point(0, 0),
+                    new Point(10, 0),
+                    new Point(5, 8),
+                },
                 IsHitTestVisible = false,
             };
-            _playheadBadge = new Border
-            {
-                Background = TimelinePlayheadBadgeBrush,
-                CornerRadius = new CornerRadius(2),
-                Padding = new Thickness(4, 1, 4, 1),
-                Child = _playheadFrameLabel,
-                IsHitTestVisible = false,
-            };
-            canvas.Children.Add(_playheadBadge);
+            canvas.Children.Add(_playheadArrow);
+        }
+        // Drop the old red frame badge if it was ever created.
+        if (_playheadBadge is not null)
+        {
+            canvas.Children.Remove(_playheadBadge);
+            _playheadBadge = null;
         }
 
         _playheadLine.X1 = x;
         _playheadLine.X2 = x;
         _playheadLine.Y1 = 0;
         _playheadLine.Y2 = h;
-        if (_playheadFrameLabel is not null)
-            _playheadFrameLabel.Text = frame.ToString();
-        if (_playheadBadge is not null)
-        {
-            _playheadBadge.Measure(new Size(double.PositiveInfinity, double.PositiveInfinity));
-            var badgeW = System.Math.Max(18, _playheadBadge.DesiredSize.Width);
-            Canvas.SetLeft(_playheadBadge, x - badgeW / 2);
-            Canvas.SetTop(_playheadBadge, 1);
-        }
+        Canvas.SetLeft(_playheadArrow, x - 5);
+        Canvas.SetTop(_playheadArrow, 0);
     }
 
     // ────────────────────────────────────────────────────────────────
@@ -3697,11 +4936,45 @@ case "prop-loaded":
     private Point _sequencerPointerStart;
     private bool _sequencerMarqueeMoved;
     private System.Windows.Shapes.Rectangle? _sequencerMarquee;
+    private enum PlaybackRangeHandle { None, In, Out }
+    private PlaybackRangeHandle _draggingRangeHandle;
+
+    private PlaybackRangeHandle HitTestPlaybackRangeHandle(Canvas canvas, Point p)
+    {
+        // Only rulers — strip/track keep their own interactions.
+        bool isDope = ReferenceEquals(canvas, DopeSheetRulerCanvas);
+        bool isSeq = ReferenceEquals(canvas, TimelineRulerCanvas);
+        if (!isDope && !isSeq) return PlaybackRangeHandle.None;
+
+        SyncTimelineControllerFromVm();
+        GetPlaybackRangeTimes(out var t0, out var t1);
+        double x0 = isDope ? DopeTimeToXRaw(t0) : TimeToTimelineXRaw(t0);
+        double x1 = isDope ? DopeTimeToXRaw(t1) : TimeToTimelineXRaw(t1);
+        const double hit = 8;
+        var dIn = System.Math.Abs(p.X - x0);
+        var dOut = System.Math.Abs(p.X - x1);
+        if (dIn <= hit && dIn <= dOut) return PlaybackRangeHandle.In;
+        if (dOut <= hit) return PlaybackRangeHandle.Out;
+        return PlaybackRangeHandle.None;
+    }
 
     private void OnTimelineSeekClick(object sender, System.Windows.Input.MouseButtonEventArgs e)
     {
         if (sender is not Canvas canvas) return;
         canvas.Focus();
+
+        var rangeHandle = HitTestPlaybackRangeHandle(canvas, e.GetPosition(canvas));
+        if (rangeHandle != PlaybackRangeHandle.None)
+        {
+            _draggingRangeHandle = rangeHandle;
+            _timelineInteraction = TimelineInteractionState.Scrubbing;
+            _timelineScrubCanvas = canvas;
+            canvas.CaptureMouse();
+            canvas.Cursor = System.Windows.Input.Cursors.SizeWE;
+            e.Handled = true;
+            return;
+        }
+
         // Summary-keyframe lane: a press on a diamond starts a key drag
         // (the diamonds are rendered geometry now, not Polygons with their
         // own handlers). A press on a LOCKED diamond eats the click like
@@ -3747,6 +5020,25 @@ case "prop-loaded":
 
     private void OnTimelineSeekMove(object sender, System.Windows.Input.MouseEventArgs e)
     {
+        if (_draggingRangeHandle != PlaybackRangeHandle.None &&
+            sender is Canvas rangeCanvas &&
+            e.LeftButton == System.Windows.Input.MouseButtonState.Pressed)
+        {
+            SyncTimelineControllerFromVm();
+            var pos = e.GetPosition(rangeCanvas);
+            bool isDope = ReferenceEquals(rangeCanvas, DopeSheetRulerCanvas);
+            var t = isDope ? DopeXToTime(pos.X) : TimelineXToTime(pos.X);
+            var fps = System.Math.Max(1, _vm.TimelineFps);
+            var frame = (int)System.Math.Round(t * fps);
+            if (_draggingRangeHandle == PlaybackRangeHandle.In)
+                SetTrimInFrame(frame);
+            else
+                SetTrimOutFrame(frame);
+            _vm.StatusText = $"Playback range In {_vm.TrimStartFrame} → Out {_vm.TrimEndFrame}";
+            e.Handled = true;
+            return;
+        }
+
         // Live summary-keyframe drag (canvas-captured).
         if (_draggingKf is not null && ReferenceEquals(sender, TimelineTrackCanvas))
         {
@@ -3789,6 +5081,18 @@ case "prop-loaded":
             }
         }
 
+        // Hover In/Out handles on rulers.
+        if (_draggingRangeHandle == PlaybackRangeHandle.None &&
+            !_timelineScrubbing &&
+            sender is Canvas hoverRuler &&
+            (ReferenceEquals(hoverRuler, DopeSheetRulerCanvas) || ReferenceEquals(hoverRuler, TimelineRulerCanvas)))
+        {
+            var h = HitTestPlaybackRangeHandle(hoverRuler, e.GetPosition(hoverRuler));
+            hoverRuler.Cursor = h == PlaybackRangeHandle.None
+                ? null
+                : System.Windows.Input.Cursors.SizeWE;
+        }
+
         if (_timelineInteraction == TimelineInteractionState.Marquee &&
             ReferenceEquals(sender, TimelineStripCanvas) &&
             _sequencerMarquee is not null)
@@ -3810,6 +5114,19 @@ case "prop-loaded":
 
     private async void OnTimelineSeekUp(object sender, System.Windows.Input.MouseButtonEventArgs e)
     {
+        if (_draggingRangeHandle != PlaybackRangeHandle.None)
+        {
+            _draggingRangeHandle = PlaybackRangeHandle.None;
+            if (sender is Canvas c)
+            {
+                c.ReleaseMouseCapture();
+                c.Cursor = null;
+            }
+            PushPreviewRangeToViewer();
+            e.Handled = true;
+            return;
+        }
+
         // Summary-keyframe drag commit.
         if (_draggingKf is not null && ReferenceEquals(sender, TimelineTrackCanvas))
         {
@@ -4018,6 +5335,7 @@ case "prop-loaded":
         if (e.ClickCount == 2)
         {
             _vm.TimelineMode = TimelineEditorMode.DopeSheet;
+            ApplyTimelineBodyRowHeights();
             _ = SendTimelineCommandAsync("openClip", new[] { strip.StableId });
             ScheduleRedrawTimeline();
             e.Handled = true;
@@ -4242,10 +5560,14 @@ case "prop-loaded":
 
     private void UpdatePlayButtonVisual()
     {
-        if (PlayIcon != null)
-            PlayIcon.Symbol = _vm.TimelinePlaying
-                ? Wpf.Ui.Controls.SymbolRegular.Pause24
-                : Wpf.Ui.Controls.SymbolRegular.Play24;
+        if (PlayIconPath != null)
+            PlayIconPath.Visibility = _vm.TimelinePlaying
+                ? System.Windows.Visibility.Collapsed
+                : System.Windows.Visibility.Visible;
+        if (PauseIconPath != null)
+            PauseIconPath.Visibility = _vm.TimelinePlaying
+                ? System.Windows.Visibility.Visible
+                : System.Windows.Visibility.Collapsed;
     }
 
     /// <summary>The last bone index we pushed to (or accepted from) the
@@ -4272,12 +5594,357 @@ case "prop-loaded":
         // pose-bone-selected path; honor it here too so a viewer ping
         // can't bounce right back as a user-initiated selection.
         if (_suppressSelectionEcho > 0) return;
+
+        // Ctrl/Shift+click toggles the bone in the multi-selection — same
+        // semantics as viewport shift-click. Last added becomes primary.
+        var mods = System.Windows.Input.Keyboard.Modifiers;
+        if (mods.HasFlag(System.Windows.Input.ModifierKeys.Control)
+            || mods.HasFlag(System.Windows.Input.ModifierKeys.Shift))
+        {
+            var next = new List<int>(_boneSelectionOrder);
+            if (!next.Remove(bone.Index)) next.Add(bone.Index);
+            await PushOutlinerBoneSelectionAsync(next);
+            return;
+        }
+
         _vm.SelectedBone = bone;
         if (!_webViewReady) return;
-        var idx = bone.Index;
-        if (idx == _lastPushedBoneIndex) return;
-        _lastPushedBoneIndex = idx;
-        await Viewport.CoreWebView2.ExecuteScriptAsync($"window.selectPoseBone && window.selectPoseBone({idx})");
+        // ALWAYS route through the replace path — the old same-index guard
+        // went stale whenever the viewer changed selection without a push
+        // (IK picks, deselects) and left the highlight on the wrong bone.
+        await PushOutlinerBoneSelectionAsync(new List<int> { bone.Index });
+    }
+
+    // ─── Outliner context menu (C4D-inspired) ───────────────────────────
+
+    /// <summary>Current bone multi-selection in viewer order (primary =
+    /// last). Mirrors the viewer's poseSelection via pose-bone-selected
+    /// echoes; Ctrl+click toggling in the outliner/timeline replays it.</summary>
+    private readonly List<int> _boneSelectionOrder = new();
+
+    private PoseBoneEntry? FindBoneBySkeletonIndex(int skeletonIndex)
+    {
+        foreach (var b in _vm.Bones)
+            if (b.Index == skeletonIndex) return b;
+        return null;
+    }
+
+    private void ApplyOutlinerBoneHighlight(IEnumerable<int> indices)
+    {
+        var set = indices as HashSet<int> ?? new HashSet<int>(indices);
+        foreach (var b in _vm.Bones)
+        {
+            var should = set.Contains(b.Index);
+            if (b.IsSelected != should) b.IsSelected = should;
+        }
+    }
+
+    /// <summary>Bone selection is ONE selection everywhere: mirror it onto
+    /// the timeline bone rows so a stale row can't stay lit next to a newly
+    /// selected bone. Non-bone rows (Summary, Root Motion) are cleared only
+    /// when bones are actually selected.</summary>
+    private void SyncTimelineRowHighlightToBoneSelection(IReadOnlyCollection<int> indices)
+    {
+        var names = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var ix in indices)
+        {
+            var bone = FindBoneBySkeletonIndex(ix);
+            if (bone != null) names.Add(bone.Name);
+        }
+
+        var changed = false;
+        void Apply(TimelineTrackRow track)
+        {
+            if (track.IsGroupHeader) return;
+            // Bone lanes are matched by NAME — snapshot echoes rewrite row
+            // Ids (viewer track ids), so an Id-prefix test misses every
+            // imported clip track.
+            bool on;
+            if (!TimelineTrackRow.IsSpecialTrack(track))
+                on = names.Contains(track.Name);
+            else if (names.Count > 0)
+                on = false;
+            else
+                return;
+            if (track.IsSelected != on) { track.IsSelected = on; changed = true; }
+        }
+        foreach (var track in _vm.TimelineTracks) Apply(track);
+        foreach (var track in _vm.DopeDisplayTracks) Apply(track);
+        if (changed) ScheduleRedrawTimeline();
+        if (names.Count == 0) return;
+
+        // Reveal the first highlighted lane: expand its collapsed group if
+        // needed, then scroll the gutter so the row is actually visible.
+        int FirstSelectedDisplayIndex()
+        {
+            for (var i = 0; i < _vm.DopeDisplayTracks.Count; i++)
+            {
+                var t = _vm.DopeDisplayTracks[i];
+                if (!t.IsGroupHeader && t.IsSelected) return i;
+            }
+            return -1;
+        }
+        var idx = FirstSelectedDisplayIndex();
+        if (idx < 0)
+        {
+            var hidden = _vm.TimelineTracks.FirstOrDefault(t =>
+                !t.IsGroupHeader && t.IsSelected && !string.IsNullOrEmpty(t.Group));
+            if (hidden == null) return;
+            _vm.DopeGroupExpanded[hidden.Group] = true;
+            foreach (var t in _vm.DopeDisplayTracks)
+                if (t.IsGroupHeader && t.Group == hidden.Group) t.IsExpanded = true;
+            RebuildDopeDisplayTracks();
+            ScheduleRedrawTimeline();
+            idx = FirstSelectedDisplayIndex();
+            if (idx < 0) return;
+        }
+        if (DopeSheetTrackScroller is not { } scroller) return;
+        var top = idx * DopeRowHeight;
+        if (top < scroller.VerticalOffset
+            || top + DopeRowHeight > scroller.VerticalOffset + scroller.ViewportHeight)
+            scroller.ScrollToVerticalOffset(
+                System.Math.Max(0, top - scroller.ViewportHeight / 2));
+    }
+
+    private async Task PushOutlinerBoneSelectionAsync(IReadOnlyList<int> indices)
+    {
+        var set = new HashSet<int>(indices);
+        _boneSelectionOrder.Clear();
+        _boneSelectionOrder.AddRange(indices);
+        _suppressSelectionEcho++;
+        try
+        {
+            ApplyOutlinerBoneHighlight(set);
+            SyncTimelineRowHighlightToBoneSelection(set);
+            if (indices.Count > 0)
+            {
+                var primary = indices[^1];
+                _lastPushedBoneIndex = primary;
+                var bone = FindBoneBySkeletonIndex(primary);
+                if (bone != null)
+                    _vm.SelectedBone = bone;
+            }
+            else
+            {
+                _lastPushedBoneIndex = -1;
+                _vm.SelectedBone = null;
+            }
+        }
+        finally
+        {
+            _suppressSelectionEcho--;
+        }
+
+        if (!_webViewReady) return;
+        var json = System.Text.Json.JsonSerializer.Serialize(indices);
+        var arg = System.Text.Json.JsonSerializer.Serialize(json);
+        await Viewport.CoreWebView2.ExecuteScriptAsync(
+            $"window.selectPoseBones && window.selectPoseBones({arg})");
+    }
+
+    private IEnumerable<PoseBoneGroup> EnumerateOutlinerGroups()
+    {
+        if (_vm.Rigs.Count > 0)
+        {
+            foreach (var rig in _vm.Rigs)
+                foreach (var g in rig.BoneGroups)
+                    yield return g;
+        }
+        else
+        {
+            foreach (var g in _vm.BoneGroups)
+                yield return g;
+        }
+    }
+
+    private List<int> VisibleBoneIndices()
+    {
+        var list = new List<int>();
+        foreach (var g in EnumerateOutlinerGroups())
+        {
+            if (g.IsFilteredOut) continue;
+            foreach (var b in g.Bones)
+            {
+                if (!b.IsHidden) list.Add(b.Index);
+            }
+        }
+        return list;
+    }
+
+    private List<int> BoneIndicesInGroup(PoseBoneGroup grp)
+    {
+        var list = new List<int>();
+        foreach (var b in grp.Bones)
+        {
+            if (!b.IsHidden) list.Add(b.Index);
+        }
+        return list;
+    }
+
+    private List<int> DescendantBoneIndices(PoseBoneEntry root)
+    {
+        var byParent = new Dictionary<string, List<PoseBoneEntry>>(StringComparer.OrdinalIgnoreCase);
+        foreach (var b in _vm.Bones)
+        {
+            if (string.IsNullOrEmpty(b.ParentName)) continue;
+            if (!byParent.TryGetValue(b.ParentName, out var kids))
+            {
+                kids = new List<PoseBoneEntry>();
+                byParent[b.ParentName] = kids;
+            }
+            kids.Add(b);
+        }
+
+        var result = new List<int> { root.Index };
+        var stack = new Stack<string>();
+        stack.Push(root.Name);
+        var guard = 0;
+        while (stack.Count > 0 && guard++ < 4096)
+        {
+            var name = stack.Pop();
+            if (!byParent.TryGetValue(name, out var kids)) continue;
+            foreach (var kid in kids)
+            {
+                result.Add(kid.Index);
+                stack.Push(kid.Name);
+            }
+        }
+        return result;
+    }
+
+    private void SetOutlinerExpanded(bool expanded)
+    {
+        foreach (var rig in _vm.Rigs)
+            rig.IsExpanded = expanded;
+        foreach (var g in EnumerateOutlinerGroups())
+            g.IsExpanded = expanded;
+    }
+
+    private async void OnOutlinerSelectAll(object sender, RoutedEventArgs e)
+        => await PushOutlinerBoneSelectionAsync(VisibleBoneIndices());
+
+    private async void OnOutlinerDeselectAll(object sender, RoutedEventArgs e)
+        => await PushOutlinerBoneSelectionAsync(Array.Empty<int>());
+
+    private void OnOutlinerExpandAll(object sender, RoutedEventArgs e)
+        => SetOutlinerExpanded(true);
+
+    private void OnOutlinerCollapseAll(object sender, RoutedEventArgs e)
+        => SetOutlinerExpanded(false);
+
+    private async void OnOutlinerSelectGroupChildren(object sender, RoutedEventArgs e)
+    {
+        var grp = ContextMenuTag<PoseBoneGroup>(sender);
+        if (grp is null) return;
+        grp.IsExpanded = true;
+        await PushOutlinerBoneSelectionAsync(BoneIndicesInGroup(grp));
+        _vm.StatusText = $"Selected {grp.Name} ({grp.Bones.Count} bones).";
+    }
+
+    private async void OnOutlinerSelectBoneChildren(object sender, RoutedEventArgs e)
+    {
+        var bone = ContextMenuTag<PoseBoneEntry>(sender);
+        if (bone is null) return;
+        var idxs = DescendantBoneIndices(bone);
+        await PushOutlinerBoneSelectionAsync(idxs);
+        _vm.StatusText = idxs.Count <= 1
+            ? $"Selected {bone.Name}."
+            : $"Selected {bone.Name} + {idxs.Count - 1} children.";
+    }
+
+    private async void OnOutlinerSelectBone(object sender, RoutedEventArgs e)
+    {
+        var bone = ContextMenuTag<PoseBoneEntry>(sender);
+        if (bone is null) return;
+        await PushOutlinerBoneSelectionAsync(new[] { bone.Index });
+    }
+
+    private void OnOutlinerCopyName(object sender, RoutedEventArgs e)
+    {
+        string? name = ContextMenuTag<PoseBoneEntry>(sender)?.Name
+            ?? ContextMenuTag<PoseBoneGroup>(sender)?.Name
+            ?? ContextMenuTag<PoseRig>(sender)?.Name;
+        if (string.IsNullOrEmpty(name)) return;
+        try
+        {
+            Clipboard.SetText(name);
+            _vm.StatusText = $"Copied \"{name}\".";
+        }
+        catch (Exception ex)
+        {
+            _vm.StatusText = "Copy failed: " + ex.Message;
+        }
+    }
+
+    private async void OnOutlinerToggleGroupVisibility(object sender, RoutedEventArgs e)
+    {
+        var grp = ContextMenuTag<PoseBoneGroup>(sender);
+        if (grp is null) return;
+        grp.IsVisible = !grp.IsVisible;
+        if (!_webViewReady) return;
+        var indices = BoneIndicesInGroup(grp);
+        var indicesJson = System.Text.Json.JsonSerializer.Serialize(indices);
+        var visibleArg = grp.IsVisible ? "true" : "false";
+        await Viewport.CoreWebView2.ExecuteScriptAsync(
+            $"window.setPoseBoneVisibility && window.setPoseBoneVisibility('{indicesJson}', {visibleArg})");
+        _vm.StatusText = grp.IsVisible ? $"Show {grp.Name}." : $"Hide {grp.Name}.";
+    }
+
+    private void OnOutlinerExpandGroup(object sender, RoutedEventArgs e)
+    {
+        var grp = ContextMenuTag<PoseBoneGroup>(sender);
+        if (grp is null) return;
+        grp.IsExpanded = true;
+    }
+
+    private void OnOutlinerCollapseGroup(object sender, RoutedEventArgs e)
+    {
+        var grp = ContextMenuTag<PoseBoneGroup>(sender);
+        if (grp is null) return;
+        grp.IsExpanded = false;
+    }
+
+    private static T? ContextMenuTag<T>(object sender) where T : class
+    {
+        if (sender is MenuItem mi)
+        {
+            if (mi.Tag is T t) return t;
+            if (mi.Parent is ContextMenu cm)
+            {
+                if (cm.Tag is T t2) return t2;
+                if (cm.PlacementTarget is FrameworkElement fe && fe.Tag is T t3) return t3;
+            }
+        }
+        if (sender is FrameworkElement fe2 && fe2.Tag is T t4) return t4;
+        return null;
+    }
+
+    private void OnOutlinerContextMenuOpening(object sender, ContextMenuEventArgs e)
+    {
+        if (sender is not FrameworkElement fe || fe.ContextMenu is null) return;
+        // Stamp Tag onto the menu so Click handlers can recover the row
+        // even when the MenuItem itself has no Tag.
+        fe.ContextMenu.Tag = fe.Tag;
+        foreach (var item in fe.ContextMenu.Items)
+        {
+            if (item is MenuItem mi && mi.Tag is null)
+                mi.Tag = fe.Tag;
+        }
+    }
+
+    private async void OnOutlinerPreviewKeyDown(object sender, KeyEventArgs e)
+    {
+        if (e.Key == Key.A && (Keyboard.Modifiers & ModifierKeys.Control) == ModifierKeys.Control)
+        {
+            e.Handled = true;
+            await PushOutlinerBoneSelectionAsync(VisibleBoneIndices());
+            return;
+        }
+        if (e.Key == Key.Escape)
+        {
+            e.Handled = true;
+            await PushOutlinerBoneSelectionAsync(Array.Empty<int>());
+        }
     }
 
     /// <summary>Outliner search filter. Mirrors Blender's outliner
@@ -4401,6 +6068,29 @@ case "prop-loaded":
             .ToString("0.###", System.Globalization.CultureInfo.InvariantCulture);
         await Viewport.CoreWebView2.ExecuteScriptAsync(
             $"window.poseSetSecondaryMotion && window.poseSetSecondaryMotion({enabled}, {intensity})");
+    }
+
+    /// <summary>Push root-travel sensitivity into the viewer so preview
+    /// (and live export samples) match the Travel slider.</summary>
+    private async void PushRootMotionScaleToViewer()
+    {
+        if (!_webViewReady) return;
+        var scale = _vm.RootMotionScale
+            .ToString("0.###", System.Globalization.CultureInfo.InvariantCulture);
+        await Viewport.CoreWebView2.ExecuteScriptAsync(
+            $"window.poseSetRootMotionScale && window.poseSetRootMotionScale({scale})");
+    }
+
+    /// <summary>Push foot-plant enable + intensity so the soft anti-skate
+    /// correction (and ankle distortion) can be dialed live.</summary>
+    private async void PushFootPlantToViewer()
+    {
+        if (!_webViewReady) return;
+        var enabled = (_vm.FootPlantEnabled && _vm.FootPlantControlsEnabled) ? "true" : "false";
+        var intensity = System.Math.Clamp(_vm.FootPlantIntensity, 0, 1)
+            .ToString("0.###", System.Globalization.CultureInfo.InvariantCulture);
+        await Viewport.CoreWebView2.ExecuteScriptAsync(
+            $"window.poseSetFootPlant && window.poseSetFootPlant({enabled}, {intensity})");
     }
 
     private async Task<bool> HasAnimatedTimelineAsync()
@@ -5144,12 +6834,15 @@ case "prop-loaded":
         if (_vm.MovementIndex == (int)Services.EmoteMovement.RootMotion)
         {
             var exportSource = root.TryGetProperty("source", out var srcEl) ? (srcEl.GetString() ?? "") : "";
+            float travelScale = (float)Math.Clamp(_vm.RootMotionScale, 0.1, 2.0);
+            // Live viewer samples already include poseRootMotionScale (WYSIWYG).
+            // Keyframe-JSON fallback stores the unscaled mover — apply scale here.
             if (root.TryGetProperty("roots", out var rootsEl) && rootsEl.GetArrayLength() >= 2)
                 rootMotion = BuildRootMotionTrackFromSamples(rootsEl, frames, fps, exportSource);
             else if (!string.IsNullOrEmpty(kfJsonForRootMotion))
             {
                 using var kdoc = JsonDocument.Parse(kfJsonForRootMotion);
-                rootMotion = BuildRootMotionTrack(kdoc.RootElement, frames, fps);
+                rootMotion = BuildRootMotionTrack(kdoc.RootElement, frames, fps, travelScale);
             }
             if (rootMotion != null && root.TryGetProperty("floorOffsetY", out var foEl))
             {
@@ -5413,15 +7106,19 @@ case "prop-loaded":
     /// <c>root</c> offsets. Samples the offset at every clip frame (linear) and
     /// converts viewer glTF Y-up to RAGE Z-up. Video imports use
     /// <c>[x, screen-up, 0]</c> → RAGE <c>[x, 0, screen-up]</c>; animation
-    /// imports use <c>[x, 0, fwd]</c> → RAGE <c>[x, fwd, 0]</c>. Returns null
-    /// when there's no root data or the travel is negligible (&lt; 3 cm).</summary>
-    private static Services.PosedPositionTrack? BuildRootMotionTrack(JsonElement docRoot, int frames, int fps)
+    /// imports use <c>[x, 0, fwd]</c> → RAGE <c>[x, fwd, 0]</c>.
+    /// <paramref name="travelScale"/> multiplies horizontal travel only
+    /// (Travel sensitivity). Returns null when there's no root data or the
+    /// travel is negligible (&lt; 3 cm).</summary>
+    private static Services.PosedPositionTrack? BuildRootMotionTrack(
+        JsonElement docRoot, int frames, int fps, float travelScale = 1f)
     {
         if (!docRoot.TryGetProperty("keyframes", out var kfEl) || kfEl.ValueKind != JsonValueKind.Array)
             return null;
 
         var source = docRoot.TryGetProperty("source", out var sEl) ? (sEl.GetString() ?? "") : "";
         bool animImport = string.Equals(source, "anim-import", StringComparison.OrdinalIgnoreCase);
+        float scale = Math.Clamp(travelScale, 0.1f, 2f);
 
         var samples = new List<(double Time, System.Numerics.Vector3 Pos)>();
         foreach (var kf in kfEl.EnumerateArray())
@@ -5440,7 +7137,7 @@ case "prop-loaded":
         float maxD = 0f;
         var origin = samples[0].Pos;
         foreach (var s in samples) maxD = Math.Max(maxD, System.Numerics.Vector3.Distance(s.Pos, origin));
-        if (maxD < 0.03f) return null;
+        if (maxD * scale < 0.03f) return null;
 
         var perFrame = new System.Numerics.Vector3[frames];
         for (int f = 0; f < frames; f++)
@@ -5448,10 +7145,10 @@ case "prop-loaded":
             var v = SampleVec3AtTime(samples, f / (double)fps);
             // Animation retarget roots are glTF ground-plane [x, 0, fwd].
             // Video roots are [x, screen-up, 0]. Never feed glTF Y into RAGE Z
-            // (up) — that was the floating bug.
+            // (up) — that was the floating bug. Scale horizontal only.
             perFrame[f] = animImport
-                ? new System.Numerics.Vector3(v.X, v.Z, 0f)
-                : new System.Numerics.Vector3(v.X, 0f, v.Y);
+                ? new System.Numerics.Vector3(v.X * scale, v.Z * scale, 0f)
+                : new System.Numerics.Vector3(v.X * scale, 0f, v.Y * scale);
         }
         return new Services.PosedPositionTrack(0 /* SKEL_ROOT */, perFrame);
     }
@@ -5836,6 +7533,8 @@ case "prop-loaded":
     /// Returns true only when the clip is on the timeline and ready to preview.</summary>
     public async Task<bool> ImportAnimationFileAsync(string path)
     {
+        // Animation lands on the active tab's rig (does not open a fresh
+        // empty tab — that would drop the skeleton Video→Emote needs).
         SetImportOverlay(on: true, "Importing animation.");
         _vm.StatusText = "Importing animation.";
         try
@@ -6217,6 +7916,9 @@ case "prop-loaded":
     {
         if (!_webViewReady) return;
         await Viewport.CoreWebView2.ExecuteScriptAsync("window.hostUndo && window.hostUndo()");
+        // Undo restores viewer timeline state but never re-publishes the
+        // per-bone lanes — pull a snapshot so the sheet matches.
+        await SendTimelineCommandAsync("requestSnapshot");
         await RefreshHistoryDepth();
     }
 
@@ -6224,6 +7926,7 @@ case "prop-loaded":
     {
         if (!_webViewReady) return;
         await Viewport.CoreWebView2.ExecuteScriptAsync("window.hostRedo && window.hostRedo()");
+        await SendTimelineCommandAsync("requestSnapshot");
         await RefreshHistoryDepth();
     }
 
@@ -6341,11 +8044,355 @@ case "prop-loaded":
         return accepted ? input.Text : null;
     }
 
+    // ── Emote document tabs (multi-doc) ──────────────────────────────
+
+    private void MarkActiveEmoteDirty()
+    {
+        if (_emoteTabSwitchBusy) return;
+        var doc = _vm.EmoteDocs.ActiveDocument;
+        if (doc == null || !_vm.HasRig) return;
+        if (!doc.IsDirty) doc.IsDirty = true;
+    }
+
+    private void SyncActiveEmoteTitleFromModel()
+    {
+        var doc = _vm.EmoteDocs.ActiveDocument;
+        if (doc == null) return;
+        doc.LoadedModelPath = string.IsNullOrEmpty(_vm.LoadedModelPath) ? null : _vm.LoadedModelPath;
+        if (doc.HasDefaultTitle)
+        {
+            // The synthetic GTA skeleton is a default scaffold every new tab
+            // loads — not a document the user named or opened. Titling tabs
+            // after it made them all read as "GTA Male (synthetic skeleton)"
+            // duplicates, so keep the default "Untitled" name for it.
+            if (!string.IsNullOrEmpty(_vm.LoadedModelPath) && !IsSyntheticSkeletonModel(_vm.LoadedModelPath))
+                doc.Title = Path.GetFileNameWithoutExtension(_vm.LoadedModelPath);
+            else
+                doc.SetDefaultTitleIfEmpty();
+        }
+    }
+
+    private static bool IsSyntheticSkeletonModel(string? path)
+        => !string.IsNullOrEmpty(path)
+           && path.IndexOf("(synthetic skeleton)", StringComparison.OrdinalIgnoreCase) >= 0;
+
+    private async void OnNewEmoteTab(object sender, RoutedEventArgs e)
+    {
+        await ActivateEmoteDocumentAsync(_vm.EmoteDocs.NewDocument(activate: false), saveCurrent: true);
+    }
+
+    private async void OnEmoteTabClick(object sender, System.Windows.Input.MouseButtonEventArgs e)
+    {
+        if (sender is not FrameworkElement fe) return;
+        if (fe.DataContext is not EmoteDocument doc) return;
+        // Close button is inside the tab — ignore if the click originated there.
+        if (e.OriginalSource is DependencyObject src
+            && FindAncestor<System.Windows.Controls.Button>(src) != null)
+            return;
+        if (ReferenceEquals(doc, _vm.EmoteDocs.ActiveDocument)) return;
+        await ActivateEmoteDocumentAsync(doc, saveCurrent: true);
+    }
+
+    private async void OnCloseEmoteTab(object sender, RoutedEventArgs e)
+    {
+        e.Handled = true;
+        if (sender is not FrameworkElement fe) return;
+        var doc = fe.DataContext as EmoteDocument
+                  ?? (fe.Parent as FrameworkElement)?.DataContext as EmoteDocument;
+        if (doc == null) return;
+
+        var pick = AppDialog.Show(
+            $"Close \"{doc.DisplayTitle.TrimEnd(' ', '•')}\"?\n\nUnsaved work in this tab will be lost.",
+            "Close tab",
+            MessageBoxButton.YesNo,
+            MessageBoxImage.Warning,
+            FindAncestorWindow() ?? System.Windows.Application.Current.MainWindow);
+        if (pick != MessageBoxResult.Yes) return;
+
+        var wasActive = ReferenceEquals(doc, _vm.EmoteDocs.ActiveDocument);
+        if (wasActive)
+            await SnapshotActiveDocumentAsync();
+
+        var next = _vm.EmoteDocs.CloseDocument(doc);
+        if (wasActive || !ReferenceEquals(next, _vm.EmoteDocs.ActiveDocument))
+            await ActivateEmoteDocumentAsync(next, saveCurrent: false);
+        else if (_vm.EmoteDocs.Documents.Count == 1 && !next.HasContent)
+        {
+            await ClearEmoteSessionAsync();
+            await LoadGtaPresetAsync("male");
+            next.Title = "Untitled";
+            next.IsDirty = false;
+        }
+    }
+
+    private static T? FindAncestor<T>(DependencyObject? start) where T : DependencyObject
+    {
+        while (start != null)
+        {
+            if (start is T match) return match;
+            start = System.Windows.Media.VisualTreeHelper.GetParent(start);
+        }
+        return null;
+    }
+
+    private Window? FindAncestorWindow() => Window.GetWindow(this);
+
+    private async Task SnapshotActiveDocumentAsync()
+    {
+        var doc = _vm.EmoteDocs.ActiveDocument;
+        if (doc == null) return;
+
+        doc.LoadedModelPath = string.IsNullOrEmpty(_vm.LoadedModelPath) ? null : _vm.LoadedModelPath;
+        doc.TimelineDuration = _vm.TimelineDuration;
+        doc.TimelineFps = _vm.TimelineFps;
+        doc.TimelineTime = _vm.TimelineTime;
+        doc.TimelineLoop = _vm.TimelineLoop;
+        doc.MovementIndex = _vm.MovementIndex;
+
+        if (_webViewReady && _vm.HasRig)
+        {
+            var capture = await SendTimelineCommandAwaitAsync("captureState");
+            if (capture != null)
+                doc.TimelineCaptureJson = capture.Value.GetRawText();
+        }
+    }
+
+    private async Task ActivateEmoteDocumentAsync(EmoteDocument target, bool saveCurrent)
+    {
+        if (_emoteTabSwitchBusy) return;
+        _emoteTabSwitchBusy = true;
+        var wasDirty = target.IsDirty;
+        try
+        {
+            if (saveCurrent && _vm.EmoteDocs.ActiveDocument != null
+                && !ReferenceEquals(_vm.EmoteDocs.ActiveDocument, target))
+                await SnapshotActiveDocumentAsync();
+
+            _vm.EmoteDocs.Activate(target);
+
+            if (!target.HasContent)
+            {
+                // New / empty tab: always land on MP male so posing and
+                // imports have a ped selected (empty grid was the "new
+                // tab bug"). Keep the tab title Untitled until the user
+                // renames or loads something else.
+                await ClearEmoteSessionAsync();
+                await LoadGtaPresetAsync("male");
+                target.SetDefaultTitleIfEmpty();
+                target.IsDirty = false;
+                _vm.StatusText = "New emote — MP male skeleton loaded.";
+                return;
+            }
+
+            var path = target.LoadedModelPath ?? "";
+            var pathChanged = !string.Equals(path, _vm.LoadedModelPath, StringComparison.OrdinalIgnoreCase)
+                              || !_vm.HasRig;
+
+            if (pathChanged && !string.IsNullOrEmpty(path))
+            {
+                if (path.StartsWith("GTA Male", StringComparison.OrdinalIgnoreCase))
+                    await LoadGtaPresetAsync("male");
+                else if (path.StartsWith("GTA Female", StringComparison.OrdinalIgnoreCase))
+                    await LoadGtaPresetAsync("female");
+                else if (File.Exists(path))
+                    await LoadModelAsync(path);
+                // Wait briefly for rig bone list.
+                for (int i = 0; i < 60 && !_vm.HasRig; i++)
+                    await Task.Delay(50);
+            }
+
+            if (!string.IsNullOrEmpty(target.TimelineCaptureJson) && _webViewReady)
+            {
+                await RestoreTimelineStateViaScriptAsync(target.TimelineCaptureJson);
+                _vm.TimelineDuration = target.TimelineDuration;
+                _vm.TimelineFps = target.TimelineFps > 0 ? target.TimelineFps : _vm.TimelineFps;
+                _vm.TimelineTime = target.TimelineTime;
+                _vm.TimelineLoop = target.TimelineLoop;
+                _vm.MovementIndex = target.MovementIndex;
+                _ = SendTimelineCommandAsync("requestSnapshot");
+            }
+
+            SyncActiveEmoteTitleFromModel();
+            // Restore must not flip dirty from echo timeline posts.
+            target.IsDirty = wasDirty;
+            _vm.StatusText = $"Switched to {target.DisplayTitle.TrimEnd(' ', '•')}";
+        }
+        finally
+        {
+            _emoteTabSwitchBusy = false;
+        }
+    }
+
+    private async Task ClearEmoteSessionAsync()
+    {
+        if (_webViewReady)
+        {
+            await SendTimelineCommandAwaitAsync("clearTimeline");
+            try
+            {
+                // clearEmoteTab exits pose mode, removes the mesh, and
+                // keeps the Assets "Drop a 3D model…" overlay hidden so
+                // a new Untitled tab is a clean grid + host toolbar.
+                await Viewport.CoreWebView2.ExecuteScriptAsync(
+                    "(function(){try{window.clearEmoteTab&&window.clearEmoteTab();}catch(e){}})()");
+            }
+            catch { /* best-effort */ }
+        }
+        _pendingModelUrl = null;
+        _vm.HasRig = false;
+        _vm.LoadedModelPath = "";
+        _vm.Bones.Clear();
+        _vm.BoneGroups.Clear();
+        _vm.Rigs.Clear();
+        _vm.NotifyBonesChanged();
+        _vm.TimelineKeyframes.Clear();
+        _vm.TimelineTracks.Clear();
+        _vm.Strips.Clear();
+        _vm.TimelineTime = 0;
+        _vm.TimelineDuration = 4;
+        ScheduleRedrawTimeline();
+    }
+
+    private async Task<JsonElement?> SendTimelineCommandAwaitAsync(string command, object? payload = null)
+    {
+        if (!_webViewReady) return null;
+        int requestId = Interlocked.Increment(ref _timelineCmdRequestId);
+        var tcs = new TaskCompletionSource<JsonElement?>(TaskCreationOptions.RunContinuationsAsynchronously);
+        lock (_timelineCmdWaiters) _timelineCmdWaiters[requestId] = tcs;
+
+        var message = JsonSerializer.Serialize(new
+        {
+            kind = "host-timeline-command",
+            requestId,
+            command,
+            ids = Array.Empty<string>(),
+            payload,
+        });
+        Viewport.CoreWebView2.PostWebMessageAsJson(message);
+
+        var completed = await Task.WhenAny(tcs.Task, Task.Delay(4000));
+        if (completed != tcs.Task)
+        {
+            lock (_timelineCmdWaiters) _timelineCmdWaiters.Remove(requestId);
+            return null;
+        }
+        return await tcs.Task;
+    }
+
+    private async Task RestoreTimelineStateViaScriptAsync(string captureJson)
+    {
+        if (!_webViewReady) return;
+        // Escape for JS string literal inside ExecuteScriptAsync.
+        var b64 = Convert.ToBase64String(System.Text.Encoding.UTF8.GetBytes(captureJson));
+        var js = "(function(){try{var s=JSON.parse(atob('" + b64
+            + "'));return !!(window.hostTimelineCommand&&window.hostTimelineCommand({op:'restoreState',state:s}));}catch(e){return false;}})()";
+        try { await Viewport.CoreWebView2.ExecuteScriptAsync(js); }
+        catch { /* best-effort */ }
+    }
+
+    /// <summary>If the active tab already has a rig/timeline, open a fresh
+    /// tab first so import doesn't wipe the current emote.</summary>
+    private async Task EnsureFreshTabForImportAsync()
+    {
+        var doc = _vm.EmoteDocs.ActiveDocument;
+        if (doc == null) return;
+        if (!doc.HasContent && !_vm.HasRig) return;
+        await ActivateEmoteDocumentAsync(_vm.EmoteDocs.NewDocument(activate: false), saveCurrent: true);
+    }
+
     // ── File menu entry points (MainWindow → Emote workspace) ────────
+
+    public EmoteDocumentSet EmoteDocs => _vm.EmoteDocs;
+
+    /// <summary>Raised when pose/timeline undo depth changes — chrome
+    /// Undo/Redo buttons re-query CanExecute.</summary>
+    public event EventHandler? HistoryChanged;
+
+    public bool CanUndoPose => _vm.CanUndo;
+    public bool CanRedoPose => _vm.CanRedo;
+
+    public void RunUndoPose() => OnUndoPose(this, new RoutedEventArgs());
+    public void RunRedoPose() => OnRedoPose(this, new RoutedEventArgs());
 
     public void RunOpenRiggedModel() => OnOpenRiggedModel(this, new RoutedEventArgs());
     public void RunLoadGtaMale() => OnLoadGtaMale(this, new RoutedEventArgs());
     public void RunLoadGtaFemale() => OnLoadGtaFemale(this, new RoutedEventArgs());
+    public void RunNewEmoteTab() => OnNewEmoteTab(this, new RoutedEventArgs());
+
+    /// <summary>Close an emote document whose chrome tab was navigated to
+    /// another workspace section. Keeps the orphaned doc from resurrecting as
+    /// a duplicate tab. Never removes the last remaining document.</summary>
+    public void DetachEmoteDocumentById(string id)
+    {
+        var doc = _vm.EmoteDocs.Find(id);
+        if (doc == null) return;
+        _vm.EmoteDocs.RemoveDocument(doc);
+    }
+
+    public async Task ActivateEmoteDocumentByIdAsync(string id)
+    {
+        var doc = _vm.EmoteDocs.Find(id);
+        if (doc == null) return;
+        if (ReferenceEquals(doc, _vm.EmoteDocs.ActiveDocument)) return;
+        await ActivateEmoteDocumentAsync(doc, saveCurrent: true);
+    }
+
+    /// <summary>Close an emote document by id. Returns false if the user
+    /// cancelled a dirty-close prompt. Pass <paramref name="alreadyConfirmed"/>
+    /// when the chrome tab strip already showed a close warning.</summary>
+    public async Task<bool> CloseEmoteDocumentByIdAsync(string id, bool alreadyConfirmed = false)
+    {
+        var doc = _vm.EmoteDocs.Find(id);
+        if (doc == null) return true;
+
+        if (!alreadyConfirmed && (doc.IsDirty || doc.HasContent))
+        {
+            var pick = AppDialog.Show(
+                $"Close \"{doc.DisplayTitle.TrimEnd(' ', '•')}\"?\n\nUnsaved work in this tab will be lost.",
+                "Close tab",
+                MessageBoxButton.YesNo,
+                MessageBoxImage.Warning,
+                FindAncestorWindow() ?? System.Windows.Application.Current.MainWindow);
+            if (pick != MessageBoxResult.Yes) return false;
+        }
+
+        var wasActive = ReferenceEquals(doc, _vm.EmoteDocs.ActiveDocument);
+        if (wasActive)
+            await SnapshotActiveDocumentAsync();
+
+        var next = _vm.EmoteDocs.CloseDocument(doc);
+        // Sole leftover tab: clear session only — do NOT reload GTA Male.
+        // Reloading was why the Emotes chrome tab could never stay closed.
+        if (_vm.EmoteDocs.Documents.Count == 1 && !next.HasContent)
+        {
+            await ClearEmoteSessionAsync();
+            next.Title = "Untitled";
+            next.IsDirty = false;
+            next.LoadedModelPath = null;
+        }
+        else if (wasActive || !ReferenceEquals(next, _vm.EmoteDocs.ActiveDocument))
+        {
+            await ActivateEmoteDocumentAsync(next, saveCurrent: false);
+        }
+        return true;
+    }
+
+    /// <summary>Clear an empty Emotes session after the last chrome Emotes
+    /// tab was closed, so tab sync doesn't resurrect a GTA Male tab.</summary>
+    public void DiscardEmptyEmoteSession()
+    {
+        foreach (var d in _vm.EmoteDocs.Documents)
+        {
+            if (d.HasContent || d.IsDirty) return;
+        }
+        _ = ClearEmoteSessionAsync();
+        if (_vm.EmoteDocs.ActiveDocument != null)
+        {
+            _vm.EmoteDocs.ActiveDocument.Title = "Untitled";
+            _vm.EmoteDocs.ActiveDocument.IsDirty = false;
+            _vm.EmoteDocs.ActiveDocument.LoadedModelPath = null;
+        }
+    }
 
     /// <summary>Deep-link: open the right-side Animation Library and index.</summary>
     public void OpenAnimLibraryMode()
@@ -6460,6 +8507,7 @@ case "prop-loaded":
         if (_vm.AnimLibraryScanning || _vm.AnimLibraryAll.Count == 0) return;
 
         _animLibScanCts?.Cancel();
+        _animLibScanCts?.Dispose();
         _animLibScanCts = new CancellationTokenSource();
         var ct = _animLibScanCts.Token;
 

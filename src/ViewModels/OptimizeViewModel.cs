@@ -47,6 +47,7 @@ public partial class OptimizeViewModel : ObservableObject
     [NotifyPropertyChangedFor(nameof(IsTexturesMode))]
     [NotifyPropertyChangedFor(nameof(IsEmbeddedTexturesMode))]
     [NotifyPropertyChangedFor(nameof(IsTxAdminMode))]
+    [NotifyPropertyChangedFor(nameof(IsHostedToolMode))]
     [NotifyPropertyChangedFor(nameof(ActiveExtension))]
     [NotifyPropertyChangedFor(nameof(ActiveBrowseFilter))]
     [NotifyPropertyChangedFor(nameof(ActiveQueue))]
@@ -63,6 +64,10 @@ public partial class OptimizeViewModel : ObservableObject
     public bool IsTexturesMode         => Mode == OptimizeMode.Textures;
     public bool IsEmbeddedTexturesMode => Mode == OptimizeMode.EmbeddedTextures;
     public bool IsTxAdminMode          => Mode == OptimizeMode.TxAdmin;
+
+    /// <summary>Modes whose workspace is a self-contained hosted view (own VM
+    /// on MainViewModel) rather than the shared drop-zone/queue workspace.</summary>
+    public bool IsHostedToolMode => Mode == OptimizeMode.TxAdmin;
 
     /// <summary>The three geometry-decimation modes — drives the REDUCTION
     /// options panel and the 3D LOD workbench on the right.</summary>

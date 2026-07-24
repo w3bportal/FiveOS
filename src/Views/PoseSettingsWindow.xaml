@@ -12,17 +12,10 @@
                  MinWidth="340" MinHeight="360"
                  ResizeMode="CanResize"
                  WindowStartupLocation="CenterOwner"
-                 WindowBackdropType="Mica"
+                 WindowBackdropType="None"
                  ExtendsContentIntoTitleBar="True">
     <ui:FluentWindow.Resources>
 
-        <!-- ─── Blender-style chevron section header ───
-             Moved here from PoseToEmoteView when the Inspector rail became
-             this dialog. Whole row toggles a single bool (IsChecked); no
-             chunky button chrome — just a small chevron, an uppercase
-             caption, and a hairline divider trailing to the right edge.
-             Mirrors Blender's Properties-editor pattern (▶ collapsed,
-             ▼ expanded). -->
         <Style x:Key="BlenderSectionHeader" TargetType="ToggleButton">
             <Setter Property="Background" Value="Transparent" />
             <Setter Property="BorderThickness" Value="0" />
@@ -99,7 +92,6 @@
                            Margin="0,0,0,10"
                            Text="Changes apply to the preview live — leave this open while you scrub." />
 
-                <!-- ═══ Body Calibration ═══ -->
                 <ToggleButton x:Name="CalibSection"
                               Content="BODY CALIBRATION"
                               IsChecked="True"
@@ -127,7 +119,6 @@
                                          ToolTip="Off = use the raw retarget angles, limbs may pass through the body." />
                     </Grid>
 
-                    <!-- Clearance -->
                     <Grid Margin="0,0,0,4">
                         <Grid.ColumnDefinitions>
                             <ColumnDefinition Width="*" />
@@ -149,7 +140,6 @@
                             Margin="0,2,0,8"
                             ToolTip="How hard to push a limb back out when a pose buries it in the torso. The arm swings rigidly from the shoulder, so the elbow bend is preserved. 0 = allow clipping." />
 
-                    <!-- Body width -->
                     <Grid Margin="0,0,0,4">
                         <Grid.ColumnDefinitions>
                             <ColumnDefinition Width="*" />
@@ -171,7 +161,6 @@
                             Margin="0,2,0,8"
                             ToolTip="How thick the ped actually is, relative to its bones. The skeleton only gives joint centres — the hip JOINTS sit ~18cm apart while the pelvis is nearer 35cm — so this is where the flesh really reaches. Raise it for a bulkier ped; lower it if the arms are being held too far out." />
 
-                    <!-- Arm spread -->
                     <Grid Margin="0,0,0,4">
                         <Grid.ColumnDefinitions>
                             <ColumnDefinition Width="*" />
@@ -205,7 +194,6 @@
                     </Grid>
                 </StackPanel>
 
-                <!-- ═══ Secondary Motion ═══ -->
                 <ToggleButton x:Name="SecondarySection"
                               Content="SECONDARY MOTION"
                               IsChecked="True"
@@ -278,7 +266,6 @@
                     </Grid>
                 </StackPanel>
 
-                <!-- ═══ Control Rig ═══ -->
                 <ToggleButton x:Name="MarkersSection"
                               Content="CONTROL RIG"
                               IsChecked="True"
@@ -306,7 +293,6 @@
                     </Grid>
                 </StackPanel>
 
-                <!-- ═══ Onion Skin ═══ -->
                 <ToggleButton x:Name="OnionSection"
                               Content="ONION SKIN"
                               IsChecked="True"

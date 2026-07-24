@@ -117,6 +117,21 @@ if (args[0] == "merge-pack")
     return YdrWriter.YtypMerger.Run(args[1..]);
 }
 
+if (args[0] == "retexture")
+{
+    YdrWriter.NativeAssimpLoader.Preload();
+    try
+    {
+        return YdrWriter.RetextureCommand.Run(args[1..]);
+    }
+    catch (Exception ex)
+    {
+        Console.Error.WriteLine($"[ydr-writer] FATAL {ex.GetType().Name}: {ex.Message}");
+        Console.Error.WriteLine(ex.StackTrace);
+        return 1;
+    }
+}
+
 // Single-file publish extracts native libs (assimp.dll) to a side
 // directory the .NET host adds to the DLL search path via
 // AddDllDirectory. AssimpNet bypasses P/Invoke and calls raw

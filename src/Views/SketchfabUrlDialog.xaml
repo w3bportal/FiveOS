@@ -6,7 +6,7 @@
                  Height="420" Width="520"
                  ResizeMode="NoResize"
                  WindowStartupLocation="CenterOwner"
-                 WindowBackdropType="Mica"
+                 WindowBackdropType="None"
                  ExtendsContentIntoTitleBar="True">
 
     <Grid>
@@ -35,7 +35,6 @@
                         FontSize="12"
                         ToolTip="Full Sketchfab model URL — the page URL of the model you want. The dialog fetches metadata (poly count, license, downloadable flag) as soon as you paste so you can decide before downloading." />
 
-            <!-- Validation result card. Hidden until we have something. -->
             <Border x:Name="InfoCard"
                     Margin="0,16,0,0"
                     Padding="14"
@@ -55,10 +54,7 @@
                                    FontSize="14"
                                    FontWeight="SemiBold"
                                    TextTrimming="CharacterEllipsis" />
-                        <!-- Quality pill: green for optimized, amber for
-                             heavy, red for "this will hurt your server's
-                             FPS". Hidden when the API didn't surface
-                             tri/vert counts. -->
+
                         <Border Grid.Column="1"
                                 x:Name="QualityPill"
                                 CornerRadius="9"
@@ -90,9 +86,7 @@
                                    FontFamily="Consolas"
                                    Opacity="0.6" />
                     </Grid>
-                    <!-- Inline warning when the model is heavy/bad. Stays
-                         empty (collapsed) for excellent/good models so we
-                         don't nag on cleanly-authored assets. -->
+
                     <TextBlock x:Name="QualityWarning"
                                FontSize="11"
                                TextWrapping="Wrap"
@@ -101,7 +95,6 @@
                 </StackPanel>
             </Border>
 
-            <!-- Status / progress -->
             <TextBlock x:Name="StatusText"
                        Margin="0,16,0,0"
                        FontSize="12"

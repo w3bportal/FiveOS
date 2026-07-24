@@ -49,13 +49,19 @@ public sealed class ConvertOptions
     public double SpinSeconds { get; init; } = 4.0;
     /// <summary>Reverse the <see cref="AutoSpin"/> direction.</summary>
     public bool SpinReverse { get; init; }
+    /// <summary>Optional JSON file of authored rotation keys for the
+    /// Animated workspace timeline. When set, <see cref="AnimatedPropBuilder"/>
+    /// builds the .ycd from these keys (rigid spin-bone technique).</summary>
+    public string? AnimKeysPath { get; init; }
     /// <summary>Comma-separated mesh-name list to drop from the FBX build
     /// and the YBN. Driven by the layers panel — hidden parts go here.</summary>
     public IReadOnlySet<string> ExcludeMeshes { get; init; }
         = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
     /// <summary>Per-mesh visual material preset, keyed by mesh (part) name.
     /// Values come from the layers panel: <c>GLASS</c>, <c>EMISSIVE</c>,
-    /// <c>EMISSIVESTRONG</c>, <c>EMISSIVENIGHT</c>. Meshes absent from this
+    /// <c>EMISSIVESTRONG</c>, <c>EMISSIVENIGHT</c>, <c>METAL</c> (forces a
+    /// spec shader with a synthesized highlight) and <c>CUTOUT</c> (forces the
+    /// alpha-tested <c>normal_decal</c> shader). Meshes absent from this
     /// map fall back to the engine's standard shader pick. Drives both
     /// the RAGE shader written into the YDR (see <see cref="TextureBaker"/>)
     /// and, for glass entries, the per-poly collision material in the YBN
@@ -108,6 +114,7 @@ public sealed class ConvertOptions
         bool autoSpin = false, spinReverse = false;
         string spinAxis = "Z";
         double spinSeconds = 4.0;
+        string? animKeysPath = null;
         var exclude = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var partMats = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         var partDiffuse = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
@@ -174,6 +181,11 @@ public sealed class ConvertOptions
                         break;
                     }
                 case "--spin-reverse": spinReverse = true; break;
+                case "--anim-keys":
+                    animKeysPath = Next();
+                    if (!string.IsNullOrWhiteSpace(animKeysPath))
+                        animatedProp = true; // keys imply animated prop pipeline
+                    break;
                 case "--exclude-mesh":
                     foreach (var part in (Next() ?? "").Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
                         if (part.Length > 0) exclude.Add(part);
@@ -316,6 +328,7 @@ public sealed class ConvertOptions
             SpinAxis = spinAxis,
             SpinSeconds = spinSeconds,
             SpinReverse = spinReverse,
+            AnimKeysPath = animKeysPath,
             ExcludeMeshes = exclude,
             PartMaterials = partMats,
             PartDiffuseTextures = partDiffuse,

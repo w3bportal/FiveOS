@@ -42,6 +42,13 @@ public partial class App : Application
 
     protected override void OnStartup(StartupEventArgs e)
     {
+        // Debug/CI hook: FIVEOS_SOFT_RENDER=1 forces CPU rendering so the
+        // UI still produces real pixels for screenshot harnesses when no
+        // active display is attached (GPU presentation goes blank there).
+        if (Environment.GetEnvironmentVariable("FIVEOS_SOFT_RENDER") == "1")
+            System.Windows.Media.RenderOptions.ProcessRenderMode =
+                System.Windows.Interop.RenderMode.SoftwareOnly;
+
         _singletonMutex = new Mutex(initiallyOwned: true, SingletonMutexName, out bool createdNew);
         if (!createdNew)
         {
@@ -115,6 +122,14 @@ public partial class App : Application
             UserSettings.LoadLanguage() ?? LocalizationService.ResolveDefaultLanguage());
 
         base.OnStartup(e);
+
+        // Accent before Splash/Main so the first paint isn't charcoal indigo
+        // leftovers from FiveOSCharcoal defaults.
+        ThemeAccent.ApplyFromSettings();
+
+        // Drop stale Emotes viewer bundles + old runtime extracts left by
+        // previous versions (cheap; locked dirs are skipped).
+        try { CacheService.PruneStaleViewerCaches(); } catch { /* best-effort */ }
 
         // ─── Drag-drop under elevation (UIPI) ─────────────────────────
         // FiveM modders routinely launch tools "Run as administrator". Our
@@ -200,7 +215,7 @@ public partial class App : Application
             splash.FinishAndClose(() =>
             {
                 main.Activate();
-                // Float the first-run dialogs (level picker, then the
+                // Float the first-run dialogs (update offer, then the
                 // Blender-style Welcome screen) over the revealed main window,
                 // just AFTER the boot splash has finished closing — never over
                 // the still-hidden window (both are CenterOwner). A short
@@ -446,12 +461,13 @@ public partial class App : Application
     /// </summary>
     private static string? ResolveActiveViewLabel(FiveOS.ViewModels.AppView v) => v switch
     {
-        FiveOS.ViewModels.AppView.Props       => "3D Model",
-        FiveOS.ViewModels.AppView.Optimize    => "Optimize",
-        FiveOS.ViewModels.AppView.Rpf         => "RPF",
-        FiveOS.ViewModels.AppView.Vehicles    => "Vehicles",
-        FiveOS.ViewModels.AppView.Emotes      => "Emotes",
-        _                                     => null,  // Dashboard/ImageTo3D → idle subtitle
+        FiveOS.ViewModels.AppView.Props          => "Props",
+        FiveOS.ViewModels.AppView.AnimatedProps  => "Animated",
+        FiveOS.ViewModels.AppView.Optimize       => "Optimize",
+        FiveOS.ViewModels.AppView.Rpf            => "RPF",
+        FiveOS.ViewModels.AppView.Vehicles       => "Vehicles",
+        FiveOS.ViewModels.AppView.Emotes         => "Emotes",
+        _                                        => null,  // Dashboard/ImageTo3D → idle subtitle
     };
 
     /// <summary>Returns true for exceptions where the process state is

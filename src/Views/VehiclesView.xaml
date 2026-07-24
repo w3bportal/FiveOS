@@ -13,6 +13,8 @@
              DragOver="OnDragOver"
              DragEnter="OnDragEnter"
              DragLeave="OnDragLeave"
+             Loaded="OnLoaded"
+             Unloaded="OnUnloaded"
              d:DataContext="{d:DesignInstance vm:VehiclesViewModel}">
 
     <UserControl.Resources>
@@ -23,75 +25,36 @@
             <Setter Property="Margin" Value="0,0,0,8" />
         </Style>
 
-        <!-- Round numbered step badge for the "① Add → ② Convert" guide. -->
-        <Style x:Key="StepBadge" TargetType="Border">
-            <Setter Property="Width" Value="24" />
-            <Setter Property="Height" Value="24" />
-            <Setter Property="CornerRadius" Value="12" />
-            <Setter Property="Background" Value="{DynamicResource AccentFillColorDefaultBrush}" />
-            <Setter Property="VerticalAlignment" Value="Center" />
-        </Style>
-        <Style x:Key="StepNumber" TargetType="TextBlock">
-            <Setter Property="Foreground" Value="{DynamicResource TextOnAccentFillColorPrimaryBrush}" />
-            <Setter Property="FontSize" Value="12" />
-            <Setter Property="FontWeight" Value="Bold" />
-            <Setter Property="HorizontalAlignment" Value="Center" />
-            <Setter Property="VerticalAlignment" Value="Center" />
-        </Style>
-        <Style x:Key="StepTitle" TargetType="TextBlock">
-            <Setter Property="FontSize" Value="14" />
+        <Style x:Key="StatLabel" TargetType="TextBlock">
+            <Setter Property="FontSize" Value="9" />
             <Setter Property="FontWeight" Value="SemiBold" />
-            <Setter Property="VerticalAlignment" Value="Center" />
-            <Setter Property="Margin" Value="10,0,0,0" />
+            <Setter Property="Opacity" Value="0.45" />
+        </Style>
+        <Style x:Key="StatValue" TargetType="TextBlock">
+            <Setter Property="FontSize" Value="13" />
+            <Setter Property="FontWeight" Value="SemiBold" />
         </Style>
 
-        <!-- Pill-segment RadioButton: two side-by-side as a Single | Pack strip. -->
-        <Style x:Key="SegmentTab" TargetType="RadioButton">
-            <Setter Property="FontSize" Value="12" />
-            <Setter Property="Foreground" Value="{DynamicResource TextFillColorSecondaryBrush}" />
-            <Setter Property="HorizontalContentAlignment" Value="Center" />
-            <Setter Property="Cursor" Value="Hand" />
-            <Setter Property="Template">
-                <Setter.Value>
-                    <ControlTemplate TargetType="RadioButton">
-                        <Border x:Name="Seg" CornerRadius="5" Padding="0,7" Background="Transparent">
-                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center" />
-                        </Border>
-                        <ControlTemplate.Triggers>
-                            <Trigger Property="IsChecked" Value="True">
-                                <Setter TargetName="Seg" Property="Background" Value="{DynamicResource AccentFillColorDefaultBrush}" />
-                                <Setter Property="Foreground" Value="{DynamicResource TextOnAccentFillColorPrimaryBrush}" />
-                                <Setter Property="FontWeight" Value="SemiBold" />
-                            </Trigger>
-                            <Trigger Property="IsMouseOver" Value="True">
-                                <Setter TargetName="Seg" Property="Background" Value="{DynamicResource SubtleFillColorSecondaryBrush}" />
-                            </Trigger>
-                            <MultiTrigger>
-                                <MultiTrigger.Conditions>
-                                    <Condition Property="IsChecked" Value="True" />
-                                    <Condition Property="IsMouseOver" Value="True" />
-                                </MultiTrigger.Conditions>
-                                <Setter TargetName="Seg" Property="Background" Value="{DynamicResource AccentFillColorSecondaryBrush}" />
-                            </MultiTrigger>
-                        </ControlTemplate.Triggers>
-                    </ControlTemplate>
-                </Setter.Value>
-            </Setter>
+        <Style x:Key="MetaFieldLabel" TargetType="TextBlock">
+            <Setter Property="FontSize" Value="10" />
+            <Setter Property="FontWeight" Value="SemiBold" />
+            <Setter Property="Opacity" Value="0.55" />
+            <Setter Property="Margin" Value="0,0,0,4" />
         </Style>
-        <!-- ═══ Shared file-tree resources (used by the queue navigator) ═══ -->
+
         <ContextMenu x:Key="VehTreeMenu"
                      DataContext="{Binding PlacementTarget.DataContext, RelativeSource={RelativeSource Self}}">
             <MenuItem Header="Optimize (make smaller)" Click="OnOptimizeFile"
                       IsEnabled="{Binding CanOptimizeNode}"
-                      ToolTip="Shrink this model or texture using the Advanced → shrink settings. Overwrites it in place.">
+                      ToolTip="Shrink this model or texture. Overwrites it in place.">
                 <MenuItem.Icon><ui:SymbolIcon Symbol="ArrowMinimize24" /></MenuItem.Icon>
             </MenuItem>
-            <MenuItem Header="Edit XML…" Click="OnEditXml" IsEnabled="{Binding IsMetaNode}"
-                      ToolTip="Open this meta file (vehicles / handling / carcols / carvariations) in a text editor.">
+            <MenuItem Header="Edit meta…" Click="OnEditXml" IsEnabled="{Binding IsMetaNode}"
+                      ToolTip="Open this meta in the Details editor.">
                 <MenuItem.Icon><ui:SymbolIcon Symbol="DocumentEdit24" /></MenuItem.Icon>
             </MenuItem>
             <MenuItem Header="Rename…" Click="OnRename" IsEnabled="{Binding CanRename}"
-                      ToolTip="Rename a file, or a whole car — its models/textures AND the spawn-name references in the metas.">
+                      ToolTip="Rename a file or a whole car.">
                 <MenuItem.Icon><ui:SymbolIcon Symbol="Rename24" /></MenuItem.Icon>
             </MenuItem>
             <Separator />
@@ -100,8 +63,6 @@
             </MenuItem>
         </ContextMenu>
 
-        <!-- Re-templated TreeViewItem: WE control the selection colour (accent fill
-             behind light text) so it's readable in every state. -->
         <Style x:Key="VehTreeItemStyle" TargetType="TreeViewItem">
             <Setter Property="IsExpanded" Value="{Binding IsExpanded, Mode=TwoWay}" />
             <Setter Property="ContextMenu" Value="{StaticResource VehTreeMenu}" />
@@ -140,7 +101,7 @@
                             </ToggleButton>
                             <Border x:Name="Bd" Grid.Column="1" CornerRadius="4" Padding="4,4" Margin="0,1"
                                     Background="Transparent" SnapsToDevicePixels="True">
-                                <ContentPresenter ContentSource="Header" HorizontalAlignment="Left" VerticalAlignment="Center" />
+                                <ContentPresenter ContentSource="Header" HorizontalAlignment="Stretch" VerticalAlignment="Center" />
                             </Border>
                             <ItemsPresenter x:Name="ItemsHost" Grid.Row="1" Grid.Column="1" Margin="12,0,0,0" />
                         </Grid>
@@ -167,9 +128,8 @@
             </Setter>
         </Style>
 
-        <!-- Row: icon · name · detail · (× remove on car branches) -->
         <HierarchicalDataTemplate x:Key="VehTreeItemTemplate" ItemsSource="{Binding Children}">
-            <Grid MinWidth="150" Margin="0,1">
+            <Grid MinWidth="120" Margin="0,1">
                 <Grid.ColumnDefinitions>
                     <ColumnDefinition Width="Auto" />
                     <ColumnDefinition Width="*" />
@@ -177,37 +137,52 @@
                     <ColumnDefinition Width="Auto" />
                     <ColumnDefinition Width="Auto" />
                 </Grid.ColumnDefinitions>
-                <ui:SymbolIcon Symbol="{Binding Icon}" FontSize="16" Opacity="0.85"
+                <ui:SymbolIcon Symbol="{Binding Icon}" FontSize="15" Opacity="0.85"
                                Margin="0,0,8,0" VerticalAlignment="Center" />
-                <TextBlock Grid.Column="1" Text="{Binding Name}" FontFamily="Consolas" FontSize="12.5"
+                <TextBlock Grid.Column="1" Text="{Binding Name}" FontFamily="Consolas" FontSize="12"
                            TextTrimming="CharacterEllipsis" VerticalAlignment="Center" />
-
-                <!-- "Unoptimized" badge — shown only on cars whose textures/models
-                     are still heavy; clears once they're optimized (files shrink). -->
-                <Border Grid.Column="2"
+                <TextBlock Grid.Column="2" Text="{Binding SizeText}" FontFamily="Consolas" FontSize="10"
+                           Opacity="0.5" Margin="8,0,0,0" VerticalAlignment="Center" />
+                <Border Grid.Column="3"
                         Visibility="{Binding IsUnoptimized, Converter={StaticResource BooleanToVisibility}}"
-                        CornerRadius="3" Padding="5,1" Margin="8,0,0,0"
+                        CornerRadius="3" Padding="4,1" Margin="6,0,0,0"
                         Background="#26E0A33A" BorderBrush="#59E0A33A" BorderThickness="1"
                         VerticalAlignment="Center"
-                        ToolTip="This car still has large textures/models. Right-click → Optimize to shrink them.">
-                    <StackPanel Orientation="Horizontal">
-                        <ui:SymbolIcon Symbol="Warning24" FontSize="9" Foreground="#E0A33A"
-                                       VerticalAlignment="Center" Margin="0,0,3,0" />
-                        <TextBlock Text="unoptimized" FontSize="9" FontWeight="SemiBold"
-                                   Foreground="#E0A33A" VerticalAlignment="Center" />
-                    </StackPanel>
+                        ToolTip="Large textures/models — right-click → Optimize.">
+                    <TextBlock Text="heavy" FontSize="9" FontWeight="SemiBold"
+                               Foreground="#E0A33A" VerticalAlignment="Center" />
                 </Border>
-
-                <TextBlock Grid.Column="3" Text="{Binding Detail}" FontSize="10.5" Margin="10,0,2,0"
-                           Opacity="0.55" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
                 <Button Grid.Column="4" Click="OnRemoveCarNode"
                         Visibility="{Binding IsCar, Converter={StaticResource BooleanToVisibility}}"
                         Background="Transparent" BorderThickness="0" Padding="4,0" Margin="4,0,0,0"
-                        Cursor="Hand" ToolTip="Remove this car from the pack">
+                        Cursor="Hand" ToolTip="Remove from queue">
                     <ui:SymbolIcon Symbol="Dismiss24" FontSize="12" Opacity="0.7" />
                 </Button>
             </Grid>
         </HierarchicalDataTemplate>
+
+        <DataTemplate x:Key="QueueItemTemplate" DataType="{x:Type vm:CarInput}">
+            <Grid Margin="0,1" MinWidth="120">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+                <ui:SymbolIcon Symbol="VehicleCar24" FontSize="15" Opacity="0.85"
+                               Margin="0,0,8,0" VerticalAlignment="Center" />
+                <StackPanel Grid.Column="1" VerticalAlignment="Center">
+                    <TextBlock Text="{Binding Name}" FontFamily="Consolas" FontSize="12"
+                               TextTrimming="CharacterEllipsis" />
+                    <TextBlock Text="Queued" FontSize="10" Opacity="0.45" />
+                </StackPanel>
+                <Button Grid.Column="2" Click="OnRemoveCar"
+                        Tag="{Binding}"
+                        Background="Transparent" BorderThickness="0" Padding="4,0" Margin="4,0,0,0"
+                        Cursor="Hand" ToolTip="Remove from queue">
+                    <ui:SymbolIcon Symbol="Dismiss24" FontSize="12" Opacity="0.7" />
+                </Button>
+            </Grid>
+        </DataTemplate>
     </UserControl.Resources>
 
     <Grid>
@@ -217,223 +192,137 @@
             <RowDefinition Height="Auto" />
         </Grid.RowDefinitions>
 
-        <!-- ───────── Header (shared by both modes; the segment on the right
-             switches between the convert workspace and the hosted Carcols
-             Fixer pane) ───────── -->
         <Border Grid.Row="0"
                 Background="{DynamicResource ControlFillColorDefaultBrush}"
                 BorderThickness="0,0,0,1"
                 BorderBrush="{DynamicResource ControlElevationBorderBrush}"
-                Padding="20,16">
+                Padding="16,10">
             <Grid>
                 <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="Auto" />
                     <ColumnDefinition Width="*" />
                     <ColumnDefinition Width="Auto" />
                 </Grid.ColumnDefinitions>
-                <StackPanel Grid.Column="0" Orientation="Horizontal">
-                    <Border CornerRadius="6"
-                            Background="{DynamicResource SubtleFillColorTertiaryBrush}"
-                            BorderThickness="1"
-                            BorderBrush="{DynamicResource ControlElevationBorderBrush}"
-                            Padding="8" Margin="0,0,12,0" VerticalAlignment="Center">
-                        <Grid>
-                            <ui:SymbolIcon Symbol="VehicleCar24" FontSize="20"
-                                           Visibility="{Binding IsCarcolsMode, Converter={StaticResource InverseBooleanToVisibility}}" />
-                            <ui:SymbolIcon Symbol="Wrench24" FontSize="20"
-                                           Visibility="{Binding IsCarcolsMode, Converter={StaticResource BooleanToVisibility}}" />
-                        </Grid>
-                    </Border>
-                    <StackPanel VerticalAlignment="Center">
-                        <TextBlock Text="Vehicles" FontSize="15" FontWeight="SemiBold"
-                                   Visibility="{Binding IsCarcolsMode, Converter={StaticResource InverseBooleanToVisibility}}" />
-                        <TextBlock Text="Carcols Fixer" FontSize="15" FontWeight="SemiBold"
-                                   Visibility="{Binding IsCarcolsMode, Converter={StaticResource BooleanToVisibility}}" />
-                        <TextBlock Text="Turn a singleplayer car into a FiveM-ready vehicle. Add a car, hit Convert — done. Then right-click a file to make it smaller."
-                                   FontSize="11" Opacity="0.6" Margin="0,2,0,0"
-                                   Visibility="{Binding IsCarcolsMode, Converter={StaticResource InverseBooleanToVisibility}}" />
-                        <TextBlock Text="Scan your vehicle resources for clashing modkit, siren and light-settings IDs — the silent cause of wrong tuning parts and broken sirens — and remap them automatically."
-                                   FontSize="11" Opacity="0.6" Margin="0,2,0,0"
-                                   Visibility="{Binding IsCarcolsMode, Converter={StaticResource BooleanToVisibility}}" />
+                <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                    <ui:SymbolIcon Symbol="VehicleCar24" FontSize="18" Opacity="0.85"
+                                   Margin="0,0,10,0" VerticalAlignment="Center" />
+                    <TextBlock Text="Car Pack" FontSize="15" FontWeight="SemiBold" VerticalAlignment="Center" />
+                    <TextBlock Text="{Binding QueueCountText}" FontSize="11" Opacity="0.5"
+                               Margin="12,0,0,0" VerticalAlignment="Center"
+                               Visibility="{Binding HasQueue, Converter={StaticResource BooleanToVisibility}}" />
+                </StackPanel>
+
+                <StackPanel Grid.Column="1" Orientation="Horizontal" HorizontalAlignment="Right"
+                            VerticalAlignment="Center" Margin="16,0"
+                            Visibility="{Binding HasFiles, Converter={StaticResource BooleanToVisibility}}">
+                    <StackPanel Margin="0,0,16,0" MinWidth="64">
+                        <TextBlock Text="TOTAL CARS" Style="{StaticResource StatLabel}" />
+                        <TextBlock Text="{Binding StatCars}" Style="{StaticResource StatValue}" />
+                    </StackPanel>
+                    <StackPanel Margin="0,0,16,0" MinWidth="64">
+                        <TextBlock Text="SIZE" Style="{StaticResource StatLabel}" />
+                        <TextBlock Text="{Binding StatSizeText}" Style="{StaticResource StatValue}" />
+                    </StackPanel>
+                    <StackPanel Margin="0,0,16,0" MinWidth="72">
+                        <TextBlock Text="POLYGONS" Style="{StaticResource StatLabel}" />
+                        <TextBlock Text="{Binding StatPolygonsText}" Style="{StaticResource StatValue}" />
+                    </StackPanel>
+                    <StackPanel Margin="0,0,16,0" MinWidth="72">
+                        <TextBlock Text="UNOPTIMIZED" Style="{StaticResource StatLabel}" />
+                        <TextBlock Text="{Binding StatUnoptimized}" Style="{StaticResource StatValue}" Foreground="#E0A33A" />
+                    </StackPanel>
+                    <StackPanel MinWidth="64">
+                        <TextBlock Text="OPTIMIZED" Style="{StaticResource StatLabel}" />
+                        <TextBlock Text="{Binding StatOptimized}" Style="{StaticResource StatValue}" Foreground="#3FB950" />
                     </StackPanel>
                 </StackPanel>
 
-                <!-- Mode segment: convert workspace vs Carcols Fixer -->
-                <Border Grid.Column="1" CornerRadius="6" Padding="2" Margin="16,0,0,0"
-                        VerticalAlignment="Center"
-                        Background="{DynamicResource SubtleFillColorTertiaryBrush}"
-                        BorderThickness="1"
-                        BorderBrush="{DynamicResource ControlElevationBorderBrush}">
-                    <Grid>
-                        <Grid.ColumnDefinitions>
-                            <ColumnDefinition Width="Auto" />
-                            <ColumnDefinition Width="Auto" />
-                        </Grid.ColumnDefinitions>
-                        <RadioButton Grid.Column="0" GroupName="VehiclesTopMode"
-                                     Style="{StaticResource SegmentTab}"
-                                     Content="Convert" MinWidth="104"
-                                     IsChecked="{Binding IsConvertMode, Mode=OneWay}"
-                                     Click="OnModeConvert"
-                                     ToolTip="The car-conversion workspace — turn SP add-on cars into FiveM resources." />
-                        <RadioButton Grid.Column="1" GroupName="VehiclesTopMode"
-                                     Style="{StaticResource SegmentTab}"
-                                     Content="Carcols Fixer" MinWidth="104"
-                                     IsChecked="{Binding IsCarcolsMode, Mode=OneWay}"
-                                     Click="OnModeCarcols"
-                                     ToolTip="Find modkit, siren and light-settings ID conflicts across your vehicle resources (wrong tuning parts, broken sirens) and remap them automatically." />
-                    </Grid>
-                </Border>
+                <StackPanel Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Center">
+                    <ui:Button Content="Cancel"
+                               Appearance="Danger"
+                               Visibility="{Binding IsProcessing, Converter={StaticResource BooleanToVisibility}}"
+                               Click="OnCancelConvert" />
+                </StackPanel>
             </Grid>
         </Border>
 
-        <!-- ───────── Body: guided steps | files | advanced ───────── -->
-        <Grid Grid.Row="1"
-              Visibility="{Binding IsCarcolsMode, Converter={StaticResource InverseBooleanToVisibility}}">
+        <Grid Grid.Row="1" x:Name="MainSplitGrid">
             <Grid.ColumnDefinitions>
-                <ColumnDefinition Width="1.3*" MinWidth="220" MaxWidth="480" />
-                <ColumnDefinition Width="*" MinWidth="200" />
-                <ColumnDefinition Width="0.85*" MinWidth="180" MaxWidth="320" />
+                <ColumnDefinition x:Name="LayersCol" Width="260" MinWidth="180" MaxWidth="480" />
+                <ColumnDefinition Width="5" />
+                <ColumnDefinition Width="*" MinWidth="280" />
             </Grid.ColumnDefinitions>
 
-            <!-- Guided-steps sidebar -->
             <Border Grid.Column="0"
                     Background="{DynamicResource ControlFillColorDefaultBrush}"
-                    BorderThickness="0,0,1,0"
-                    BorderBrush="{DynamicResource ControlElevationBorderBrush}">
-                <ScrollViewer VerticalScrollBarVisibility="Auto">
-                    <StackPanel Margin="20,18">
+                    BorderThickness="0,0,0,0">
+                <Grid>
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="*" />
+                    </Grid.RowDefinitions>
 
-                        <!-- ── STEP 1 — Add your car(s) ── -->
-                        <StackPanel Orientation="Horizontal" Margin="0,0,0,10">
-                            <Border Style="{StaticResource StepBadge}">
-                                <TextBlock Text="1" Style="{StaticResource StepNumber}" />
-                            </Border>
-                            <TextBlock Text="Add your car" Style="{StaticResource StepTitle}" />
-                        </StackPanel>
+                    <StackPanel Grid.Row="0" Margin="12,12,12,8">
+                        <Grid Margin="0,0,0,10">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+                            <StackPanel>
+                                <TextBlock Text="Multi-car pack" FontSize="12" FontWeight="SemiBold" />
+                                <TextBlock Text="{Binding MultiCarHint}" FontSize="10" Opacity="0.5" Margin="0,2,0,0" />
+                            </StackPanel>
+                            <ui:ToggleSwitch Grid.Column="1"
+                                             IsChecked="{Binding MergeIntoPack, Mode=TwoWay}"
+                                             VerticalAlignment="Center"
+                                             IsEnabled="{Binding IsProcessing, Converter={StaticResource InverseBoolean}}"
+                                             ToolTip="Queue multiple cars into one pack" />
+                        </Grid>
 
-                        <!-- Single car vs Car pack (a queue of cars). -->
-                        <Border CornerRadius="6" Padding="2" Margin="0,0,0,10"
-                                IsEnabled="{Binding IsProcessing, Converter={StaticResource InverseBoolean}}"
-                                Background="{DynamicResource SubtleFillColorTertiaryBrush}"
-                                BorderThickness="1"
-                                BorderBrush="{DynamicResource ControlElevationBorderBrush}">
-                            <Grid>
-                                <Grid.ColumnDefinitions>
-                                    <ColumnDefinition Width="*" />
-                                    <ColumnDefinition Width="*" />
-                                </Grid.ColumnDefinitions>
-                                <RadioButton Grid.Column="0" GroupName="VehMode"
-                                             Style="{StaticResource SegmentTab}"
-                                             Content="Single car"
-                                             IsChecked="{Binding MergeIntoPack, Converter={StaticResource InverseBoolean}, Mode=OneWay}"
-                                             Click="OnModeSingle"
-                                             ToolTip="Convert one car into its own FiveM resource." />
-                                <RadioButton Grid.Column="1" GroupName="VehMode"
-                                             Style="{StaticResource SegmentTab}"
-                                             Content="Car pack"
-                                             IsChecked="{Binding MergeIntoPack, Mode=OneWay}"
-                                             Click="OnModePack"
-                                             ToolTip="Queue up several cars and merge them into one resource." />
-                            </Grid>
-                        </Border>
-
-                        <!-- ══ SINGLE-CAR view ══ -->
-                        <Border Visibility="{Binding MergeIntoPack, Converter={StaticResource InverseBooleanToVisibility}}"
-                                IsEnabled="{Binding IsProcessing, Converter={StaticResource InverseBoolean}}"
-                                CornerRadius="8"
-                                BorderThickness="1"
-                                BorderBrush="{DynamicResource ControlElevationBorderBrush}"
-                                Background="{DynamicResource SubtleFillColorTertiaryBrush}"
-                                Padding="16,18" MinHeight="128">
-                            <Grid>
-                                <!-- Empty: prompt + Browse -->
-                                <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center"
-                                            Visibility="{Binding HasInput, Converter={StaticResource InverseBooleanToVisibility}}">
-                                    <ui:SymbolIcon Symbol="ArrowDownload24" FontSize="26" Opacity="0.5" HorizontalAlignment="Center" />
-                                    <TextBlock Text="Drag your car mod here"
-                                               FontSize="13" FontWeight="SemiBold" Opacity="0.8"
-                                               HorizontalAlignment="Center" Margin="0,8,0,2" />
-                                    <TextBlock Text="a dlc.rpf file or its folder"
-                                               FontSize="11" Opacity="0.5" HorizontalAlignment="Center" />
-                                    <ui:Button Content="Browse files…"
-                                               Appearance="Primary"
-                                               HorizontalAlignment="Center"
-                                               Margin="0,12,0,0"
-                                               Click="OnBrowseInput"
-                                               ToolTip="Pick your car's dlc.rpf file (or its folder)." />
-                                </StackPanel>
-
-                                <!-- Selected: name + change -->
-                                <StackPanel Visibility="{Binding HasInput, Converter={StaticResource BooleanToVisibility}}">
-                                    <StackPanel Orientation="Horizontal" HorizontalAlignment="Center">
-                                        <ui:SymbolIcon Symbol="CheckmarkCircle24" FontSize="20"
-                                                       Foreground="#3FB950" VerticalAlignment="Center" Margin="0,0,8,0" />
-                                        <TextBlock Text="Car added" FontSize="13" FontWeight="SemiBold"
-                                                   VerticalAlignment="Center" />
-                                    </StackPanel>
-                                    <TextBlock Text="{Binding InputDisplay}"
-                                               FontSize="11" FontFamily="Consolas" Opacity="0.75"
-                                               TextWrapping="Wrap" TextAlignment="Center"
-                                               Margin="0,8,0,0" MaxHeight="72" TextTrimming="CharacterEllipsis" />
-                                    <ui:Button Content="Change…"
-                                               Appearance="Secondary"
-                                               HorizontalAlignment="Center"
-                                               Margin="0,12,0,0"
-                                               Click="OnBrowseInput" />
-                                </StackPanel>
-                            </Grid>
-                        </Border>
-
-                        <!-- ══ CAR-PACK view: a queue of cars ══ -->
-                        <StackPanel Visibility="{Binding MergeIntoPack, Converter={StaticResource BooleanToVisibility}}"
-                                    IsEnabled="{Binding IsProcessing, Converter={StaticResource InverseBoolean}}">
-                            <TextBlock Text="PACK NAME" Style="{StaticResource SectionHeader}" />
-                            <ui:TextBox Text="{Binding PackName, UpdateSourceTrigger=PropertyChanged}"
-                                        PlaceholderText="car_pack1"
-                                        ToolTip="The merged resource's folder name (e.g. car_pack1). Leave blank to auto-name it." />
-
-                            <ui:Button Content="Add a car…"
+                        <Grid Margin="0,0,0,8">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="8" />
+                                <ColumnDefinition Width="*" />
+                            </Grid.ColumnDefinitions>
+                            <ui:Button Grid.Column="0"
+                                       Content="{Binding AddCarsButtonText}"
+                                       Appearance="Secondary"
+                                       HorizontalAlignment="Stretch"
+                                       IsEnabled="{Binding IsProcessing, Converter={StaticResource InverseBoolean}}"
+                                       Click="OnBrowseInput"
+                                       ToolTip="Pick dlc.rpf files or folders." />
+                            <ui:Button Grid.Column="2"
+                                       Content="{Binding ImportButtonText}"
                                        Appearance="Primary"
                                        HorizontalAlignment="Stretch"
-                                       Margin="0,8,0,0"
-                                       Click="OnBrowseInput"
-                                       ToolTip="Pick another car's dlc.rpf (or folder) to add to the pack. You can also drag several in at once.">
-                                <ui:Button.Icon>
-                                    <ui:SymbolIcon Symbol="Add24" />
-                                </ui:Button.Icon>
-                            </ui:Button>
-                            <TextBlock Text="…or drag several dlc.rpf files / folders in at once."
-                                       FontSize="11" Opacity="0.5" TextWrapping="Wrap" Margin="2,6,0,0" />
-                        </StackPanel>
+                                       IsEnabled="{Binding CanConvert}"
+                                       Click="OnConvert"
+                                       ToolTip="Import queued cars into a FiveM pack." />
+                        </Grid>
 
-                        <!-- Car-pack queue as a tree: each car a branch, expand to
-                             its files. Click to preview; × removes a car; right-click
-                             to optimize / edit / rename. -->
-                        <StackPanel Visibility="{Binding HasFiles, Converter={StaticResource BooleanToVisibility}}"
-                                    Margin="0,4,0,0">
-                            <StackPanel Orientation="Horizontal" Margin="0,14,0,6">
-                                <TextBlock Text="CARS IN THIS PACK" Style="{StaticResource SectionHeader}" Margin="0" VerticalAlignment="Center" />
-                                <TextBlock Text="{Binding QueueCountText}" FontSize="11" Opacity="0.5"
-                                           VerticalAlignment="Center" Margin="8,0,0,0" />
-                            </StackPanel>
-                            <Border CornerRadius="8" BorderThickness="1" MaxHeight="300" MinHeight="86"
-                                    BorderBrush="{DynamicResource ControlElevationBorderBrush}"
-                                    Background="{DynamicResource SubtleFillColorTertiaryBrush}"
-                                    Padding="4,6">
-                                <TreeView x:Name="FilesTree"
-                                          ItemsSource="{Binding CarNodes}"
-                                          ItemContainerStyle="{StaticResource VehTreeItemStyle}"
-                                          ItemTemplate="{StaticResource VehTreeItemTemplate}"
-                                          BorderThickness="0" Background="Transparent"
-                                          ScrollViewer.HorizontalScrollBarVisibility="Disabled"
-                                          IsEnabled="{Binding IsProcessing, Converter={StaticResource InverseBoolean}}"
-                                          PreviewMouseLeftButtonDown="OnQueueMouseDown"
-                                          SelectedItemChanged="OnTreeSelected" />
-                            </Border>
-                        </StackPanel>
+                        <Grid Margin="0,0,0,10">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="8" />
+                                <ColumnDefinition Width="*" />
+                            </Grid.ColumnDefinitions>
+                            <ui:Button Grid.Column="0" Content="New template"
+                                       Appearance="Secondary"
+                                       HorizontalAlignment="Stretch"
+                                       IsEnabled="{Binding IsProcessing, Converter={StaticResource InverseBoolean}}"
+                                       Click="OnNewTemplate"
+                                       ToolTip="Create empty FiveM pack folders: stream, data, audio…" />
+                            <ui:Button Grid.Column="2" Content="Load folder…"
+                                       Appearance="Secondary"
+                                       HorizontalAlignment="Stretch"
+                                       IsEnabled="{Binding IsProcessing, Converter={StaticResource InverseBoolean}}"
+                                       Click="OnLoadFolder"
+                                       ToolTip="Open an existing FiveM car resource folder." />
+                        </Grid>
 
-                        <!-- …or a link -->
-                        <TextBlock Text="…or paste a gta5-mods link"
-                                   FontSize="11" Opacity="0.55" Margin="2,14,0,6" />
+                        <TextBlock Text="Or paste a gta5-mods link" FontSize="10" Opacity="0.5" Margin="0,0,0,6" />
                         <Grid>
                             <Grid.ColumnDefinitions>
                                 <ColumnDefinition Width="*" />
@@ -441,225 +330,133 @@
                             </Grid.ColumnDefinitions>
                             <ui:TextBox Grid.Column="0"
                                         Text="{Binding ModUrl, UpdateSourceTrigger=PropertyChanged}"
-                                        PlaceholderText="https://www.gta5-mods.com/vehicles/…"
-                                        ToolTip="Paste a gta5-mods.com car page link. FiveOS downloads it and converts it for you." />
-                            <ui:Button Grid.Column="1" Content="Get"
-                                       Appearance="Secondary" Margin="6,0,0,0" Padding="14,0"
+                                        PlaceholderText="gta5-mods.com/vehicles/…"
+                                        FontSize="11"
+                                        ToolTip="Downloads and adds the mod to the queue." />
+                            <ui:Button Grid.Column="1" Content="Add"
+                                       Appearance="Secondary" Margin="6,0,0,0" Padding="10,0"
                                        IsEnabled="{Binding IsProcessing, Converter={StaticResource InverseBoolean}}"
                                        Click="OnImportFromUrl"
-                                       ToolTip="Download the mod from the link and convert it." />
+                                       ToolTip="Download and add to the queue." />
                         </Grid>
-                        <TextBlock Text="Links from mega / drive / mediafire can't be auto-downloaded — grab those yourself and drag them in."
-                                   FontSize="10" Opacity="0.45" TextWrapping="Wrap" Margin="2,6,0,0" />
-
-                        <!-- ── STEP 2 — Convert ── -->
-                        <StackPanel Orientation="Horizontal" Margin="0,24,0,4">
-                            <Border Style="{StaticResource StepBadge}">
-                                <TextBlock Text="2" Style="{StaticResource StepNumber}" />
-                            </Border>
-                            <TextBlock Text="Convert to FiveM" Style="{StaticResource StepTitle}" />
-                        </StackPanel>
-                        <TextBlock FontSize="11" Opacity="0.5" TextWrapping="Wrap" Margin="0,0,0,10"
-                                   Text="Single car converts automatically. For a pack, add all your cars, then click Convert." />
-
-                        <ui:Button Content="Convert"
-                                   Appearance="Primary"
-                                   HorizontalAlignment="Stretch"
-                                   Padding="0,11" FontSize="14" FontWeight="SemiBold"
-                                   IsEnabled="{Binding CanConvert}"
-                                   Click="OnConvert"
-                                   ToolTip="Build the FiveM resource. For a car pack this merges every car in the queue into one resource.">
-                            <ui:Button.Icon>
-                                <ui:SymbolIcon Symbol="VehicleCar24" />
-                            </ui:Button.Icon>
-                        </ui:Button>
-                        <ui:Button Content="Cancel conversion"
-                                   Appearance="Danger"
-                                   HorizontalAlignment="Stretch"
-                                   Padding="0,11" FontSize="14" FontWeight="SemiBold"
-                                   Margin="0,8,0,0"
-                                   Visibility="{Binding IsProcessing, Converter={StaticResource BooleanToVisibility}}"
-                                   Click="OnCancelConvert"
-                                   ToolTip="Stop the conversion. For a car pack, cars already written stay; the rest are skipped.">
-                            <ui:Button.Icon>
-                                <ui:SymbolIcon Symbol="Dismiss24" />
-                            </ui:Button.Icon>
-                        </ui:Button>
-                        <TextBlock Text="{Binding Summary}"
-                                   FontSize="11" Opacity="0.6" TextWrapping="Wrap" Margin="2,8,0,0" />
-
-                        <!-- Warnings from the last conversion -->
-                        <Border Visibility="{Binding HasReviewNotes, Converter={StaticResource BooleanToVisibility}}"
-                                CornerRadius="6" BorderThickness="1" Margin="0,12,0,0"
-                                BorderBrush="#E0A33A"
-                                Background="{DynamicResource SubtleFillColorTertiaryBrush}"
-                                Padding="10,8">
-                            <StackPanel>
-                                <StackPanel Orientation="Horizontal" Margin="0,0,0,4">
-                                    <ui:SymbolIcon Symbol="Warning24" FontSize="13" Foreground="#E0A33A" VerticalAlignment="Center" Margin="0,0,6,0" />
-                                    <TextBlock Text="HEADS UP" FontSize="9" FontWeight="SemiBold" Opacity="0.8" VerticalAlignment="Center" />
-                                </StackPanel>
-                                <ItemsControl ItemsSource="{Binding ReviewNotes}">
-                                    <ItemsControl.ItemTemplate>
-                                        <DataTemplate>
-                                            <TextBlock Text="{Binding}" FontSize="10" Opacity="0.85"
-                                                       TextWrapping="Wrap" Margin="0,1" />
-                                        </DataTemplate>
-                                    </ItemsControl.ItemTemplate>
-                                </ItemsControl>
-                            </StackPanel>
-                        </Border>
-
                     </StackPanel>
-                </ScrollViewer>
+
+                    <TextBlock Grid.Row="1" Text="LAYERS" Style="{StaticResource SectionHeader}"
+                               Margin="14,4,14,8" />
+
+                    <Grid Grid.Row="2" Margin="8,0,8,8">
+                        <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center"
+                                    Visibility="{Binding ShowLayersEmpty, Converter={StaticResource BooleanToVisibility}}">
+                            <ui:SymbolIcon Symbol="Layer24" FontSize="28" Opacity="0.3" HorizontalAlignment="Center" />
+                            <TextBlock Text="No layers yet"
+                                       FontSize="13" FontWeight="SemiBold" Opacity="0.55"
+                                       HorizontalAlignment="Center" Margin="0,10,0,4" />
+                            <TextBlock Text="Add to queue, New template, or drop a dlc.rpf here."
+                                       FontSize="11" Opacity="0.45" TextWrapping="Wrap" MaxWidth="180"
+                                       TextAlignment="Center" HorizontalAlignment="Center" />
+                        </StackPanel>
+
+                        <ListBox x:Name="QueueList"
+                                 ItemsSource="{Binding Queue}"
+                                 ItemTemplate="{StaticResource QueueItemTemplate}"
+                                 SelectedItem="{Binding SelectedQueueItem, Mode=TwoWay}"
+                                 BorderThickness="0" Background="Transparent"
+                                 ScrollViewer.HorizontalScrollBarVisibility="Disabled"
+                                 IsEnabled="{Binding IsProcessing, Converter={StaticResource InverseBoolean}}"
+                                 Visibility="{Binding ShowPendingQueue, Converter={StaticResource BooleanToVisibility}}"
+                                 PreviewMouseLeftButtonDown="OnQueueMouseDown">
+                            <ListBox.ItemContainerStyle>
+                                <Style TargetType="ListBoxItem">
+                                    <Setter Property="Padding" Value="6,6" />
+                                    <Setter Property="Margin" Value="0,1" />
+                                    <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+                                    <Setter Property="Background" Value="Transparent" />
+                                    <Setter Property="Template">
+                                        <Setter.Value>
+                                            <ControlTemplate TargetType="ListBoxItem">
+                                                <Border x:Name="Bd" CornerRadius="4" Padding="{TemplateBinding Padding}"
+                                                        Background="{TemplateBinding Background}">
+                                                    <ContentPresenter />
+                                                </Border>
+                                                <ControlTemplate.Triggers>
+                                                    <Trigger Property="IsSelected" Value="True">
+                                                        <Setter TargetName="Bd" Property="Background"
+                                                                Value="{DynamicResource AccentFillColorDefaultBrush}" />
+                                                    </Trigger>
+                                                    <MultiTrigger>
+                                                        <MultiTrigger.Conditions>
+                                                            <Condition Property="IsSelected" Value="False" />
+                                                            <Condition Property="IsMouseOver" Value="True" />
+                                                        </MultiTrigger.Conditions>
+                                                        <Setter TargetName="Bd" Property="Background"
+                                                                Value="{DynamicResource SubtleFillColorSecondaryBrush}" />
+                                                    </MultiTrigger>
+                                                </ControlTemplate.Triggers>
+                                            </ControlTemplate>
+                                        </Setter.Value>
+                                    </Setter>
+                                </Style>
+                            </ListBox.ItemContainerStyle>
+                        </ListBox>
+
+                        <TreeView x:Name="FilesTree"
+                                  ItemsSource="{Binding CarNodes}"
+                                  ItemContainerStyle="{StaticResource VehTreeItemStyle}"
+                                  ItemTemplate="{StaticResource VehTreeItemTemplate}"
+                                  BorderThickness="0" Background="Transparent"
+                                  ScrollViewer.HorizontalScrollBarVisibility="Disabled"
+                                  IsEnabled="{Binding IsProcessing, Converter={StaticResource InverseBoolean}}"
+                                  Visibility="{Binding ShowLayersTree, Converter={StaticResource BooleanToVisibility}}"
+                                  PreviewMouseLeftButtonDown="OnQueueMouseDown"
+                                  SelectedItemChanged="OnTreeSelected" />
+                    </Grid>
+                </Grid>
             </Border>
 
-            <!-- File list — the produced resource's files, right-click to optimize -->
-            <Grid Grid.Column="1" Margin="16"
-                  Visibility="{Binding ShowFilesSection, Converter={StaticResource BooleanToVisibility}}">
+            <GridSplitter Grid.Column="1"
+                          x:Name="LayersSplitter"
+                          HorizontalAlignment="Stretch"
+                          VerticalAlignment="Stretch"
+                          Background="{DynamicResource ControlElevationBorderBrush}"
+                          ShowsPreview="False"
+                          ResizeBehavior="PreviousAndNext"
+                          Cursor="SizeWE"
+                          DragCompleted="OnLayersSplitterDragCompleted" />
+
+            <Grid Grid.Column="2" x:Name="WorkspaceGrid" Margin="0">
                 <Grid.RowDefinitions>
-                    <RowDefinition Height="Auto" />
-                    <RowDefinition Height="*" />
+                    <RowDefinition x:Name="StageRow" Height="*" MinHeight="160" />
+                    <RowDefinition Height="5" />
+                    <RowDefinition x:Name="DetailsRow" Height="380" MinHeight="140" MaxHeight="560" />
                 </Grid.RowDefinitions>
 
-                <Grid Grid.Row="0" Margin="2,0,2,10">
+                <Grid Grid.Row="0" Margin="10,10,10,0" x:Name="StageGrid">
                     <Grid.ColumnDefinitions>
-                        <ColumnDefinition Width="*" />
-                        <ColumnDefinition Width="Auto" />
-                    </Grid.ColumnDefinitions>
-                    <StackPanel VerticalAlignment="Center">
-                        <TextBlock Text="Your car's files" FontSize="14" FontWeight="SemiBold" />
-                        <TextBlock Text="Click a car or file to preview. Right-click to optimize, edit or rename."
-                                   FontSize="11" Opacity="0.55" Margin="0,1,0,0" />
-                    </StackPanel>
-                    <ui:Button Grid.Column="1" Content="Optimize everything"
-                               Appearance="Primary" FontSize="12" Padding="12,6" VerticalAlignment="Center"
-                               Visibility="{Binding HasFiles, Converter={StaticResource BooleanToVisibility}}"
-                               IsEnabled="{Binding IsProcessing, Converter={StaticResource InverseBoolean}}"
-                               Click="OnOptimizeAll"
-                               ToolTip="Shrink every model and texture in the resource at once.">
-                        <ui:Button.Icon>
-                            <ui:SymbolIcon Symbol="ArrowMinimize24" />
-                        </ui:Button.Icon>
-                    </ui:Button>
-                </Grid>
-
-                <!-- Row 1: file tree | drag-handle | 3D preview & mods. -->
-                <Grid Grid.Row="1">
-                    <Grid.ColumnDefinitions>
-                        <ColumnDefinition Width="*" MinWidth="120" />
-                        <ColumnDefinition Width="Auto" />
-                        <ColumnDefinition Width="1.4*" MinWidth="160" />
+                        <ColumnDefinition Width="*" MinWidth="200" />
+                        <ColumnDefinition Width="5" />
+                        <ColumnDefinition x:Name="PaintCol" Width="220" MinWidth="160" MaxWidth="420" />
                     </Grid.ColumnDefinitions>
 
-                    <GridSplitter Grid.Column="1" Width="7" HorizontalAlignment="Center" VerticalAlignment="Stretch"
-                                  ResizeBehavior="PreviousAndNext" ResizeDirection="Columns"
-                                  Background="Transparent" Cursor="SizeWE" ToolTip="Drag to resize the preview." />
-
-                    <!-- Files (tree) -->
-                    <Border Grid.Column="0" CornerRadius="8" BorderThickness="1"
-                            BorderBrush="{DynamicResource ControlElevationBorderBrush}"
-                            Background="{DynamicResource ControlFillColorDefaultBrush}" ClipToBounds="True">
-                        <Grid>
-                            <Grid.RowDefinitions>
-                                <RowDefinition Height="Auto" />
-                                <RowDefinition Height="*" />
-                            </Grid.RowDefinitions>
-
-                            <!-- Search + sort toolbar (only once there are files) -->
-                            <StackPanel Grid.Row="0" Margin="8,8,8,4"
-                                        Visibility="{Binding HasFiles, Converter={StaticResource BooleanToVisibility}}">
-                                <ui:TextBox PlaceholderText="Search files…" FontSize="12"
-                                            Text="{Binding FileSearch, UpdateSourceTrigger=PropertyChanged}">
-                                    <ui:TextBox.Icon>
-                                        <ui:SymbolIcon Symbol="Search24" />
-                                    </ui:TextBox.Icon>
-                                </ui:TextBox>
-                                <Grid Margin="0,6,0,0">
-                                    <Grid.ColumnDefinitions>
-                                        <ColumnDefinition Width="*" />
-                                        <ColumnDefinition Width="Auto" />
-                                    </Grid.ColumnDefinitions>
-                                    <!-- sort field -->
-                                    <Border Grid.Column="0" CornerRadius="6" Padding="2"
-                                            Background="{DynamicResource SubtleFillColorTertiaryBrush}">
-                                        <Grid>
-                                            <Grid.ColumnDefinitions>
-                                                <ColumnDefinition Width="*" />
-                                                <ColumnDefinition Width="*" />
-                                                <ColumnDefinition Width="*" />
-                                            </Grid.ColumnDefinitions>
-                                            <RadioButton Grid.Column="0" GroupName="VehSort" Style="{StaticResource SegmentTab}"
-                                                         Content="Size" Click="OnSortSize"
-                                                         IsChecked="{Binding SortBySize, Mode=OneWay}"
-                                                         ToolTip="Order by file size." />
-                                            <RadioButton Grid.Column="1" GroupName="VehSort" Style="{StaticResource SegmentTab}"
-                                                         Content="Type" Click="OnSortType"
-                                                         IsChecked="{Binding SortByType, Mode=OneWay}"
-                                                         ToolTip="Group models, textures and settings together." />
-                                            <RadioButton Grid.Column="2" GroupName="VehSort" Style="{StaticResource SegmentTab}"
-                                                         Content="Date" Click="OnSortDate"
-                                                         IsChecked="{Binding SortByDate, Mode=OneWay}"
-                                                         ToolTip="Order by when the file was last changed." />
-                                        </Grid>
-                                    </Border>
-                                    <!-- direction -->
-                                    <ui:Button Grid.Column="1" Margin="6,0,0,0" FontSize="11" Padding="10,0"
-                                               Appearance="Secondary" VerticalAlignment="Stretch"
-                                               Content="{Binding SortDirLabel}" Click="OnToggleSortDir"
-                                               ToolTip="Flip the order (biggest↔smallest, newest↔oldest)." />
-                                </Grid>
-                            </StackPanel>
-
-                            <Grid Grid.Row="1">
-                                <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center"
-                                            Visibility="{Binding HasFiles, Converter={StaticResource InverseBooleanToVisibility}}">
-                                    <ui:SymbolIcon Symbol="VehicleCar24" FontSize="40" Opacity="0.25" HorizontalAlignment="Center" />
-                                    <TextBlock Text="{Binding FilesEmptyTitle}" FontSize="14" FontWeight="SemiBold" Opacity="0.6"
-                                               HorizontalAlignment="Center" Margin="0,10,0,4" />
-                                    <TextBlock Text="{Binding FilesEmptyHint}" FontSize="11.5" Opacity="0.5"
-                                               TextAlignment="Center" TextWrapping="Wrap" MaxWidth="320" HorizontalAlignment="Center" />
-                                </StackPanel>
-                                <!-- MIDDLE detail = highlighted car's files + shared config. -->
-                                <TreeView ItemsSource="{Binding MiddleNodes}"
-                                          ItemContainerStyle="{StaticResource VehTreeItemStyle}"
-                                          ItemTemplate="{StaticResource VehTreeItemTemplate}"
-                                          BorderThickness="0" Background="Transparent" Padding="6,8"
-                                          ScrollViewer.HorizontalScrollBarVisibility="Disabled"
-                                          IsEnabled="{Binding IsProcessing, Converter={StaticResource InverseBoolean}}"
-                                          Visibility="{Binding HasFiles, Converter={StaticResource BooleanToVisibility}}"
-                                          SelectedItemChanged="OnTreeSelected" />
-                            </Grid>
-                        </Grid>
-                    </Border>
-
-                    <!-- 3D preview + mods (Col 2) -->
-                <Grid Grid.Column="2" Margin="6,0,0,0" Visibility="{Binding HasFiles, Converter={StaticResource BooleanToVisibility}}">
-                    <Grid.RowDefinitions>
-                        <RowDefinition Height="*" MinHeight="120" />
-                        <RowDefinition Height="Auto" />
-                    </Grid.RowDefinitions>
-
-                    <!-- 3D preview (fills the available height) -->
-                    <Border Grid.Row="0"
-                            CornerRadius="8" BorderThickness="1"
+                    <Border Grid.Column="0"
+                            CornerRadius="4" BorderThickness="1"
                             BorderBrush="{DynamicResource ControlElevationBorderBrush}"
                             Background="#0d0d10" ClipToBounds="True">
                         <Grid>
                             <wv2:WebView2 x:Name="CarPreview" DefaultBackgroundColor="#0d0d10" />
 
-                            <!-- hint before a model is picked -->
                             <StackPanel x:Name="PreviewHint" HorizontalAlignment="Center" VerticalAlignment="Center"
                                         IsHitTestVisible="False">
-                                <ui:SymbolIcon Symbol="VehicleCar24" FontSize="30" Opacity="0.3"
+                                <ui:SymbolIcon Symbol="VehicleCar24" FontSize="36" Opacity="0.28"
                                                Foreground="White" HorizontalAlignment="Center" />
-                                <TextBlock Text="Click a .yft model to preview it"
-                                           FontSize="12" Opacity="0.5" Foreground="White"
-                                           TextAlignment="Center" TextWrapping="Wrap" MaxWidth="220"
-                                           HorizontalAlignment="Center" Margin="0,8,0,0" />
+                                <TextBlock Text="{Binding FilesEmptyTitle}"
+                                           FontSize="13" FontWeight="SemiBold" Opacity="0.55" Foreground="White"
+                                           HorizontalAlignment="Center" Margin="0,12,0,4" />
+                                <TextBlock Text="{Binding FilesEmptyHint}"
+                                           FontSize="11" Opacity="0.4" Foreground="White"
+                                           TextAlignment="Center" TextWrapping="Wrap" MaxWidth="280"
+                                           HorizontalAlignment="Center" />
                             </StackPanel>
 
-                            <!-- texture / model loading spinner -->
                             <StackPanel x:Name="PreviewLoader" HorizontalAlignment="Center" VerticalAlignment="Center"
                                         Visibility="Collapsed" IsHitTestVisible="False">
                                 <ctrl:DotMatrixLoader LoaderStyle="BlockDrop" DotSize="5" DotSpacing="2"
@@ -676,30 +473,40 @@
                                        TextTrimming="CharacterEllipsis" Text="" />
 
                             <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Top"
-                                        Margin="0,7,7,0">
-                                <ui:Button x:Name="GtaFolderBtn" Content="GTA folder"
+                                        Margin="0,8,8,0"
+                                        Visibility="{Binding HasFiles, Converter={StaticResource BooleanToVisibility}}">
+                                <ui:Button x:Name="GtaFolderBtn" Content="GTA"
                                            Appearance="Secondary" FontSize="10" Padding="8,3"
                                            Click="OnSetGtaFolder"
-                                           ToolTip="Point at your GTA V install so bodies/trim show GTA's shared vehicle textures (vehshare). Nothing is copied." />
+                                           ToolTip="Point at GTA V for shared vehicle textures." />
                                 <ui:Button Content="↺" Appearance="Secondary" FontSize="11" Padding="9,3" Margin="5,0,0,0"
-                                           Click="OnCarRecenter" ToolTip="Recenter — reset the camera to frame the model." />
+                                           Click="OnCarRecenter" ToolTip="Recenter camera." />
                             </StackPanel>
                         </Grid>
                     </Border>
 
-                    <!-- Mods controls: paint colour + open doors + toggle parts -->
-                    <Border Grid.Row="1" Margin="0,10,0,0" MaxHeight="270"
-                            CornerRadius="8" BorderThickness="1"
+                    <GridSplitter Grid.Column="1"
+                                  HorizontalAlignment="Stretch"
+                                  VerticalAlignment="Stretch"
+                                  Background="{DynamicResource ControlElevationBorderBrush}"
+                                  ShowsPreview="False"
+                                  ResizeBehavior="PreviousAndNext"
+                                  Cursor="SizeWE"
+                                  DragCompleted="OnPaintSplitterDragCompleted" />
+
+                    <Border Grid.Column="2"
+                            CornerRadius="4" BorderThickness="1"
                             BorderBrush="{DynamicResource ControlElevationBorderBrush}"
-                            Background="{DynamicResource ControlFillColorDefaultBrush}">
-                        <ScrollViewer VerticalScrollBarVisibility="Auto">
-                            <StackPanel Margin="14,12">
-                                <TextBlock Text="PAINT COLOUR" Style="{StaticResource SectionHeader}" Margin="0,0,0,6" />
-                                <WrapPanel>
+                            Background="{DynamicResource ControlFillColorDefaultBrush}"
+                            Visibility="{Binding HasFiles, Converter={StaticResource BooleanToVisibility}}">
+                        <ScrollViewer VerticalScrollBarVisibility="Auto" Padding="12,10">
+                            <StackPanel>
+                                <TextBlock Text="PAINT &amp; VEHICLE CONTROLS" Style="{StaticResource SectionHeader}" />
+                                <WrapPanel Margin="0,0,0,10">
                                     <WrapPanel.Resources>
                                         <Style TargetType="Border">
-                                            <Setter Property="Width" Value="24" />
-                                            <Setter Property="Height" Value="24" />
+                                            <Setter Property="Width" Value="22" />
+                                            <Setter Property="Height" Value="22" />
                                             <Setter Property="CornerRadius" Value="4" />
                                             <Setter Property="Margin" Value="0,0,6,6" />
                                             <Setter Property="Cursor" Value="Hand" />
@@ -717,90 +524,309 @@
                                     <Border Background="#D4A017" Tag="D4A017" MouseLeftButtonUp="OnPaintColor" ToolTip="Gold" />
                                     <Border Background="#C2560F" Tag="C2560F" MouseLeftButtonUp="OnPaintColor" ToolTip="Orange" />
                                 </WrapPanel>
-
                                 <ui:ToggleSwitch x:Name="DoorsToggle" Content="Open doors"
-                                                 IsEnabled="False" FontSize="12" Margin="0,8,0,0"
-                                                 Checked="OnDoorsToggled" Unchecked="OnDoorsToggled"
-                                                 ToolTip="Swing the doors / bonnet / boot open (approximate hinge angles). Only works when the model separates them from the chassis." />
-                                <TextBlock Text="PARTS &amp; EXTRAS" Style="{StaticResource SectionHeader}" Margin="0,14,0,6" />
+                                                 IsEnabled="False" FontSize="12" Margin="0,0,0,4"
+                                                 Checked="OnDoorsToggled" Unchecked="OnDoorsToggled" />
+                                <TextBlock x:Name="DoorsHint" FontSize="10" Opacity="0.5" TextWrapping="Wrap"
+                                           Margin="0,0,0,10"
+                                           Text="Load a car to unlock doors." />
                                 <ItemsControl x:Name="PartsList" />
-                                <TextBlock Text="Untick a part to hide it (extras, spoilers, accessories)."
-                                           FontSize="10" Opacity="0.45" TextWrapping="Wrap" Margin="0,6,0,0" />
                             </StackPanel>
                         </ScrollViewer>
                     </Border>
                 </Grid>
-                </Grid>
+
+                <GridSplitter Grid.Row="1"
+                              HorizontalAlignment="Stretch"
+                              VerticalAlignment="Stretch"
+                              Background="{DynamicResource ControlElevationBorderBrush}"
+                              ShowsPreview="False"
+                              ResizeBehavior="PreviousAndNext"
+                              Cursor="SizeNS"
+                              DragCompleted="OnDetailsSplitterDragCompleted" />
+
+                <Border Grid.Row="2"
+                        Background="{DynamicResource ControlFillColorDefaultBrush}"
+                        Margin="10,0,10,10"
+                        CornerRadius="4"
+                        BorderBrush="{DynamicResource ControlElevationBorderBrush}"
+                        BorderThickness="1">
+                    <ScrollViewer VerticalScrollBarVisibility="Auto" Padding="16,12">
+                        <Grid>
+                            <StackPanel Visibility="{Binding ShowCarDetails, Converter={StaticResource BooleanToVisibility}}">
+                                <TextBlock Text="DETAILS" Style="{StaticResource SectionHeader}" />
+
+                                <StackPanel Visibility="{Binding HasDetail, Converter={StaticResource InverseBooleanToVisibility}}"
+                                            Margin="0,4,0,16">
+                                    <TextBlock Text="Nothing selected"
+                                               FontSize="13" FontWeight="SemiBold" Opacity="0.55" />
+                                    <TextBlock Text="Select a layer to see its source and stats."
+                                               FontSize="11" Opacity="0.45" TextWrapping="Wrap" Margin="0,4,0,0" />
+                                </StackPanel>
+
+                                <StackPanel Visibility="{Binding HasDetail, Converter={StaticResource BooleanToVisibility}}"
+                                            Margin="0,0,0,18">
+                                    <TextBlock Text="{Binding DetailTitle}" FontSize="15" FontWeight="SemiBold"
+                                               TextTrimming="CharacterEllipsis"
+                                               ToolTip="{Binding DetailTitle}" />
+                                    <TextBlock Text="{Binding DetailSubtitle}" FontSize="11" Opacity="0.55" Margin="0,4,0,0" />
+                                    <TextBlock Text="{Binding DetailStats}" FontSize="12" Opacity="0.8" Margin="0,10,0,0" />
+                                    <TextBlock Text="{Binding DetailSource}" FontSize="10" FontFamily="Consolas"
+                                               Opacity="0.5" TextWrapping="Wrap" Margin="0,8,0,0"
+                                               ToolTip="{Binding DetailSource}" />
+                                </StackPanel>
+
+                                <Border Visibility="{Binding HasReviewNotes, Converter={StaticResource BooleanToVisibility}}"
+                                        CornerRadius="6" BorderThickness="1" Margin="0,0,0,16"
+                                        BorderBrush="#E0A33A"
+                                        Background="{DynamicResource SubtleFillColorTertiaryBrush}"
+                                        Padding="10,8">
+                                    <StackPanel>
+                                        <TextBlock Text="HEADS UP" FontSize="9" FontWeight="SemiBold" Opacity="0.8" Margin="0,0,0,4" />
+                                        <ItemsControl ItemsSource="{Binding ReviewNotes}">
+                                            <ItemsControl.ItemTemplate>
+                                                <DataTemplate>
+                                                    <TextBlock Text="{Binding}" FontSize="10" Opacity="0.85"
+                                                               TextWrapping="Wrap" Margin="0,1" />
+                                                </DataTemplate>
+                                            </ItemsControl.ItemTemplate>
+                                        </ItemsControl>
+                                    </StackPanel>
+                                </Border>
+
+                                <Grid>
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="16" />
+                                        <ColumnDefinition Width="*" />
+                                    </Grid.ColumnDefinitions>
+                                    <StackPanel Grid.Column="0">
+                                        <TextBlock Text="RESOURCE" Style="{StaticResource SectionHeader}" />
+                                        <ui:TextBox Text="{Binding PackName, UpdateSourceTrigger=PropertyChanged}"
+                                                    PlaceholderText="auto name"
+                                                    ToolTip="FiveM resource folder name." />
+                                        <TextBlock Text="SAVE TO" Style="{StaticResource SectionHeader}" Margin="0,14,0,8" />
+                                        <Border CornerRadius="6"
+                                                Background="{DynamicResource SubtleFillColorTertiaryBrush}"
+                                                BorderThickness="1"
+                                                BorderBrush="{DynamicResource ControlElevationBorderBrush}"
+                                                Padding="10,8">
+                                            <TextBlock Text="{Binding OutputPath}"
+                                                       FontSize="11" FontFamily="Consolas"
+                                                       TextWrapping="Wrap" Opacity="0.85" />
+                                        </Border>
+                                        <ui:Button Content="Change folder…"
+                                                   Appearance="Secondary"
+                                                   HorizontalAlignment="Stretch"
+                                                   Margin="0,8,0,0"
+                                                   Click="OnBrowseOutput" />
+                                    </StackPanel>
+                                    <StackPanel Grid.Column="2">
+                                        <TextBlock Text="OPTIMIZE" Style="{StaticResource SectionHeader}" />
+                                        <TextBlock Text="{Binding KeepRatioDisplay}" FontSize="11" Opacity="0.7" Margin="0,0,0,4" />
+                                        <Slider x:Name="OptimizeSlider"
+                                                Minimum="0.05" Maximum="0.95" SmallChange="0.05" LargeChange="0.1"
+                                                Value="{Binding KeepRatio, Mode=TwoWay}"
+                                                TickFrequency="0.05" IsSnapToTickEnabled="True" />
+                                        <CheckBox Content="Keep panel edges crisp"
+                                                  IsChecked="{Binding PreserveBoundary, Mode=TwoWay}"
+                                                  FontSize="11" Margin="0,8,0,0" />
+                                        <CheckBox x:Name="TextureDownsizeCheck" Content="Shrink huge textures"
+                                                  IsChecked="True"
+                                                  FontSize="11" Margin="0,6,0,0" />
+                                        <ui:Button Content="Optimize everything"
+                                                   Appearance="Secondary"
+                                                   HorizontalAlignment="Stretch"
+                                                   Margin="0,12,0,0"
+                                                   Visibility="{Binding HasFiles, Converter={StaticResource BooleanToVisibility}}"
+                                                   IsEnabled="{Binding IsProcessing, Converter={StaticResource InverseBoolean}}"
+                                                   Click="OnOptimizeAll" />
+                                    </StackPanel>
+                                </Grid>
+                            </StackPanel>
+
+                            <StackPanel Visibility="{Binding ShowMetaEditor, Converter={StaticResource BooleanToVisibility}}">
+                                <TextBlock Text="META EDITOR" Style="{StaticResource SectionHeader}" />
+                                <TextBlock Text="{Binding MetaTitle}" FontSize="15" FontWeight="SemiBold"
+                                           TextTrimming="CharacterEllipsis" Margin="0,0,0,4" />
+                                <TextBlock FontSize="10" Opacity="0.5" TextWrapping="Wrap" Margin="0,0,0,10"
+                                           Text="Form fields — not raw XML. Switch to Raw to edit the full file." />
+
+                                <Grid Margin="0,0,0,10">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="8" />
+                                        <ColumnDefinition Width="*" />
+                                    </Grid.ColumnDefinitions>
+                                    <ui:Button x:Name="MetaModeFormBtn" Grid.Column="0" Content="Form"
+                                               Appearance="Primary"
+                                               HorizontalAlignment="Stretch"
+                                               IsEnabled="{Binding MetaSupportsForm}"
+                                               Click="OnMetaModeForm" />
+                                    <ui:Button x:Name="MetaModeRawBtn" Grid.Column="2" Content="Raw editor"
+                                               Appearance="Secondary"
+                                               HorizontalAlignment="Stretch"
+                                               Click="OnMetaModeRaw" />
+                                </Grid>
+
+                                <Grid Margin="0,0,0,10"
+                                      Visibility="{Binding MetaFormVisible, Converter={StaticResource BooleanToVisibility}}">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="8" />
+                                        <ColumnDefinition Width="*" />
+                                    </Grid.ColumnDefinitions>
+                                    <ui:Button Grid.Column="0" Content="Import meta…"
+                                               Appearance="Secondary" HorizontalAlignment="Stretch"
+                                               Click="OnMetaImport" />
+                                    <ui:Button Grid.Column="2" Content="Reset form"
+                                               Appearance="Secondary" HorizontalAlignment="Stretch"
+                                               Click="OnMetaReset" />
+                                </Grid>
+
+                                <StackPanel Visibility="{Binding MetaFormVisible, Converter={StaticResource BooleanToVisibility}}">
+                                    <UniformGrid Columns="2" Visibility="{Binding ShowMetaVehicles, Converter={StaticResource BooleanToVisibility}}">
+                                        <StackPanel Margin="0,0,8,10">
+                                            <TextBlock Text="MODEL NAME" Style="{StaticResource MetaFieldLabel}" />
+                                            <ui:TextBox Text="{Binding MetaModelName, UpdateSourceTrigger=PropertyChanged}" />
+                                        </StackPanel>
+                                        <StackPanel Margin="0,0,0,10">
+                                            <TextBlock Text="GAME NAME" Style="{StaticResource MetaFieldLabel}" />
+                                            <ui:TextBox Text="{Binding MetaGameName, UpdateSourceTrigger=PropertyChanged}" />
+                                        </StackPanel>
+                                        <StackPanel Margin="0,0,8,10">
+                                            <TextBlock Text="VEHICLE MAKE" Style="{StaticResource MetaFieldLabel}" />
+                                            <ui:TextBox Text="{Binding MetaVehicleMake, UpdateSourceTrigger=PropertyChanged}" />
+                                        </StackPanel>
+                                        <StackPanel Margin="0,0,0,10">
+                                            <TextBlock Text="VEHICLE CLASS" Style="{StaticResource MetaFieldLabel}" />
+                                            <ComboBox SelectedValue="{Binding MetaVehicleClass, Mode=TwoWay}"
+                                                      SelectedValuePath="Content">
+                                                <ComboBoxItem Content="VC_SPORT" />
+                                                <ComboBoxItem Content="VC_SEDAN" />
+                                                <ComboBoxItem Content="VC_SUPER" />
+                                                <ComboBoxItem Content="VC_MUSCLE" />
+                                                <ComboBoxItem Content="VC_SUV" />
+                                                <ComboBoxItem Content="VC_COMPACT" />
+                                                <ComboBoxItem Content="VC_COUPE" />
+                                                <ComboBoxItem Content="VC_MUSCLE" />
+                                                <ComboBoxItem Content="VC_OFF_ROAD" />
+                                                <ComboBoxItem Content="VC_INDUSTRIAL" />
+                                                <ComboBoxItem Content="VC_UTILITY" />
+                                                <ComboBoxItem Content="VC_VAN" />
+                                                <ComboBoxItem Content="VC_CYCLE" />
+                                                <ComboBoxItem Content="VC_BOAT" />
+                                                <ComboBoxItem Content="VC_HELICOPTER" />
+                                                <ComboBoxItem Content="VC_PLANE" />
+                                                <ComboBoxItem Content="VC_SERVICE" />
+                                                <ComboBoxItem Content="VC_EMERGENCY" />
+                                                <ComboBoxItem Content="VC_MILITARY" />
+                                                <ComboBoxItem Content="VC_COMMERCIAL" />
+                                            </ComboBox>
+                                        </StackPanel>
+                                        <StackPanel Margin="0,0,8,10">
+                                            <TextBlock Text="HANDLING ID" Style="{StaticResource MetaFieldLabel}" />
+                                            <ui:TextBox Text="{Binding MetaHandlingId, UpdateSourceTrigger=PropertyChanged}" />
+                                        </StackPanel>
+                                        <StackPanel Margin="0,0,0,10">
+                                            <TextBlock Text="FREQUENCY" Style="{StaticResource MetaFieldLabel}" />
+                                            <ui:TextBox Text="{Binding MetaFrequency, UpdateSourceTrigger=PropertyChanged}" />
+                                        </StackPanel>
+                                        <StackPanel Grid.ColumnSpan="2" Margin="0,0,0,10">
+                                            <TextBlock Text="FLAGS" Style="{StaticResource MetaFieldLabel}" />
+                                            <ui:TextBox Text="{Binding MetaFlags, UpdateSourceTrigger=PropertyChanged}" />
+                                        </StackPanel>
+                                    </UniformGrid>
+
+                                    <UniformGrid Columns="2" Visibility="{Binding ShowMetaHandling, Converter={StaticResource BooleanToVisibility}}">
+                                        <StackPanel Margin="0,0,8,10">
+                                            <TextBlock Text="HANDLING ID" Style="{StaticResource MetaFieldLabel}" />
+                                            <ui:TextBox Text="{Binding MetaHandlingId, UpdateSourceTrigger=PropertyChanged}" />
+                                        </StackPanel>
+                                        <StackPanel Margin="0,0,0,10">
+                                            <TextBlock Text="MASS (KG)" Style="{StaticResource MetaFieldLabel}" />
+                                            <ui:TextBox Text="{Binding MetaMass, UpdateSourceTrigger=PropertyChanged}" />
+                                        </StackPanel>
+                                        <StackPanel Margin="0,0,8,10">
+                                            <TextBlock Text="INITIAL DRIVE FORCE" Style="{StaticResource MetaFieldLabel}" />
+                                            <ui:TextBox Text="{Binding MetaInitialDriveForce, UpdateSourceTrigger=PropertyChanged}" />
+                                        </StackPanel>
+                                        <StackPanel Margin="0,0,0,10">
+                                            <TextBlock Text="BRAKE FORCE" Style="{StaticResource MetaFieldLabel}" />
+                                            <ui:TextBox Text="{Binding MetaBrakeForce, UpdateSourceTrigger=PropertyChanged}" />
+                                        </StackPanel>
+                                        <StackPanel Margin="0,0,8,10">
+                                            <TextBlock Text="TRACTION CURVE MAX" Style="{StaticResource MetaFieldLabel}" />
+                                            <ui:TextBox Text="{Binding MetaTractionCurveMax, UpdateSourceTrigger=PropertyChanged}" />
+                                        </StackPanel>
+                                        <StackPanel Margin="0,0,0,10">
+                                            <TextBlock Text="TRACTION CURVE MIN" Style="{StaticResource MetaFieldLabel}" />
+                                            <ui:TextBox Text="{Binding MetaTractionCurveMin, UpdateSourceTrigger=PropertyChanged}" />
+                                        </StackPanel>
+                                        <StackPanel Margin="0,0,8,10">
+                                            <TextBlock Text="TOP SPEED (KPH)" Style="{StaticResource MetaFieldLabel}" />
+                                            <ui:TextBox Text="{Binding MetaTopSpeedKph, UpdateSourceTrigger=PropertyChanged}" />
+                                        </StackPanel>
+                                        <StackPanel Margin="0,0,0,10">
+                                            <TextBlock Text="DOWNFORCE MODIFIER" Style="{StaticResource MetaFieldLabel}" />
+                                            <ui:TextBox Text="{Binding MetaDownforceModifier, UpdateSourceTrigger=PropertyChanged}" />
+                                        </StackPanel>
+                                    </UniformGrid>
+
+                                    <UniformGrid Columns="2" Visibility="{Binding ShowMetaCarvariations, Converter={StaticResource BooleanToVisibility}}">
+                                        <StackPanel Margin="0,0,8,10">
+                                            <TextBlock Text="MODEL NAME" Style="{StaticResource MetaFieldLabel}" />
+                                            <ui:TextBox Text="{Binding MetaModelName, UpdateSourceTrigger=PropertyChanged}" />
+                                        </StackPanel>
+                                        <StackPanel Margin="0,0,0,10">
+                                            <TextBlock Text="COLOR 1" Style="{StaticResource MetaFieldLabel}" />
+                                            <ui:TextBox Text="{Binding MetaColor1, UpdateSourceTrigger=PropertyChanged}" />
+                                        </StackPanel>
+                                        <StackPanel Margin="0,0,8,10">
+                                            <TextBlock Text="COLOR 2" Style="{StaticResource MetaFieldLabel}" />
+                                            <ui:TextBox Text="{Binding MetaColor2, UpdateSourceTrigger=PropertyChanged}" />
+                                        </StackPanel>
+                                        <StackPanel Margin="0,0,0,10">
+                                            <TextBlock Text="PEARLESCENT" Style="{StaticResource MetaFieldLabel}" />
+                                            <ui:TextBox Text="{Binding MetaPearlescent, UpdateSourceTrigger=PropertyChanged}" />
+                                        </StackPanel>
+                                        <StackPanel Margin="0,0,0,10">
+                                            <TextBlock Text="KITS / MODKITS" Style="{StaticResource MetaFieldLabel}" />
+                                            <ui:TextBox Text="{Binding MetaKits, UpdateSourceTrigger=PropertyChanged}" />
+                                        </StackPanel>
+                                    </UniformGrid>
+                                </StackPanel>
+
+                                <TextBox Visibility="{Binding MetaRawVisible, Converter={StaticResource BooleanToVisibility}}"
+                                         Text="{Binding MetaRawText, UpdateSourceTrigger=PropertyChanged}"
+                                         AcceptsReturn="True" AcceptsTab="True"
+                                         TextWrapping="NoWrap"
+                                         FontFamily="Consolas" FontSize="12"
+                                         MinHeight="180"
+                                         VerticalScrollBarVisibility="Auto"
+                                         HorizontalScrollBarVisibility="Auto"
+                                         Margin="0,0,0,10" />
+
+                                <ui:Button Content="Save meta"
+                                           Appearance="Primary"
+                                           HorizontalAlignment="Left"
+                                           MinWidth="140"
+                                           Click="OnMetaSave" />
+                                <TextBlock Text="{Binding MetaStatusNote}" FontSize="10" Opacity="0.7"
+                                           Margin="0,8,0,0" TextWrapping="Wrap"
+                                           Foreground="#3FB950" />
+                            </StackPanel>
+                        </Grid>
+                    </ScrollViewer>
+                </Border>
             </Grid>
-
-            <!-- ── Advanced sidebar (right) ── -->
-            <Border Grid.Column="2"
-                    Background="{DynamicResource ControlFillColorDefaultBrush}"
-                    BorderThickness="1,0,0,0"
-                    BorderBrush="{DynamicResource ControlElevationBorderBrush}">
-                <ScrollViewer VerticalScrollBarVisibility="Auto">
-                    <StackPanel Margin="18,18">
-                        <StackPanel Orientation="Horizontal" Margin="0,0,0,4">
-                            <ui:SymbolIcon Symbol="Settings24" FontSize="16" Opacity="0.7" VerticalAlignment="Center" Margin="0,0,8,0" />
-                            <TextBlock Text="Advanced" FontSize="14" FontWeight="SemiBold" VerticalAlignment="Center" />
-                        </StackPanel>
-                        <TextBlock Text="Optional — the defaults already work for most cars. Single-car vs Car-pack is chosen up in step ①."
-                                   FontSize="11" Opacity="0.5" TextWrapping="Wrap" Margin="0,0,0,4" />
-
-                        <!-- Same binding as PACK NAME in step ① — hide the duplicate when Car pack is on. -->
-                        <StackPanel Visibility="{Binding MergeIntoPack, Converter={StaticResource InverseBooleanToVisibility}}">
-                            <TextBlock Text="RESOURCE NAME" Style="{StaticResource SectionHeader}" Margin="0,18,0,8" />
-                            <ui:TextBox Text="{Binding PackName, UpdateSourceTrigger=PropertyChanged}"
-                                        PlaceholderText="auto (from the car's name)"
-                                        ToolTip="The FiveM resource folder name. Leave blank to name it automatically." />
-                        </StackPanel>
-
-                        <TextBlock Text="SAVE TO" Style="{StaticResource SectionHeader}" Margin="0,18,0,8" />
-                        <Border CornerRadius="6"
-                                Background="{DynamicResource SubtleFillColorTertiaryBrush}"
-                                BorderThickness="1"
-                                BorderBrush="{DynamicResource ControlElevationBorderBrush}"
-                                Padding="10,8">
-                            <TextBlock Text="{Binding OutputPath}"
-                                       FontSize="11" FontFamily="Consolas"
-                                       TextWrapping="Wrap" Opacity="0.85" />
-                        </Border>
-                        <ui:Button Content="Change folder…"
-                                   Appearance="Secondary"
-                                   HorizontalAlignment="Stretch"
-                                   Margin="0,8,0,0"
-                                   Click="OnBrowseOutput"
-                                   ToolTip="Choose where the FiveM resource folder is written." />
-
-                        <TextBlock Text="HOW MUCH TO SHRINK" Style="{StaticResource SectionHeader}" Margin="0,18,0,8" />
-                        <TextBlock Text="{Binding KeepRatioDisplay}" FontSize="11" Opacity="0.75" Margin="0,0,0,4" />
-                        <Slider x:Name="OptimizeSlider"
-                                Minimum="0.05" Maximum="0.95" SmallChange="0.05" LargeChange="0.1"
-                                Value="{Binding KeepRatio, Mode=TwoWay}"
-                                TickFrequency="0.05" IsSnapToTickEnabled="True"
-                                ToolTip="How much of the model's detail to keep when you Optimize. 50% roughly halves the polycount." />
-                        <CheckBox Content="Keep panel edges crisp"
-                                  IsChecked="{Binding PreserveBoundary, Mode=TwoWay}"
-                                  FontSize="11" Margin="0,6,0,0"
-                                  ToolTip="Lock the open edges of each body piece so panels don't tear when shrunk." />
-                        <CheckBox x:Name="TextureDownsizeCheck" Content="Shrink huge textures"
-                                  IsChecked="True"
-                                  FontSize="11" Margin="0,6,0,0"
-                                  ToolTip="Cap any texture bigger than 1K down to 1024px (halves a 2K, quarters a 4K) — the standard FiveM vehicle target." />
-                        <TextBlock Text="These apply when you right-click a file → Optimize."
-                                   FontSize="10" Opacity="0.45" TextWrapping="Wrap" Margin="0,8,0,0" />
-                    </StackPanel>
-                </ScrollViewer>
-            </Border>
         </Grid>
 
-        <!-- ───────── Footer ───────── -->
         <Border Grid.Row="2"
                 BorderThickness="0,1,0,0"
                 BorderBrush="{DynamicResource ControlElevationBorderBrush}"
                 Background="{DynamicResource ControlFillColorDefaultBrush}"
-                Padding="16,12"
-                Visibility="{Binding IsCarcolsMode, Converter={StaticResource InverseBooleanToVisibility}}">
+                Padding="16,10">
             <Grid>
                 <Grid.ColumnDefinitions>
                     <ColumnDefinition Width="Auto" />
@@ -822,11 +848,11 @@
                                  Visibility="{Binding IsProcessing, Converter={StaticResource BooleanToVisibility}}" />
                 </StackPanel>
 
-                <ui:Button Grid.Column="2" Content="Open output folder"
+                <ui:Button Grid.Column="2" Content="Open output"
                            Appearance="Secondary"
                            IsEnabled="{Binding HasOutput}"
                            Click="OnOpenOutput"
-                           ToolTip="Open the produced resource folder in Explorer. Copy it into your server's resources/ and add `ensure` it.">
+                           ToolTip="Open the produced resource folder.">
                     <ui:Button.Icon>
                         <ui:SymbolIcon Symbol="FolderOpen24" />
                     </ui:Button.Icon>
@@ -834,15 +860,6 @@
             </Grid>
         </Border>
 
-        <!-- ══ CARCOLS FIXER mode — hosted pane. The VM is the singleton
-             MainViewModel.CarcolsVm (resolved to CarcolsFixerView by the
-             App.xaml DataTemplate), so scan results survive mode and tab
-             switches. Same hosting pattern as the txAdmin card in Optimize. ══ -->
-        <ContentControl Grid.Row="1" Grid.RowSpan="2"
-                        Content="{Binding DataContext.CarcolsVm, RelativeSource={RelativeSource AncestorType=Window}}"
-                        Visibility="{Binding IsCarcolsMode, Converter={StaticResource BooleanToVisibility}}" />
-
-        <!-- Drag-drop highlight overlay -->
         <Border x:Name="DropOverlay"
                 Grid.RowSpan="3"
                 Background="#33000000"
@@ -853,7 +870,7 @@
                     CornerRadius="10" Padding="28,18"
                     BorderThickness="2"
                     BorderBrush="{DynamicResource AccentControlElevationBorderBrush}">
-                <TextBlock Text="Drop your car mod here (dlc.rpf file or folder)" FontSize="15" FontWeight="SemiBold" />
+                <TextBlock Text="Drop to add to queue" FontSize="15" FontWeight="SemiBold" />
             </Border>
         </Border>
     </Grid>

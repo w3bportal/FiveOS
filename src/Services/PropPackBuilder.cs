@@ -49,10 +49,23 @@ public static class PropPackBuilder
     public static BuildResult Build(PropPackSession session, double fallbackLodDist = 500d)
     {
         if (session is null) throw new ArgumentNullException(nameof(session));
-        if (session.Entries.Count == 0)
+        return Build(session.Entries.ToList(), session.PackName, fallbackLodDist);
+    }
+
+    /// <summary>Group-aware overload: roll an arbitrary subset of staged
+    /// entries into one resource named <paramref name="packName"/>. The
+    /// Photoshop-style outliner calls this once per group (its members)
+    /// and once per loose layer (a single-entry "pack" named after the
+    /// asset), so ungrouped layers export separately.</summary>
+    /// <param name="emitHousing">Write the nolag_properties furniture
+    /// catalog next to the streamed assets ("Furniture pack" in the export
+    /// dialog). Off = plain prop pack.</param>
+    public static BuildResult Build(IReadOnlyList<PropPackEntry> entries, string packName, double fallbackLodDist = 500d, bool emitHousing = false)
+    {
+        if (entries is null || entries.Count == 0)
             return new BuildResult(false, null, "Pack is empty — convert at least one prop first.", EngineRunner.OutputMode.SingleZip);
 
-        var packSafeName = Sanitize(session.PackName);
+        var packSafeName = Sanitize(packName);
         if (string.IsNullOrEmpty(packSafeName)) packSafeName = "props_pack";
 
         // Stage the merged resource under a fresh temp dir, then deliver
@@ -93,7 +106,7 @@ public static class PropPackBuilder
             //     in-memory drawable (the Name baked at convert time),
             //     and the second copy renders the first one's geometry.
             var stemSeen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-            foreach (var entry in session.Entries)
+            foreach (var entry in entries)
             {
                 var srcStream = Path.Combine(entry.SlotDir, "stream");
                 if (!Directory.Exists(srcStream)) continue;
@@ -178,7 +191,7 @@ public static class PropPackBuilder
 
             File.WriteAllText(
                 Path.Combine(resourceDir, "fxmanifest.lua"),
-                BuildManifest(packSafeName, session.PackName, mergedYtypName),
+                BuildManifest(packSafeName, packName, mergedYtypName),
                 new UTF8Encoding(false));
 
             // Drop the per-script housing catalog snippets next to the
@@ -186,15 +199,18 @@ public static class PropPackBuilder
             // in-game preview (no thumbnails needed); the other two ship
             // their own greenscreen generators. So this writes Lua/JSON
             // only — see HousingCatalogEmitter for the per-script formats.
-            HousingCatalogEmitter.Emit(
-                resourceDir,
-                packDisplayName: session.PackName,
-                packSafeName: packSafeName,
-                catalogMappings);
+            if (emitHousing)
+            {
+                HousingCatalogEmitter.Emit(
+                    resourceDir,
+                    packDisplayName: packName,
+                    packSafeName: packSafeName,
+                    catalogMappings);
+            }
 
             File.WriteAllText(
                 Path.Combine(resourceDir, "README.md"),
-                BuildReadme(packSafeName, session, copied, catalogMappings),
+                BuildReadme(packSafeName, packName, entries.Count, copied, catalogMappings),
                 new UTF8Encoding(false));
 
             // Deliver via the same strategies EngineRunner uses for a
@@ -320,18 +336,19 @@ public static class PropPackBuilder
 
     private static string BuildReadme(
         string safeName,
-        PropPackSession session,
+        string packName,
+        int propCount,
         IReadOnlyList<string> streamFiles,
         IReadOnlyList<HousingCatalogEmitter.MappedEntry> catalog)
     {
         var sb = new StringBuilder();
-        sb.AppendLine($"# {session.PackName}");
+        sb.AppendLine($"# {packName}");
         sb.AppendLine();
         sb.AppendLine($"FiveM prop pack built with **FiveOS** on {DateTime.Now:yyyy-MM-dd}.");
         sb.AppendLine();
         sb.AppendLine("## Contents");
         sb.AppendLine();
-        sb.AppendLine($"- **Props:** {session.Entries.Count}");
+        sb.AppendLine($"- **Props:** {propCount}");
         sb.AppendLine($"- **Archetype dictionary:** `stream/{safeName}.ytyp`");
         sb.AppendLine($"- **Housing catalogs:** `housing/` (ps-housing, qbx_properties, loaf_housing, qs-housing, nolag_properties)");
         sb.AppendLine();

@@ -7,7 +7,7 @@
                  Height="540" Width="640"
                  MinHeight="360" MinWidth="500"
                  WindowStartupLocation="CenterOwner"
-                 WindowBackdropType="Mica"
+                 WindowBackdropType="None"
                  ExtendsContentIntoTitleBar="True">
 
     <Grid>
@@ -23,7 +23,6 @@
                      ShowMaximize="False"
                      ShowMinimize="False" />
 
-        <!-- Header: error icon + headline + summary -->
         <Grid Grid.Row="1" Margin="20,4,20,12">
             <Grid.ColumnDefinitions>
                 <ColumnDefinition Width="Auto" />
@@ -58,7 +57,6 @@
             </StackPanel>
         </Grid>
 
-        <!-- Log area -->
         <Border Grid.Row="2"
                 Margin="20,0,20,12"
                 CornerRadius="6"
@@ -115,7 +113,6 @@
             </Grid>
         </Border>
 
-        <!-- Action row -->
         <Grid Grid.Row="3" Margin="20,0,20,16">
             <Grid.ColumnDefinitions>
                 <ColumnDefinition Width="Auto" />

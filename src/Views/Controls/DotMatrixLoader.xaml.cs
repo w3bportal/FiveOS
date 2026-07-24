@@ -1,5 +1,4 @@
-// Copyright (c) 2026 FiveOS. All rights reserved.
-// https://github.com/w3bportal/FiveOS
+
 
 using System;
 using System.Collections.Generic;
@@ -20,13 +19,6 @@ public enum DotMatrixLoaderStyle
     BlockDrop,
 }
 
-/// <summary>
-/// 5x5 dot-matrix loader. Patterns are encoded as a list of binary frames
-/// (one bool[5,5] per frame). Each dot gets a per-keyframe Opacity animation
-/// driven by a single shared Storyboard, so all 25 dots stay in lockstep.
-/// Discrete keyframes give the crisp on/off pixel-art look that the source
-/// loaders at dotmatrix.zzzzshawn.cloud use.
-/// </summary>
 public partial class DotMatrixLoader : UserControl
 {
     private const int Grid = 5;
@@ -58,7 +50,7 @@ public partial class DotMatrixLoader : UserControl
 
     public static readonly DependencyProperty DotColorProperty = DependencyProperty.Register(
         nameof(DotColor), typeof(Brush), typeof(DotMatrixLoader),
-        new PropertyMetadata(new SolidColorBrush(Color.FromRgb(0x00, 0x7A, 0xCC)), OnColorChanged));
+        new PropertyMetadata(new SolidColorBrush(Color.FromRgb(0x00, 0xA2, 0xFF)), OnColorChanged));
 
     public Brush DotColor
     {
@@ -195,15 +187,10 @@ public partial class DotMatrixLoader : UserControl
         _ => new List<bool[,]>(),
     };
 
-    /// <summary>
-    /// Two vertical rails (cols 1 and 3) stay lit; a "rung" of 3 horizontal
-    /// dots travels top→bottom→top, like climbing a ladder.
-    /// </summary>
     private static List<bool[,]> PulseLadder()
     {
         var frames = new List<bool[,]>();
-        // 5 rows down, then 5 rows up → 10 rung positions, plus the rung
-        // hangs on each row for 2 frames so motion reads at 80ms/frame.
+
         int[] rungRows = { 0, 0, 1, 1, 2, 2, 3, 3, 4, 4, 3, 3, 2, 2, 1, 1 };
         foreach (var rr in rungRows)
         {
@@ -215,10 +202,6 @@ public partial class DotMatrixLoader : UserControl
         return frames;
     }
 
-    /// <summary>
-    /// 5 column bars of varying height, each phase-shifted to give the
-    /// audio-equalizer look. Heights bottom-anchored.
-    /// </summary>
     private static List<bool[,]> SoundBars()
     {
         var frames = new List<bool[,]>();
@@ -239,11 +222,6 @@ public partial class DotMatrixLoader : UserControl
         return frames;
     }
 
-    /// <summary>
-    /// Lights dots in spiral order from the center outward, with a 3-dot
-    /// trail. After the spiral fills, all dots flash on for 2 frames, then
-    /// reset.
-    /// </summary>
     private static List<bool[,]> CoreSpiral()
     {
         var spiral = new (int r, int c)[]
@@ -264,7 +242,7 @@ public partial class DotMatrixLoader : UserControl
             }
             frames.Add(f);
         }
-        // Brief full flash, then 2 dim frames before the spiral restarts.
+
         var allOn = new bool[Grid, Grid];
         for (int r = 0; r < Grid; r++) for (int c = 0; c < Grid; c++) allOn[r, c] = true;
         frames.Add(allOn);
@@ -274,10 +252,6 @@ public partial class DotMatrixLoader : UserControl
         return frames;
     }
 
-    /// <summary>
-    /// Two sine waves crossing across the 5 columns — one rising, one
-    /// falling. Reads as a DNA helix.
-    /// </summary>
     private static List<bool[,]> HelixGlow()
     {
         var frames = new List<bool[,]>();
@@ -300,11 +274,6 @@ public partial class DotMatrixLoader : UserControl
         return frames;
     }
 
-    /// <summary>
-    /// One dot drops down each column in turn; landed dots stack at the
-    /// bottom row. Once the bottom row is full, everything clears and the
-    /// pattern restarts.
-    /// </summary>
     private static List<bool[,]> BlockDrop()
     {
         var frames = new List<bool[,]>();
@@ -313,14 +282,14 @@ public partial class DotMatrixLoader : UserControl
             for (int r = 0; r < Grid; r++)
             {
                 var f = new bool[Grid, Grid];
-                // Stack of previously-landed dots on the bottom row.
+
                 for (int prev = 0; prev < c; prev++) f[Grid - 1, prev] = true;
-                // Falling dot.
+
                 f[r, c] = true;
                 frames.Add(f);
             }
         }
-        // Hold the full bottom row, then clear before restart.
+
         var full = new bool[Grid, Grid];
         for (int c = 0; c < Grid; c++) full[Grid - 1, c] = true;
         frames.Add(full);

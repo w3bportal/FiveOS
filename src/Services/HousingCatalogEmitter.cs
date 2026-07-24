@@ -47,10 +47,9 @@ public static class HousingCatalogEmitter
         var housingDir = Path.Combine(resourceDir, "housing");
         Directory.CreateDirectory(housingDir);
 
-        WritePsHousing(housingDir, packDisplayName, packSafeName, entries);
-        WriteQbxProperties(housingDir, packDisplayName, packSafeName, entries);
-        WriteLoafHousing(housingDir, packDisplayName, packSafeName, entries);
-        WriteQsHousingJson(housingDir, packDisplayName, packSafeName, entries);
+        // nolag_properties is the only supported housing system (product
+        // decision 2026-07-23). The other writers stay in the file, dormant,
+        // in case support widens again.
         WriteNolagProperties(housingDir, packDisplayName, packSafeName, entries);
         WriteUniversalCatalog(housingDir, packDisplayName, packSafeName, entries);
     }

@@ -6,12 +6,11 @@
                  Height="540" Width="600"
                  MinHeight="420" MinWidth="480"
                  WindowStartupLocation="CenterOwner"
-                 WindowBackdropType="Mica"
+                 WindowBackdropType="None"
                  ExtendsContentIntoTitleBar="True">
 
     <Window.Resources>
-        <!-- Reuse the same underlined tab look used elsewhere so the About
-             window matches the main Optimize/3D-to-Props strip. -->
+
         <Style x:Key="UnderlineTabItem" TargetType="TabItem">
             <Setter Property="Background" Value="Transparent" />
             <Setter Property="BorderThickness" Value="0" />
@@ -104,7 +103,6 @@
                     Style="{StaticResource UnderlineTabControl}"
                     Margin="20,0,20,0">
 
-            <!-- ─── About tab ─── -->
             <TabItem Header="About" FontSize="13" Padding="14,8">
                 <StackPanel Margin="0,28,0,0"
                             VerticalAlignment="Top"
@@ -124,7 +122,6 @@
                                HorizontalAlignment="Center"
                                Margin="0,2,0,8" />
 
-                    <!-- Update check + last-checked indicator -->
                     <Button x:Name="CheckUpdateButton"
                             Content="Check for updates"
                             Click="OnCheckForUpdates"
@@ -145,8 +142,6 @@
                                HorizontalAlignment="Center"
                                Margin="0,0,0,16" />
 
-                    <!-- FiveOS is free to use; donations are optional and keep
-                         it going. -->
                     <ui:Button x:Name="DonateButton"
                                Content="♥  Support FiveOS"
                                Appearance="Primary"
@@ -179,7 +174,6 @@
                 </StackPanel>
             </TabItem>
 
-            <!-- ─── Credits tab ─── -->
             <TabItem Header="Credits" FontSize="13" Padding="14,8">
                 <Grid Margin="0,16,0,0">
                     <Grid.RowDefinitions>

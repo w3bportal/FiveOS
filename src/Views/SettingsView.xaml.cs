@@ -3,6 +3,7 @@
 
 using System.Diagnostics;
 using System.IO;
+using System.Linq;
 using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Controls;
@@ -10,6 +11,7 @@ using System.Windows.Input;
 using Microsoft.Win32;
 using FiveOS.Services;
 using FiveOS.Services.AiProviders;
+using FiveOS.ViewModels;
 using FiveOS.Views.Controls;
 
 namespace FiveOS.Views;
@@ -18,8 +20,8 @@ public partial class SettingsView : UserControl
 {
     /// <summary>Anchor points the rest of the app can deep-link into.
     /// Specific AI providers are addressed by id via
-    /// <see cref="FocusAiProvider(string)"/> — only Sketchfab needs a
-    /// dedicated enum slot because it lives outside the AI list.</summary>
+    /// <see cref="FocusAiProvider(string)"/> — Sketchfab lives outside
+    /// the AI list and needs a dedicated enum slot.</summary>
     public enum FocusSection { None, Sketchfab }
 
     // Pages keyed by their nav-item Tag so reordering the NavList in
@@ -49,6 +51,7 @@ public partial class SettingsView : UserControl
         _ = RefreshCacheStatusAsync();
         RefreshAbout();
         RefreshLanguage();
+        RefreshAccentSwatches();
         RefreshAddons();
     }
 
@@ -357,7 +360,6 @@ public partial class SettingsView : UserControl
     // ─────────────── About ───────────────
 
     private bool _suppressDiscordToggle;
-    private bool _suppressGlobalUpdateToggle;
 
     private void RefreshAbout()
     {
@@ -375,20 +377,9 @@ public partial class SettingsView : UserControl
             AboutVersion.Text = v is null ? "0.0.0" : $"{v.Major}.{v.Minor}.{v.Build}";
         }
 
-        // Hydrate toggles from disk without firing their handlers.
-        _suppressGlobalUpdateToggle = true;
-        GlobalUpdateToggle.IsChecked = UserSettings.LoadGlobalUpdate();
-        _suppressGlobalUpdateToggle = false;
-
         _suppressDiscordToggle = true;
         DiscordPresenceToggle.IsChecked = UserSettings.LoadEnableDiscordPresence();
         _suppressDiscordToggle = false;
-    }
-
-    private void OnGlobalUpdateToggled(object sender, RoutedEventArgs e)
-    {
-        if (_suppressGlobalUpdateToggle) return;
-        UserSettings.SaveGlobalUpdate(GlobalUpdateToggle.IsChecked == true);
     }
 
     private void OnDiscordPresenceToggled(object sender, RoutedEventArgs e)
@@ -575,6 +566,46 @@ public partial class SettingsView : UserControl
             RefreshOutput();
             RefreshSketchfab();
         }
+    }
+
+    // ─────────────── Accent color ───────────────
+
+    private sealed class AccentSwatchRow
+    {
+        public string Name { get; init; } = "";
+        public string Hex { get; init; } = "";
+        public System.Windows.Media.Brush Fill { get; init; } = System.Windows.Media.Brushes.Transparent;
+        public System.Windows.Media.Brush BorderBrush { get; init; } = System.Windows.Media.Brushes.Transparent;
+    }
+
+    private void RefreshAccentSwatches()
+    {
+        if (AccentSwatches is null) return;
+        var current = ThemeAccent.ToHex(ThemeAccent.Current).ToUpperInvariant();
+        AccentSwatches.ItemsSource = ThemeAccent.Presets.Select(p =>
+        {
+            ThemeAccent.TryParseHex(p.Hex, out var c);
+            var selected = string.Equals(p.Hex, current, StringComparison.OrdinalIgnoreCase)
+                || string.Equals(ThemeAccent.ToHex(c), current, StringComparison.OrdinalIgnoreCase);
+            return new AccentSwatchRow
+            {
+                Name = p.Name + " (" + p.Hex + ")",
+                Hex = p.Hex,
+                Fill = new System.Windows.Media.SolidColorBrush(c),
+                BorderBrush = selected
+                    ? System.Windows.Media.Brushes.White
+                    : new System.Windows.Media.SolidColorBrush(
+                        System.Windows.Media.Color.FromRgb(0x55, 0x55, 0x55)),
+            };
+        }).ToList();
+    }
+
+    private void OnAccentSwatchClick(object sender, RoutedEventArgs e)
+    {
+        if (sender is not System.Windows.Controls.Button btn) return;
+        if (btn.Tag is not string hex) return;
+        ThemeAccent.ApplyHex(hex, persist: true);
+        RefreshAccentSwatches();
     }
 
     // ─────────────── Shared ───────────────

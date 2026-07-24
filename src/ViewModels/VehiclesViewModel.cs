@@ -3,6 +3,7 @@
 
 using System.Collections.ObjectModel;
 using System.IO;
+using System.Linq;
 using System.Threading.Tasks;
 using CommunityToolkit.Mvvm.ComponentModel;
 using FiveOS.Services;
@@ -55,13 +56,14 @@ public sealed record CarInput(string Name, string Path);
 public sealed class VehicleTreeNode
 {
     public string Name { get; init; } = "";
-    public string Detail { get; init; } = "";     // "3D model · 1.1 MB", or "3 files"
+    public string Detail { get; init; } = "";
+    public string SizeText { get; set; } = "";
     public Wpf.Ui.Controls.SymbolRegular Icon { get; init; }
     public bool IsCar { get; init; }
     public bool IsExpanded { get; set; } = true;
-    public VehicleFile? File { get; init; }         // null for branch nodes
-    public string? PreviewPath { get; init; }       // .yft to preview when selected
-    public VehicleTreeNode? Parent { get; set; }    // the car/branch a file belongs to
+    public VehicleFile? File { get; init; }
+    public string? PreviewPath { get; init; }
+    public VehicleTreeNode? Parent { get; set; }
     public System.Collections.ObjectModel.ObservableCollection<VehicleTreeNode> Children { get; } = new();
 
     public bool CanOptimizeNode => File?.CanOptimize ?? false;
@@ -117,16 +119,6 @@ public partial class VehiclesViewModel : ObservableObject
 
     public VehiclesViewModel(Action<string> setStatus) => _setStatus = setStatus;
 
-    /// <summary>Header mode switch: false = the car-convert workspace, true =
-    /// the hosted Carcols Fixer pane. The pane's state lives in
-    /// MainViewModel.CarcolsVm (same hosting pattern as the txAdmin card in
-    /// the Optimize tab), so it survives mode and tab switches.</summary>
-    [ObservableProperty]
-    [NotifyPropertyChangedFor(nameof(IsConvertMode))]
-    private bool _isCarcolsMode;
-
-    public bool IsConvertMode => !IsCarcolsMode;
-
     public ObservableCollection<RpfFileRow> Rows { get; } = new();
     public ObservableCollection<VehicleFile> Files { get; } = new();
     /// <summary>LEFT car-pack queue — CARS ONLY (each a 🚗 branch, collapsed).</summary>
@@ -142,11 +134,153 @@ public partial class VehiclesViewModel : ObservableObject
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(ShowFilesSection))]
     [NotifyPropertyChangedFor(nameof(ActiveCarName))]
+    [NotifyPropertyChangedFor(nameof(HasDetail))]
+    [NotifyPropertyChangedFor(nameof(DetailTitle))]
+    [NotifyPropertyChangedFor(nameof(DetailSubtitle))]
+    [NotifyPropertyChangedFor(nameof(DetailStats))]
+    [NotifyPropertyChangedFor(nameof(DetailSource))]
     private VehicleTreeNode? _activeCar;
 
     public string ActiveCarName => ActiveCar?.Name ?? "";
 
-    partial void OnActiveCarChanged(VehicleTreeNode? value) => RebuildMiddle();
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(HasDetail))]
+    [NotifyPropertyChangedFor(nameof(DetailTitle))]
+    [NotifyPropertyChangedFor(nameof(DetailSubtitle))]
+    [NotifyPropertyChangedFor(nameof(DetailStats))]
+    [NotifyPropertyChangedFor(nameof(DetailSource))]
+    private CarInput? _selectedQueueItem;
+
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(ShowMetaEditor))]
+    [NotifyPropertyChangedFor(nameof(ShowCarDetails))]
+    [NotifyPropertyChangedFor(nameof(MetaSupportsForm))]
+    [NotifyPropertyChangedFor(nameof(ShowMetaVehicles))]
+    [NotifyPropertyChangedFor(nameof(ShowMetaHandling))]
+    [NotifyPropertyChangedFor(nameof(ShowMetaCarvariations))]
+    [NotifyPropertyChangedFor(nameof(MetaFormVisible))]
+    [NotifyPropertyChangedFor(nameof(MetaRawVisible))]
+    private VehicleFile? _selectedMetaFile;
+
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(MetaFormVisible))]
+    [NotifyPropertyChangedFor(nameof(MetaRawVisible))]
+    [NotifyPropertyChangedFor(nameof(IsMetaFormMode))]
+    [NotifyPropertyChangedFor(nameof(IsMetaRawMode))]
+    private bool _metaRawMode;
+
+    [ObservableProperty] private string _metaRawText = "";
+    [ObservableProperty] private string _metaTitle = "";
+    [ObservableProperty] private string _metaStatusNote = "";
+    [ObservableProperty] private VehicleMetaKind _metaKind = VehicleMetaKind.Other;
+
+    [ObservableProperty] private string _metaModelName = "";
+    [ObservableProperty] private string _metaGameName = "";
+    [ObservableProperty] private string _metaVehicleMake = "";
+    [ObservableProperty] private string _metaVehicleClass = "VC_SEDAN";
+    [ObservableProperty] private string _metaHandlingId = "";
+    [ObservableProperty] private string _metaFrequency = "100";
+    [ObservableProperty] private string _metaFlags = "";
+    [ObservableProperty] private string _metaMass = "";
+    [ObservableProperty] private string _metaInitialDriveForce = "";
+    [ObservableProperty] private string _metaBrakeForce = "";
+    [ObservableProperty] private string _metaTractionCurveMax = "";
+    [ObservableProperty] private string _metaTractionCurveMin = "";
+    [ObservableProperty] private string _metaTopSpeedKph = "";
+    [ObservableProperty] private string _metaDownforceModifier = "";
+    [ObservableProperty] private string _metaColor1 = "0";
+    [ObservableProperty] private string _metaColor2 = "0";
+    [ObservableProperty] private string _metaPearlescent = "0";
+    [ObservableProperty] private string _metaKits = "";
+
+    public bool ShowMetaEditor => SelectedMetaFile != null;
+    public bool ShowCarDetails => SelectedMetaFile == null;
+    public bool MetaSupportsForm => VehicleMetaFormService.SupportsForm(MetaKind);
+    public bool ShowMetaVehicles => MetaKind == VehicleMetaKind.Vehicles;
+    public bool ShowMetaHandling => MetaKind == VehicleMetaKind.Handling;
+    public bool ShowMetaCarvariations => MetaKind == VehicleMetaKind.Carvariations;
+    public bool IsMetaFormMode => !MetaRawMode && MetaSupportsForm;
+    public bool IsMetaRawMode => MetaRawMode || !MetaSupportsForm;
+    public bool MetaFormVisible => ShowMetaEditor && IsMetaFormMode;
+    public bool MetaRawVisible => ShowMetaEditor && IsMetaRawMode;
+
+    [ObservableProperty] private string _statCars = "—";
+    [ObservableProperty] private string _statSizeText = "—";
+    [ObservableProperty] private string _statPolygonsText = "—";
+    [ObservableProperty] private string _statUnoptimized = "—";
+    [ObservableProperty] private string _statOptimized = "—";
+
+    public bool HasDetail => ActiveCar != null || SelectedQueueItem != null;
+
+    public string DetailTitle => ActiveCar?.Name ?? SelectedQueueItem?.Name ?? "";
+
+    public string DetailSubtitle => ActiveCar != null
+        ? (HasFiles ? "Imported" : "Queued")
+        : SelectedQueueItem != null ? "Queued — waiting for Import" : "";
+
+    public string DetailStats
+    {
+        get
+        {
+            if (ActiveCar != null)
+            {
+                long bytes = 0;
+                int n = 0;
+                foreach (var f in EnumerateFileNodes(ActiveCar))
+                {
+                    n++;
+                    bytes += f.File!.Bytes;
+                }
+                var size = n == 0 ? "—" : HumanBytes(bytes);
+                var files = n == 1 ? "1 file" : $"{n} files";
+                return ActiveCar.IsUnoptimized ? $"{files} · {size} · needs optimize" : $"{files} · {size}";
+            }
+            return SelectedQueueItem != null ? "In queue" : "";
+        }
+    }
+
+    private static IEnumerable<VehicleTreeNode> EnumerateFileNodes(VehicleTreeNode root)
+    {
+        foreach (var child in root.Children)
+        {
+            if (child.File != null) yield return child;
+            else foreach (var nested in EnumerateFileNodes(child)) yield return nested;
+        }
+    }
+
+    public string DetailSource
+    {
+        get
+        {
+            if (SelectedQueueItem != null) return SelectedQueueItem.Path;
+            if (ActiveCar?.Name is { } model)
+            {
+                for (int i = 0; i < LastCarSources.Count && i < Queue.Count; i++)
+                    if (LastCarSources[i].Models.Any(m => m.Equals(model, StringComparison.OrdinalIgnoreCase)))
+                        return Queue[i].Path;
+                var q = Queue.FirstOrDefault(c =>
+                    c.Name.Contains(model, StringComparison.OrdinalIgnoreCase)
+                    || model.Contains(c.Name, StringComparison.OrdinalIgnoreCase));
+                if (q != null) return q.Path;
+            }
+            return "";
+        }
+    }
+
+    public bool ShowPendingQueue => !HasFiles && HasQueue;
+    public bool ShowLayersTree => HasFiles;
+    public bool ShowLayersEmpty => !HasFiles && !HasQueue;
+
+    partial void OnActiveCarChanged(VehicleTreeNode? value)
+    {
+        if (value != null) SelectedQueueItem = null;
+        RebuildMiddle();
+    }
+
+    partial void OnSelectedQueueItemChanged(CarInput? value)
+    {
+        if (value != null) ActiveCar = null;
+    }
 
     // ─── Search & sort (the middle files list) ───────────────────────────
 
@@ -182,29 +316,12 @@ public partial class VehiclesViewModel : ObservableObject
         _                => SortDescending ? "Z–A ↓"     : "A–Z ↑",
     };
 
-    /// <summary>Middle detail tree = the highlighted car's files (searched +
-    /// sorted), then the shared "Data &amp; config" branch (same filter) so the
-    /// metas/manifest stay reachable.</summary>
     private void RebuildMiddle()
     {
         MiddleNodes.Clear();
-        if (ActiveCar != null)
-            foreach (var leaf in OrderLeaves(ActiveCar.Children)) MiddleNodes.Add(leaf);
-        if (_dataConfig != null)
-        {
-            var kids = OrderLeaves(_dataConfig.Children).ToList();
-            if (kids.Count > 0)
-            {
-                var branch = new VehicleTreeNode
-                {
-                    Name = _dataConfig.Name, Icon = _dataConfig.Icon,
-                    Detail = kids.Count == 1 ? "1 file" : $"{kids.Count} files",
-                    IsExpanded = _dataConfig.IsExpanded,
-                };
-                foreach (var k in kids) branch.Children.Add(k);
-                MiddleNodes.Add(branch);
-            }
-        }
+        if (ActiveCar == null) return;
+        foreach (var leaf in OrderLeaves(EnumerateFileNodes(ActiveCar)))
+            MiddleNodes.Add(leaf);
     }
 
     /// <summary>Apply the live search filter and current sort to a set of file
@@ -230,9 +347,7 @@ public partial class VehiclesViewModel : ObservableObject
         };
     }
 
-    /// <summary>Middle files section shows when: single-car mode (always), or
-    /// car-pack mode with a car highlighted in the queue.</summary>
-    public bool ShowFilesSection => HasFiles && (!MergeIntoPack || ActiveCar != null);
+    public bool ShowFilesSection => HasFiles;
     public ObservableCollection<string> ReviewNotes { get; } = new();
     public bool HasReviewNotes => ReviewNotes.Count > 0;
 
@@ -279,21 +394,43 @@ public partial class VehiclesViewModel : ObservableObject
         }
         catch { /* directory vanished mid-scan — show what we gathered */ }
         BuildTree();
+        RefreshPackStats();
         OnPropertyChanged(nameof(HasFiles));
         OnPropertyChanged(nameof(ShowFilesSection));
     }
 
-    /// <summary>Group the flat <see cref="Files"/> into the navigator tree:
-    /// one 🚗 branch per car (its .yft/.ytd), then a 📁 "Data &amp; config"
-    /// branch for the metas / manifest / shared files.</summary>
+    public void SetPreviewPolygonCount(long? tris)
+    {
+        StatPolygonsText = tris is null or < 0 ? "—" : tris.Value.ToString("N0");
+    }
+
+    public void RefreshPackStats()
+    {
+        if (!HasFiles)
+        {
+            StatCars = "—";
+            StatSizeText = "—";
+            StatPolygonsText = "—";
+            StatUnoptimized = "—";
+            StatOptimized = "—";
+            return;
+        }
+        var cars = CarNodes.Count(n => n.IsCar);
+        StatCars = cars.ToString();
+        long bytes = Files.Sum(f => f.Bytes);
+        StatSizeText = HumanBytes(bytes);
+        int heavy = CarNodes.Count(n => n.IsCar && n.IsUnoptimized);
+        int light = Math.Max(0, cars - heavy);
+        StatUnoptimized = heavy.ToString();
+        StatOptimized = light.ToString();
+    }
+
     private void BuildTree()
     {
         CarNodes.Clear();
         _dataConfig = null;
         if (Files.Count == 0) { OnActiveCarChanged(ActiveCar); return; }
 
-        // Car names come from the conversion; fall back to inferring them from
-        // the .yft base names so the tree works even without that context.
         var cars = LastCarModels.Count > 0
             ? LastCarModels.Where(c => !string.IsNullOrWhiteSpace(c)).Distinct(StringComparer.OrdinalIgnoreCase).ToList()
             : Files.Where(f => f.Type == "YFT")
@@ -301,49 +438,115 @@ public partial class VehiclesViewModel : ObservableObject
                    .Distinct(StringComparer.OrdinalIgnoreCase).ToList();
 
         var assigned = new HashSet<VehicleFile>();
+        var built = new List<VehicleTreeNode>();
         foreach (var car in cars.OrderBy(c => c, StringComparer.OrdinalIgnoreCase))
         {
             var carFiles = Files.Where(f => !assigned.Contains(f) && BelongsToCar(f, car)).ToList();
             if (carFiles.Count == 0) continue;
-            var node = new VehicleTreeNode
-            {
-                Name = car, Icon = Wpf.Ui.Controls.SymbolRegular.VehicleCar24, IsCar = true,
-                Detail = carFiles.Count == 1 ? "1 file" : $"{carFiles.Count} files",
-                PreviewPath = MainYft(carFiles),
-                IsExpanded = false,   // queue shows car NAMES; expand to see files
-            };
-            foreach (var f in carFiles.OrderBy(f => f.Name, StringComparer.OrdinalIgnoreCase))
-            { var leaf = FileLeaf(f); leaf.Parent = node; node.Children.Add(leaf); assigned.Add(f); }
-            CarNodes.Add(node);   // LEFT queue = cars only
+            foreach (var f in carFiles) assigned.Add(f);
+            built.Add(BuildCarNode(car, carFiles, isCar: true));
         }
 
-        // Metas / manifest / shared files: NOT a queue entry — they surface in
-        // the middle detail alongside whichever car is highlighted.
         var rest = Files.Where(f => !assigned.Contains(f)).ToList();
         if (rest.Count > 0)
         {
-            _dataConfig = new VehicleTreeNode
+            if (built.Count == 1)
             {
-                Name = "Data & config", Icon = Wpf.Ui.Controls.SymbolRegular.Folder24,
-                Detail = rest.Count == 1 ? "1 file" : $"{rest.Count} files",
-                IsExpanded = false,
-            };
-            foreach (var f in rest.OrderBy(f => f.Name, StringComparer.OrdinalIgnoreCase))
-            { var leaf = FileLeaf(f); leaf.Parent = _dataConfig; _dataConfig.Children.Add(leaf); }
+                MergeFilesIntoCar(built[0], rest);
+            }
+            else
+            {
+                var shared = BuildCarNode("shared", rest, isCar: false);
+                built.Add(shared);
+                _dataConfig = shared;
+            }
         }
 
-        // Single-car mode auto-focuses the one car (its files fill the middle);
-        // pack mode keeps the previously-focused car if it still exists, else
-        // waits for the user to pick one from the queue.
-        if (!MergeIntoPack)
-            ActiveCar = CarNodes.FirstOrDefault();
-        else
-            ActiveCar = ActiveCar?.Name is { } prev
-                ? CarNodes.FirstOrDefault(n => n.Name.Equals(prev, StringComparison.OrdinalIgnoreCase))
-                : null;
-        // ActiveCar may be unchanged by ref (same node) yet its children changed
-        // after a re-convert — force the middle detail to rebuild.
+        foreach (var n in built) CarNodes.Add(n);
+
+        ActiveCar = ActiveCar?.Name is { } prev
+            ? CarNodes.FirstOrDefault(n => n.IsCar && n.Name.Equals(prev, StringComparison.OrdinalIgnoreCase))
+            : CarNodes.FirstOrDefault(n => n.IsCar);
         OnActiveCarChanged(ActiveCar);
+        OnPropertyChanged(nameof(ShowPendingQueue));
+        OnPropertyChanged(nameof(ShowLayersTree));
+        OnPropertyChanged(nameof(ShowLayersEmpty));
+        OnPropertyChanged(nameof(HasDetail));
+        OnPropertyChanged(nameof(DetailTitle));
+        OnPropertyChanged(nameof(DetailSubtitle));
+        OnPropertyChanged(nameof(DetailStats));
+        OnPropertyChanged(nameof(DetailSource));
+    }
+
+    private static VehicleTreeNode BuildCarNode(string name, List<VehicleFile> files, bool isCar)
+    {
+        var streamFiles = files.Where(IsStreamFile).OrderBy(f => f.Name, StringComparer.OrdinalIgnoreCase).ToList();
+        var dataFiles = files.Where(f => !IsStreamFile(f)).OrderBy(f => f.Name, StringComparer.OrdinalIgnoreCase).ToList();
+        var node = new VehicleTreeNode
+        {
+            Name = name,
+            Icon = isCar ? Wpf.Ui.Controls.SymbolRegular.VehicleCar24 : Wpf.Ui.Controls.SymbolRegular.Folder24,
+            IsCar = isCar,
+            Detail = files.Count == 1 ? "1 file" : $"{files.Count} files",
+            SizeText = HumanBytes(files.Sum(f => f.Bytes)),
+            PreviewPath = MainYft(files),
+            IsExpanded = true,
+        };
+        if (streamFiles.Count > 0)
+            node.Children.Add(MakeFolderNode("stream", streamFiles, node));
+        if (dataFiles.Count > 0)
+            node.Children.Add(MakeFolderNode("data", dataFiles, node));
+        return node;
+    }
+
+    private static void MergeFilesIntoCar(VehicleTreeNode car, List<VehicleFile> files)
+    {
+        var all = EnumerateFileNodes(car).Select(n => n.File!).Concat(files).ToList();
+        car.Children.Clear();
+        var streamFiles = all.Where(IsStreamFile).OrderBy(f => f.Name, StringComparer.OrdinalIgnoreCase).ToList();
+        var dataFiles = all.Where(f => !IsStreamFile(f)).OrderBy(f => f.Name, StringComparer.OrdinalIgnoreCase).ToList();
+        if (streamFiles.Count > 0)
+            car.Children.Add(MakeFolderNode("stream", streamFiles, car));
+        if (dataFiles.Count > 0)
+            car.Children.Add(MakeFolderNode("data", dataFiles, car));
+    }
+
+    private static VehicleTreeNode MakeFolderNode(string name, List<VehicleFile> files, VehicleTreeNode parent)
+    {
+        var folder = new VehicleTreeNode
+        {
+            Name = name,
+            Icon = Wpf.Ui.Controls.SymbolRegular.Folder24,
+            Detail = files.Count == 0 ? "" : files.Count == 1 ? "1 file" : $"{files.Count} files",
+            SizeText = HumanBytes(files.Sum(f => f.Bytes)),
+            IsExpanded = true,
+            Parent = parent,
+        };
+        foreach (var f in files)
+        {
+            var leaf = FileLeaf(f);
+            leaf.Parent = folder;
+            folder.Children.Add(leaf);
+        }
+        return folder;
+    }
+
+    private static bool IsStreamFile(VehicleFile f)
+    {
+        var folder = (f.Folder ?? "").Replace('\\', '/');
+        if (folder.StartsWith("stream", StringComparison.OrdinalIgnoreCase)
+            || folder.Contains("/stream/", StringComparison.OrdinalIgnoreCase)
+            || folder.EndsWith("/stream", StringComparison.OrdinalIgnoreCase))
+            return true;
+        if (folder.StartsWith("data", StringComparison.OrdinalIgnoreCase)
+            || folder.Contains("/data/", StringComparison.OrdinalIgnoreCase)
+            || folder.EndsWith("/data", StringComparison.OrdinalIgnoreCase))
+            return false;
+        if (folder.StartsWith("audio", StringComparison.OrdinalIgnoreCase)
+            || folder.Contains("/audio/", StringComparison.OrdinalIgnoreCase))
+            return true;
+        return f.CanOptimizeGeometry || f.CanOptimizeTexture
+            || f.Type is "YFT" or "YTD" or "YDR" or "YDD" or "AWC" or "REL" or "DAT" or "NAMETABLE";
     }
 
     private static string StripHi(string b)
@@ -362,9 +565,9 @@ public partial class VehiclesViewModel : ObservableObject
     private static string? MainYft(List<VehicleFile> carFiles)
     {
         var yfts = carFiles.Where(f => f.Type == "YFT").ToList();
-        var main = yfts.FirstOrDefault(f => !Path.GetFileNameWithoutExtension(f.Name)
-                        .EndsWith("_hi", StringComparison.OrdinalIgnoreCase)) ?? yfts.FirstOrDefault();
-        return main?.FullPath;
+        var hi = yfts.FirstOrDefault(f => Path.GetFileNameWithoutExtension(f.Name)
+            .EndsWith("_hi", StringComparison.OrdinalIgnoreCase));
+        return (hi ?? yfts.FirstOrDefault())?.FullPath;
     }
 
     /// <summary>Rename a single file in place (keeps it in its folder). Returns
@@ -436,6 +639,7 @@ public partial class VehiclesViewModel : ObservableObject
     {
         Name = f.Name,
         Detail = $"{f.Kind} · {f.SizeText}",
+        SizeText = f.SizeText,
         Icon = VehicleTreeNode.IconFor(f),
         File = f,
         PreviewPath = f.Type == "YFT" ? f.FullPath : null,
@@ -467,14 +671,18 @@ public partial class VehiclesViewModel : ObservableObject
     public ObservableCollection<CarInput> Queue { get; } = new();
 
     public bool HasQueue => Queue.Count > 0;
-    public string QueueCountText => Queue.Count == 1 ? "1 car in this pack" : $"{Queue.Count} cars in this pack";
+    public string QueueCountText => Queue.Count == 1 ? "1 in queue" : $"{Queue.Count} in queue";
 
     /// <summary>Empty-file-panel heading — context-aware so a queued-but-not-yet-
     /// converted pack doesn't wrongly say "no car added".</summary>
-    public string FilesEmptyTitle => HasInput ? "Ready to convert" : "No car added yet";
-    public string FilesEmptyHint => HasInput
-        ? "Your car is added. Click Convert (step ②) to build the resource — its files then appear here, ready to preview and shrink."
-        : "Add a car on the left — drag it in, Browse, or paste a link.\nIts files show up here automatically, ready to right-click and shrink.";
+    public string FilesEmptyTitle => HasFiles
+        ? "Select a layer"
+        : HasInput ? "Ready to import" : "No cars in queue";
+    public string FilesEmptyHint => HasFiles
+        ? "Pick a car on the left to preview it here."
+        : HasInput
+            ? "Cars are queued. Click Import to build the pack."
+            : "Add cars to the queue, then Import.";
 
     [ObservableProperty] private string _outputPath = "";
 
@@ -510,12 +718,19 @@ public partial class VehiclesViewModel : ObservableObject
     /// <summary>FiveM resource name; empty = auto (dlc device / folder name).</summary>
     [ObservableProperty] private string _packName = "";
 
-    /// <summary>false (default) = single car: multiple mods in the input keep
-    /// only the largest. true = car pack: merge everything found.</summary>
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(InputDisplay))]
     [NotifyPropertyChangedFor(nameof(ShowFilesSection))]
-    private bool _mergeIntoPack;
+    [NotifyPropertyChangedFor(nameof(AddCarsButtonText))]
+    [NotifyPropertyChangedFor(nameof(ImportButtonText))]
+    [NotifyPropertyChangedFor(nameof(MultiCarHint))]
+    private bool _mergeIntoPack = true;
+
+    public string AddCarsButtonText => MergeIntoPack ? "Add to queue" : "Add car";
+    public string ImportButtonText => MergeIntoPack ? "Import all" : "Import";
+    public string MultiCarHint => MergeIntoPack
+        ? "On — queue cars, then Import all"
+        : "Off — one car only";
 
     /// <summary>gta5-mods.com page (or direct archive) link to import.</summary>
     [ObservableProperty] private string _modUrl = "";
@@ -554,7 +769,7 @@ public partial class VehiclesViewModel : ObservableObject
     private bool _isProcessing;
 
     [ObservableProperty]
-    private string _summary = "Drop an SP car mod (or paste a gta5-mods link) to begin.";
+    private string _summary = "Add cars to the queue, then Import.";
 
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(HasOutput))]
@@ -588,10 +803,178 @@ public partial class VehiclesViewModel : ObservableObject
         Files.Clear();
         CarNodes.Clear();
         _dataConfig = null;
-        ActiveCar = null;   // clears MiddleNodes via OnActiveCarChanged
+        ActiveCar = null;
+        ClearMetaEditor();
+        RefreshPackStats();
         OnPropertyChanged(nameof(HasFiles));
         OnPropertyChanged(nameof(ShowFilesSection));
         OnPropertyChanged(nameof(HasCarPack));
+        OnPropertyChanged(nameof(ShowPendingQueue));
+        OnPropertyChanged(nameof(ShowLayersTree));
+        OnPropertyChanged(nameof(ShowLayersEmpty));
+    }
+
+    public void ClearMetaEditor()
+    {
+        SelectedMetaFile = null;
+        MetaRawText = "";
+        MetaTitle = "";
+        MetaStatusNote = "";
+        MetaKind = VehicleMetaKind.Other;
+        MetaRawMode = false;
+    }
+
+    public void OpenMetaEditor(VehicleFile file)
+    {
+        if (file == null || !file.IsMeta) { ClearMetaEditor(); return; }
+        SelectedMetaFile = file;
+        MetaTitle = file.Name;
+        MetaKind = VehicleMetaFormService.DetectKind(file.Name);
+        MetaRawMode = !VehicleMetaFormService.SupportsForm(MetaKind);
+        MetaStatusNote = "";
+        ReloadMetaFromDisk();
+    }
+
+    public void ReloadMetaFromDisk()
+    {
+        if (SelectedMetaFile == null) return;
+        try
+        {
+            MetaRawText = File.ReadAllText(SelectedMetaFile.FullPath);
+            ApplyRawToFormFields();
+            MetaStatusNote = "";
+        }
+        catch (Exception ex)
+        {
+            MetaStatusNote = "Couldn't open: " + ex.Message;
+        }
+    }
+
+    public void ImportMetaText(string xml, string? sourceName = null)
+    {
+        if (SelectedMetaFile == null) return;
+        MetaRawText = xml ?? "";
+        ApplyRawToFormFields();
+        MetaStatusNote = string.IsNullOrWhiteSpace(sourceName)
+            ? "Imported — review, then Save meta."
+            : $"Imported from {sourceName} — review, then Save meta.";
+    }
+
+    public void SetMetaEditorMode(bool raw)
+    {
+        if (!MetaSupportsForm) { MetaRawMode = true; return; }
+        if (raw == MetaRawMode) return;
+        if (raw)
+        {
+            MetaRawText = VehicleMetaFormService.ApplyFields(MetaRawText, MetaKind, CaptureFormFields());
+            MetaRawMode = true;
+        }
+        else
+        {
+            if (!string.IsNullOrWhiteSpace(MetaRawText))
+                ApplyRawToFormFields();
+            MetaRawMode = false;
+        }
+    }
+
+    public string? SaveMetaEditor()
+    {
+        if (SelectedMetaFile == null) return "No meta selected.";
+        string xml;
+        if (IsMetaFormMode)
+            xml = VehicleMetaFormService.ApplyFields(MetaRawText, MetaKind, CaptureFormFields());
+        else
+            xml = MetaRawText ?? "";
+
+        var err = VehicleMetaFormService.TryValidateXml(xml);
+        if (err != null) return "Not valid XML — not saved: " + err;
+        try
+        {
+            File.WriteAllText(SelectedMetaFile.FullPath, xml);
+            MetaRawText = xml;
+            ApplyRawToFormFields();
+            MetaStatusNote = "Saved into the selected layer file.";
+            PopulateFiles();
+            return null;
+        }
+        catch (Exception ex) { return "Save failed: " + ex.Message; }
+    }
+
+    private void ApplyRawToFormFields()
+    {
+        var f = VehicleMetaFormService.LoadFields(MetaRawText, MetaKind);
+        MetaModelName = f.ModelName;
+        MetaGameName = f.GameName;
+        MetaVehicleMake = f.VehicleMake;
+        MetaVehicleClass = string.IsNullOrWhiteSpace(f.VehicleClass) ? "VC_SEDAN" : f.VehicleClass;
+        MetaHandlingId = f.HandlingId;
+        MetaFrequency = f.Frequency;
+        MetaFlags = f.Flags;
+        MetaMass = f.Mass;
+        MetaInitialDriveForce = f.InitialDriveForce;
+        MetaBrakeForce = f.BrakeForce;
+        MetaTractionCurveMax = f.TractionCurveMax;
+        MetaTractionCurveMin = f.TractionCurveMin;
+        MetaTopSpeedKph = f.TopSpeedKph;
+        MetaDownforceModifier = f.DownforceModifier;
+        MetaColor1 = f.Color1;
+        MetaColor2 = f.Color2;
+        MetaPearlescent = f.Pearlescent;
+        MetaKits = f.Kits;
+    }
+
+    private VehicleMetaFormFields CaptureFormFields() => new()
+    {
+        ModelName = MetaModelName,
+        GameName = MetaGameName,
+        VehicleMake = MetaVehicleMake,
+        VehicleClass = MetaVehicleClass,
+        HandlingId = MetaHandlingId,
+        Frequency = MetaFrequency,
+        Flags = MetaFlags,
+        Mass = MetaMass,
+        InitialDriveForce = MetaInitialDriveForce,
+        BrakeForce = MetaBrakeForce,
+        TractionCurveMax = MetaTractionCurveMax,
+        TractionCurveMin = MetaTractionCurveMin,
+        TopSpeedKph = MetaTopSpeedKph,
+        DownforceModifier = MetaDownforceModifier,
+        Color1 = MetaColor1,
+        Color2 = MetaColor2,
+        Pearlescent = MetaPearlescent,
+        Kits = MetaKits,
+    };
+
+    public void LoadResourceFolder(string path)
+    {
+        if (string.IsNullOrWhiteSpace(path) || !Directory.Exists(path)) return;
+        LastOutputPath = path;
+        OutputPath = path;
+        _outputUserSet = true;
+        if (string.IsNullOrWhiteSpace(PackName))
+            PackName = new DirectoryInfo(path.TrimEnd('\\', '/')).Name;
+        LastCarModels.Clear();
+        LastCarSources.Clear();
+        LastModelLabels.Clear();
+        ClearMetaEditor();
+        PopulateFiles();
+        Summary = $"Loaded resource folder — {Files.Count} file(s).";
+        OnPropertyChanged(nameof(HasOutput));
+        OnPropertyChanged(nameof(HasCarPack));
+        RaiseState();
+    }
+
+    public string? CreateTemplate(string parentFolder, string resourceName)
+    {
+        try
+        {
+            var dir = VehiclePackTemplate.Create(parentFolder, resourceName);
+            PackName = new DirectoryInfo(dir).Name;
+            LoadResourceFolder(dir);
+            Summary = $"Created empty pack template at {dir}.";
+            return null;
+        }
+        catch (Exception ex) { return ex.Message; }
     }
 
     /// <summary>Replace the whole input set (single-car add — one car in, the
@@ -620,8 +1003,9 @@ public partial class VehiclesViewModel : ObservableObject
         }
         InputFolder = InputPaths.FirstOrDefault() ?? "";
         InvalidateConversion();
+        SelectedQueueItem = Queue.LastOrDefault();
         if (HasInput) RecomputeDefaultOutput();
-        else Summary = "Add a car — drop a dlc.rpf (or its folder), Browse, or paste a link.";
+        else Summary = "Add cars to the queue, then Import.";
         RaiseState();
     }
 
@@ -650,28 +1034,20 @@ public partial class VehiclesViewModel : ObservableObject
         InputPaths.RemoveAll(x => string.Equals(x, item.Path, StringComparison.OrdinalIgnoreCase));
         InputFolder = InputPaths.FirstOrDefault() ?? "";
         InvalidateConversion();
-        if (HasInput) RecomputeDefaultOutput();
+        if (HasInput)
+        {
+            RecomputeDefaultOutput();
+            SelectedQueueItem = Queue.LastOrDefault();
+            Summary = "Queue updated — Import again to rebuild the pack.";
+        }
         else
         {
-            // Queue emptied — return to a fully clean slate.
             _outputUserSet = false;
             OutputPath = "";
             LastOutputPath = "";
-            Summary = "Add a car to begin.";
+            Summary = "Add cars to the queue, then Import.";
+            SelectedQueueItem = null;
         }
-        RaiseState();
-    }
-
-    /// <summary>Trim a multi-car queue down to one when the user switches to
-    /// Single-car mode, so "Single car" never silently converts a whole pack.</summary>
-    partial void OnMergeIntoPackChanged(bool value)
-    {
-        if (value || InputPaths.Count <= 1) return;
-        while (Queue.Count > 1) Queue.RemoveAt(Queue.Count - 1);
-        if (InputPaths.Count > 1) InputPaths.RemoveRange(1, InputPaths.Count - 1);
-        InputFolder = InputPaths.FirstOrDefault() ?? "";
-        InvalidateConversion();
-        if (HasInput) RecomputeDefaultOutput();
         RaiseState();
     }
 
@@ -702,8 +1078,8 @@ public partial class VehiclesViewModel : ObservableObject
 
     private void UpdateReadySummary()
         => Summary = InputPaths.Count > 1
-            ? $"Ready — merges {InputPaths.Count} cars into ONE FiveM pack"
-            : $"Ready — converts {NameFor(InputFolder)} into a FiveM add-on vehicle resource";
+            ? $"{InputPaths.Count} cars queued — Import to build the pack"
+            : $"1 car queued — Import to build the resource";
 
     private static bool IsUnderTemp(string path)
     {
@@ -725,7 +1101,8 @@ public partial class VehiclesViewModel : ObservableObject
         LastOutputPath = "";
         Rows.Clear();
         InvalidateConversion();
-        Summary = "Drop an SP car mod (or paste a gta5-mods link) to begin.";
+        Summary = "Add cars to the queue, then Import.";
+        SelectedQueueItem = null;
         RaiseState();
     }
 
@@ -739,6 +1116,14 @@ public partial class VehiclesViewModel : ObservableObject
         OnPropertyChanged(nameof(InputDisplay));
         OnPropertyChanged(nameof(FilesEmptyTitle));
         OnPropertyChanged(nameof(FilesEmptyHint));
+        OnPropertyChanged(nameof(ShowPendingQueue));
+        OnPropertyChanged(nameof(ShowLayersTree));
+        OnPropertyChanged(nameof(ShowLayersEmpty));
+        OnPropertyChanged(nameof(HasDetail));
+        OnPropertyChanged(nameof(DetailTitle));
+        OnPropertyChanged(nameof(DetailSubtitle));
+        OnPropertyChanged(nameof(DetailStats));
+        OnPropertyChanged(nameof(DetailSource));
     }
 
     // ─── Import from link ────────────────────────────────────────────────
@@ -768,20 +1153,10 @@ public partial class VehiclesViewModel : ObservableObject
             return false;
         }
 
-        // Car-pack mode: append the downloaded car to the queue and re-convert
-        // the whole pack so its files show immediately. (Output already defaults
-        // to Downloads — RecomputeDefaultOutput redirects temp inputs.)
-        if (MergeIntoPack)
-        {
-            AddInputs(new[] { res.ExtractedDir });
-            await ConvertAsync();
-            return HasCarPack;
-        }
-
-        SetInputs(new[] { res.ExtractedDir });
+        AddInputs(new[] { res.ExtractedDir });
         if (string.IsNullOrWhiteSpace(PackName) && res.ModName != null) PackName = res.ModName;
-        await ConvertAsync();
-        return HasCarPack;
+        Summary = "Added to queue — Import when ready.";
+        return false;
     }
 
     // ─── Convert ─────────────────────────────────────────────────────────
@@ -812,7 +1187,8 @@ public partial class VehiclesViewModel : ObservableObject
         OnPropertyChanged(nameof(HasFiles));
         ReviewNotes.Clear();
         OnPropertyChanged(nameof(HasReviewNotes));
-        Summary = "Converting SP car to FiveM…";
+        ClearMetaEditor();
+        Summary = "Importing cars to FiveM…";
         RaiseState();
 
         try

@@ -1,10 +1,10 @@
 // Copyright (c) 2026 FiveOS. All rights reserved.
 // https://github.com/w3bportal/FiveOS
 
-using System.ComponentModel;
 using System.IO;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Controls.Primitives;
 using System.Windows.Input;
 using CodeWalker.GameFiles;
 using FiveOS.Services;
@@ -14,13 +14,6 @@ using Microsoft.Win32;
 
 namespace FiveOS.Views;
 
-/// <summary>
-/// Code-behind for the "Vehicles" tab: SP car mod in (file, folder, or
-/// gta5-mods link) → FiveM resource out. The middle is a detail list of the
-/// produced files; right-click a model to decimate it or a texture to
-/// compress it (the same engines as the Optimize tab), or a meta to edit its
-/// XML. No 3D viewer — this is a conversion + optimization workbench.
-/// </summary>
 public partial class VehiclesView : UserControl
 {
     public VehiclesView()
@@ -32,24 +25,57 @@ public partial class VehiclesView : UserControl
 
     private bool _busy;
 
-    // ─── File tree navigation ────────────────────────────────────────────
+    private void OnLoaded(object sender, RoutedEventArgs e)
+    {
+        LayersCol.Width = new GridLength(UserSettings.LoadVehiclesLayersWidth());
+        PaintCol.Width = new GridLength(UserSettings.LoadVehiclesPaintWidth());
+        DetailsRow.Height = new GridLength(UserSettings.LoadVehiclesDetailsHeight());
+        SyncMetaModeButtons();
+    }
 
-    /// <summary>Select a car (or a file) — focus that car in the middle detail
-    /// panel and preview it.</summary>
+    private void OnUnloaded(object sender, RoutedEventArgs e) => PersistLayout();
+
+    private void PersistLayout()
+    {
+        UserSettings.SaveVehiclesLayersWidth(LayersCol.Width.Value);
+        UserSettings.SaveVehiclesPaintWidth(PaintCol.Width.Value);
+        UserSettings.SaveVehiclesDetailsHeight(DetailsRow.Height.Value);
+    }
+
+    private void OnLayersSplitterDragCompleted(object sender, DragCompletedEventArgs e)
+        => UserSettings.SaveVehiclesLayersWidth(LayersCol.Width.Value);
+
+    private void OnPaintSplitterDragCompleted(object sender, DragCompletedEventArgs e)
+        => UserSettings.SaveVehiclesPaintWidth(PaintCol.Width.Value);
+
+    private void OnDetailsSplitterDragCompleted(object sender, DragCompletedEventArgs e)
+        => UserSettings.SaveVehiclesDetailsHeight(DetailsRow.Height.Value);
+
     private async void OnTreeSelected(object sender, RoutedPropertyChangedEventArgs<object> e)
     {
         if (Vm == null) return;
         if (e.NewValue is not VehicleTreeNode node)
         {
-            // Deselected in the queue (clicked away) → drop the highlight and,
-            // in pack mode, close the detail back to the "pick a car" state.
-            if (ReferenceEquals(sender, FilesTree) && Vm.MergeIntoPack) Vm.ActiveCar = null;
+            if (ReferenceEquals(sender, FilesTree))
+            {
+                Vm.ActiveCar = null;
+                Vm.ClearMetaEditor();
+                SyncMetaModeButtons();
+            }
             return;
         }
-        // Only a car (or one of its files) drives the middle detail. Selecting
-        // the shared "Data & config" branch or its metas must NOT hijack it.
-        var carOwner = node.IsCar ? node : node.Parent?.IsCar == true ? node.Parent : null;
+        var carOwner = FindCarOwner(node);
         if (carOwner != null) Vm.ActiveCar = carOwner;
+
+        if (node.File is { IsMeta: true } meta)
+        {
+            Vm.OpenMetaEditor(meta);
+            SyncMetaModeButtons();
+            return;
+        }
+
+        Vm.ClearMetaEditor();
+        SyncMetaModeButtons();
         if (node.PreviewPath == null) return;
         await InitCarPreviewAsync();
         if (_carViewerReady) await LoadModelAsync(node.PreviewPath);
@@ -62,15 +88,24 @@ public partial class VehiclesView : UserControl
     private void OnQueueMouseDown(object sender, MouseButtonEventArgs e)
     {
         var src = e.OriginalSource as DependencyObject;
-        if (FindAncestor<System.Windows.Controls.Primitives.ButtonBase>(src) != null) return; // chevron / ×
+        if (FindAncestor<System.Windows.Controls.Primitives.ButtonBase>(src) != null) return;
+        if (ReferenceEquals(sender, QueueList))
+        {
+            if (FindAncestor<ListBoxItem>(src) == null)
+            {
+                QueueList.SelectedItem = null;
+                if (Vm != null) Vm.SelectedQueueItem = null;
+            }
+            return;
+        }
         var tvi = FindAncestor<TreeViewItem>(src);
         if (tvi == null)
         {
-            DeselectTree(FilesTree);           // clicked empty space in the queue box
+            DeselectTree(FilesTree);
         }
         else if (tvi.IsSelected)
         {
-            tvi.IsSelected = false;            // clicked the highlighted car again → toggle off
+            tvi.IsSelected = false;
             e.Handled = true;
         }
     }
@@ -98,6 +133,16 @@ public partial class VehiclesView : UserControl
         return d as T;
     }
 
+    private static VehicleTreeNode? FindCarOwner(VehicleTreeNode? node)
+    {
+        while (node != null)
+        {
+            if (node.IsCar) return node;
+            node = node.Parent;
+        }
+        return null;
+    }
+
     // ─── Search & sort toolbar ───────────────────────────────────────────
 
     private void OnSortSize(object sender, RoutedEventArgs e) { if (Vm != null) Vm.SortMode = VehicleSort.Size; }
@@ -105,43 +150,134 @@ public partial class VehiclesView : UserControl
     private void OnSortDate(object sender, RoutedEventArgs e) { if (Vm != null) Vm.SortMode = VehicleSort.Date; }
     private void OnToggleSortDir(object sender, RoutedEventArgs e) { if (Vm != null) Vm.SortDescending = !Vm.SortDescending; }
 
-    /// <summary>Double-click a meta leaf to edit it.</summary>
     private void OnTreeDoubleClick(object sender, RoutedEventArgs e)
     {
-        if (sender is TreeViewItem { DataContext: VehicleTreeNode { File: { IsMeta: true } vf } })
-            EditXml(vf);
+        if (sender is TreeViewItem { DataContext: VehicleTreeNode { File: { IsMeta: true } vf } } && Vm != null)
+        {
+            Vm.OpenMetaEditor(vf);
+            SyncMetaModeButtons();
+        }
     }
 
-    // ─── Input pickers ───────────────────────────────────────────────────
-
     private async void OnBrowseInput(object sender, RoutedEventArgs e)
+        => await RunBrowseInputFromMenuAsync();
+
+    public async Task RunBrowseInputFromMenuAsync()
     {
         if (Vm == null) return;
         var dlg = new OpenFileDialog
         {
-            Title = "Pick SP car dlc.rpf file(s) — multi-select for a pack",
+            Title = Vm.MergeIntoPack ? "Add cars to the queue" : "Add a car",
             Filter = "RAGE package (*.rpf)|*.rpf|All files (*.*)|*.*",
-            Multiselect = true,
+            Multiselect = Vm.MergeIntoPack,
             InitialDirectory = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
         };
         if (dlg.ShowDialog() == true)
             await AddOrSetAsync(dlg.FileNames);
     }
 
-    /// <summary>Add cars. In car-pack mode they APPEND to the queue and wait for
-    /// an explicit Convert; in single-car mode adding REPLACES and converts
-    /// immediately (the beginner's "add → see files" flow).</summary>
-    private async Task AddOrSetAsync(IReadOnlyList<string> paths)
+    private Task AddOrSetAsync(IReadOnlyList<string> paths)
     {
-        // Ignore drops/browses while a convert is in flight — changing the
-        // inputs mid-convert desyncs the file list from the queue.
-        if (Vm == null || paths.Count == 0 || Vm.IsProcessing) return;
-        // Pack mode APPENDS to the queue, single mode REPLACES — then both
-        // convert right away so the files/tree show immediately (no hunting for
-        // the Convert button). Adding another pack car re-converts the whole pack.
+        if (Vm == null || paths.Count == 0 || Vm.IsProcessing) return Task.CompletedTask;
         if (Vm.MergeIntoPack) Vm.AddInputs(paths);
         else Vm.SetInputs(paths);
-        await AutoConvertAsync();
+        return Task.CompletedTask;
+    }
+
+    private void OnLoadFolder(object sender, RoutedEventArgs e)
+    {
+        if (Vm == null || Vm.IsProcessing) return;
+        var dlg = new OpenFolderDialog
+        {
+            Title = "Open an existing FiveM car resource folder",
+            InitialDirectory = GetDir(Vm.OutputPath)
+                ?? Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
+        };
+        if (dlg.ShowDialog() == true)
+            Vm.LoadResourceFolder(dlg.FolderName);
+    }
+
+    private void OnNewTemplate(object sender, RoutedEventArgs e)
+    {
+        if (Vm == null || Vm.IsProcessing) return;
+        var name = string.IsNullOrWhiteSpace(Vm.PackName) ? "car_pack" : Vm.PackName.Trim();
+        var rename = new RenameDialog("New template", "Pack / resource name:", name, isFile: false,
+            hint: "Creates stream/, data/ (meta stubs), audio/sfx/, fxmanifest.lua, and vehicle_names.lua.")
+        { Owner = Window.GetWindow(this) };
+        if (rename.ShowDialog() != true) return;
+
+        var parent = GetDir(Vm.OutputPath)
+            ?? Environment.GetFolderPath(Environment.SpecialFolder.UserProfile) + "\\Downloads";
+        var folderDlg = new OpenFolderDialog
+        {
+            Title = "Where should the empty pack be created?",
+            InitialDirectory = Directory.Exists(parent) ? parent
+                : Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
+        };
+        if (folderDlg.ShowDialog() != true) return;
+
+        var err = Vm.CreateTemplate(folderDlg.FolderName, rename.ResultName);
+        if (err != null)
+            AppDialog.Show(err, "New template", MessageBoxButton.OK, MessageBoxImage.Warning, Window.GetWindow(this));
+    }
+
+    private void OnMetaModeForm(object sender, RoutedEventArgs e)
+    {
+        Vm?.SetMetaEditorMode(false);
+        SyncMetaModeButtons();
+    }
+
+    private void OnMetaModeRaw(object sender, RoutedEventArgs e)
+    {
+        Vm?.SetMetaEditorMode(true);
+        SyncMetaModeButtons();
+    }
+
+    private void SyncMetaModeButtons()
+    {
+        if (Vm == null || MetaModeFormBtn == null || MetaModeRawBtn == null) return;
+        var form = Vm.IsMetaFormMode;
+        MetaModeFormBtn.Appearance = form
+            ? Wpf.Ui.Controls.ControlAppearance.Primary
+            : Wpf.Ui.Controls.ControlAppearance.Secondary;
+        MetaModeRawBtn.Appearance = form
+            ? Wpf.Ui.Controls.ControlAppearance.Secondary
+            : Wpf.Ui.Controls.ControlAppearance.Primary;
+    }
+
+    private void OnMetaImport(object sender, RoutedEventArgs e)
+    {
+        if (Vm?.SelectedMetaFile == null) return;
+        var dlg = new OpenFileDialog
+        {
+            Title = "Import meta into form",
+            Filter = "Meta / XML (*.meta;*.xml)|*.meta;*.xml|All files (*.*)|*.*",
+            Multiselect = false,
+        };
+        if (dlg.ShowDialog() != true) return;
+        try
+        {
+            Vm.ImportMetaText(File.ReadAllText(dlg.FileName), Path.GetFileName(dlg.FileName));
+            SyncMetaModeButtons();
+        }
+        catch (Exception ex)
+        {
+            Vm.MetaStatusNote = "Import failed: " + ex.Message;
+        }
+    }
+
+    private void OnMetaReset(object sender, RoutedEventArgs e)
+    {
+        Vm?.ReloadMetaFromDisk();
+        SyncMetaModeButtons();
+    }
+
+    private void OnMetaSave(object sender, RoutedEventArgs e)
+    {
+        if (Vm == null) return;
+        var err = Vm.SaveMetaEditor();
+        if (err != null) Vm.MetaStatusNote = err;
+        SyncMetaModeButtons();
     }
 
     private void OnRemoveCar(object sender, RoutedEventArgs e)
@@ -149,30 +285,13 @@ public partial class VehiclesView : UserControl
         if (sender is FrameworkElement { Tag: CarInput ci }) Vm?.RemoveInput(ci);
     }
 
-    /// <summary>× on a car branch in the tree — drop that car from the pack and
-    /// rebuild the resource without it.</summary>
-    private async void OnRemoveCarNode(object sender, RoutedEventArgs e)
+    private void OnRemoveCarNode(object sender, RoutedEventArgs e)
     {
         if (sender is not FrameworkElement { DataContext: VehicleTreeNode { IsCar: true } node } || Vm == null) return;
         if (Vm.IsProcessing) return;
         if (!Vm.RemoveCarByModel(node.Name)) return;
         _loadedModelPath = null;
         _pendingModelPath = null;
-        if (Vm.HasInput) await Vm.ConvertAsync();   // rebuild the pack minus this car
-    }
-
-    private void OnModeSingle(object sender, RoutedEventArgs e) { if (Vm != null) Vm.MergeIntoPack = false; }
-    private void OnModePack(object sender, RoutedEventArgs e) { if (Vm != null) Vm.MergeIntoPack = true; }
-
-    private void OnModeConvert(object sender, RoutedEventArgs e) { if (Vm != null) Vm.IsCarcolsMode = false; }
-    private void OnModeCarcols(object sender, RoutedEventArgs e) { if (Vm != null) Vm.IsCarcolsMode = true; }
-
-    /// <summary>Convert as soon as a single car is added so its files appear
-    /// without a separate button click.</summary>
-    private async Task AutoConvertAsync()
-    {
-        if (Vm != null && Vm.HasInput && !Vm.IsProcessing)
-            await Vm.ConvertAsync();
     }
 
     private void OnBrowseOutput(object sender, RoutedEventArgs e)
@@ -197,6 +316,11 @@ public partial class VehiclesView : UserControl
     {
         if (Vm == null) return;
         await Vm.ConvertAsync();
+        var preview = Vm.ActiveCar?.PreviewPath;
+        if (string.IsNullOrWhiteSpace(preview)) return;
+        await InitCarPreviewAsync();
+        if (_carViewerReady) await LoadModelAsync(preview);
+        else _pendingModelPath = preview;
     }
 
     private void OnCancelConvert(object sender, RoutedEventArgs e) => Vm?.RequestCancel();
@@ -232,16 +356,13 @@ public partial class VehiclesView : UserControl
 
     private void OnDragOver(object sender, DragEventArgs e)
     {
-        // Dropping a car only means something in the convert workspace — the
-        // hosted Carcols pane has no drop target.
-        e.Effects = Vm?.IsCarcolsMode != true && GetDroppedInputs(e).Count > 0
+        e.Effects = GetDroppedInputs(e).Count > 0
             ? DragDropEffects.Copy : DragDropEffects.None;
         e.Handled = true;
     }
 
     private void OnDragEnter(object sender, DragEventArgs e)
     {
-        if (Vm?.IsCarcolsMode == true) return;
         if (GetDroppedInputs(e).Count > 0) DropOverlay.Visibility = Visibility.Visible;
     }
 
@@ -250,7 +371,6 @@ public partial class VehiclesView : UserControl
     private async void OnDrop(object sender, DragEventArgs e)
     {
         DropOverlay.Visibility = Visibility.Collapsed;
-        if (Vm?.IsCarcolsMode == true) return;
         var inputs = GetDroppedInputs(e);
         if (inputs.Count == 0 || Vm == null) return;
         await AddOrSetAsync(inputs);
@@ -286,7 +406,9 @@ public partial class VehiclesView : UserControl
 
     private void OnEditXml(object sender, RoutedEventArgs e)
     {
-        if (NodeFile(sender) is { } vf) EditXml(vf);
+        if (NodeFile(sender) is not { } vf || Vm == null) return;
+        Vm.OpenMetaEditor(vf);
+        SyncMetaModeButtons();
     }
 
     private void OnRename(object sender, RoutedEventArgs e)
@@ -316,18 +438,6 @@ public partial class VehiclesView : UserControl
             Vm.Summary = err == null
                 ? $"Renamed car to {dlg.ResultName}. Restart the resource on your server to apply."
                 : "Rename failed: " + err;
-        }
-    }
-
-    private void EditXml(VehicleFile vf)
-    {
-        if (!File.Exists(vf.FullPath)) return;
-        var win = new XmlEditorWindow(vf.FullPath) { Owner = Window.GetWindow(this) };
-        win.ShowDialog();
-        if (win.Saved && Vm != null)
-        {
-            Vm.PopulateFiles();
-            Vm.Summary = $"Saved {vf.Name}. Restart the resource on your server to apply.";
         }
     }
 
@@ -531,6 +641,35 @@ public partial class VehiclesView : UserControl
         }
     }
 
+    /// <summary>Free the car-preview Edge process and delete its session
+    /// viewer copy. Call from MainWindow.OnClosed.</summary>
+    public void Teardown()
+    {
+        try
+        {
+            if (CarPreview?.CoreWebView2 != null)
+                CarPreview.CoreWebView2.WebMessageReceived -= OnCarViewerMessage;
+        }
+        catch { /* */ }
+
+        try { CarPreview?.Dispose(); } catch { /* already gone */ }
+        _carWebReady = false;
+        _carViewerReady = false;
+
+        if (!string.IsNullOrEmpty(_carSessionDir))
+        {
+            try
+            {
+                if (Directory.Exists(_carSessionDir))
+                    Directory.Delete(_carSessionDir, recursive: true);
+            }
+            catch { /* CacheService sweeps leftovers */ }
+            _carSessionDir = null;
+        }
+
+        try { GameTextureCache.Reset(null); } catch { /* optional */ }
+    }
+
     private void OnCarViewerMessage(object? sender, CoreWebView2WebMessageReceivedEventArgs e)
     {
         string json;
@@ -590,6 +729,7 @@ public partial class VehiclesView : UserControl
                          && r.TotalParts > 0 && r.TexturedParts < r.TotalParts / 2
             ? " · set your GTA folder for shared textures →" : "";
         CarMeshInfoText.Text = $"{name} · {r.Tris:N0} tris — drag to orbit, wheel to zoom{texNote}";
+        Vm?.SetPreviewPolygonCount(r.Tris);
     }
 
     private void SetPreviewLoader(bool on, string text = "")
@@ -611,12 +751,14 @@ public partial class VehiclesView : UserControl
 
     private void PopulateParts(List<VehicleMeshBuilder.GroupInfo> groups)
     {
-        // Doors only swing when the model separates them — many conversions
-        // weld everything to the chassis bone.
-        DoorsToggle.IsEnabled = groups.Any(g => g.Kind is "door_l" or "door_r" or "bonnet" or "boot");
-        DoorsToggle.ToolTip = DoorsToggle.IsEnabled
-            ? "Swing the doors / bonnet / boot open (approximate hinge angles)."
-            : "This model bakes its doors into the chassis — nothing separable to swing.";
+        bool canDoors = groups.Any(g => g.Kind is "door_l" or "door_r" or "bonnet" or "boot");
+        DoorsToggle.IsEnabled = canDoors;
+        DoorsToggle.ToolTip = canDoors
+            ? "Swing the doors / bonnet / boot open."
+            : "This model has no separate door meshes — doors are welded into the body.";
+        DoorsHint.Text = canDoors
+            ? "Toggle to swing doors, bonnet, and boot."
+            : "No separate doors on this model (baked into the chassis). Try the _hi.yft if you picked the low LOD.";
 
         PartsList.Items.Clear();
         foreach (var g in groups.OrderBy(g => g.Kind).ThenBy(g => g.Name))
@@ -693,4 +835,5 @@ public partial class VehiclesView : UserControl
         foreach (var file in Directory.GetFiles(src, "*", SearchOption.AllDirectories))
             File.Copy(file, file.Replace(src, dst), overwrite: true);
     }
+
 }

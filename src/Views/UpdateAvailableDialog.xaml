@@ -7,7 +7,7 @@
                  SizeToContent="Height"
                  ResizeMode="NoResize"
                  WindowStartupLocation="CenterOwner"
-                 WindowBackdropType="Mica"
+                 WindowBackdropType="None"
                  ExtendsContentIntoTitleBar="True">
 
     <Grid>
@@ -42,7 +42,6 @@
             </StackPanel>
         </StackPanel>
 
-        <!-- Release notes — collapsed until "Show Info". -->
         <Border x:Name="InfoPanel"
                 Grid.Row="2"
                 Visibility="Collapsed"

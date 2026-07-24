@@ -49,13 +49,17 @@ public static class Converter
         // mesh as its own entry, so per-mesh shader assignment (glass, emissive)
         // can target one part without touching its neighbours.
         ai.SetConfig(new Assimp.Configs.BooleanPropertyConfig("PP_PTV_KEEP_HIERARCHY", true));
+        // EmbedTextures pulls FBX .fbm / sidecar images into scene.Textures so
+        // TextureBaker can resolve them the same way RAGE expects pixels inside
+        // the YDR (embedded TXD), not as dangling external paths.
         const PostProcessSteps steps =
             PostProcessSteps.Triangulate
             | PostProcessSteps.GenerateNormals
             | PostProcessSteps.JoinIdenticalVertices
             | PostProcessSteps.ImproveCacheLocality
             | PostProcessSteps.GenerateUVCoords
-            | PostProcessSteps.PreTransformVertices;
+            | PostProcessSteps.PreTransformVertices
+            | PostProcessSteps.EmbedTextures;
         var scene = ai.ImportFile(opts.InputPath, steps);
         if (scene == null || !scene.HasMeshes)
         {
@@ -392,22 +396,25 @@ public static class Converter
             string? ycdClipName = null;
             bool animatedProp = false;
 
-            if (opts.AnimatedProp || opts.AutoSpin)
+            if (opts.AnimatedProp || opts.AutoSpin || !string.IsNullOrWhiteSpace(opts.AnimKeysPath))
             {
                 // Animated-prop path: attach a Skeleton + bind each model to
-                // a bone (rigid) so the prop moves in-game. --auto-spin
-                // SYNTHESIZES a 360° spin for a model with no animation of its
-                // own; otherwise the clip is imported from the source rig.
-                // The static drawable already on disk is re-saved afterwards
-                // because the skeleton/bone-binding is applied to it in memory.
-                Log(opts.AutoSpin
-                    ? "[7/-] Building ANIMATED PROP (auto-spin)..."
-                    : "[7/-] Building ANIMATED PROP (rigid bone-binding)...");
+                // a bone (rigid) so the prop moves in-game. Priority:
+                // authored --anim-keys timeline → --auto-spin → source clip.
+                Log(!string.IsNullOrWhiteSpace(opts.AnimKeysPath)
+                    ? "[7/-] Building ANIMATED PROP (timeline keys)..."
+                    : opts.AutoSpin
+                        ? "[7/-] Building ANIMATED PROP (auto-spin)..."
+                        : "[7/-] Building ANIMATED PROP (rigid bone-binding)...");
                 try
                 {
-                    var ap = opts.AutoSpin
-                        ? AnimatedPropBuilder.BuildAutoSpin(ydr, opts, streamDir)
-                        : AnimatedPropBuilder.Build(ydr, opts.InputPath, opts, streamDir);
+                    AnimatedPropBuilder.Result ap;
+                    if (!string.IsNullOrWhiteSpace(opts.AnimKeysPath))
+                        ap = AnimatedPropBuilder.BuildFromKeys(ydr, opts, streamDir);
+                    else if (opts.AutoSpin)
+                        ap = AnimatedPropBuilder.BuildAutoSpin(ydr, opts, streamDir);
+                    else
+                        ap = AnimatedPropBuilder.Build(ydr, opts.InputPath, opts, streamDir);
                     if (ap.Success)
                     {
                         // The skeleton-bearing YDR was already persisted inside

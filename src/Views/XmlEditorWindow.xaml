@@ -6,7 +6,7 @@
                  Height="620" Width="820"
                  MinHeight="360" MinWidth="480"
                  WindowStartupLocation="CenterOwner"
-                 WindowBackdropType="Mica"
+                 WindowBackdropType="None"
                  ExtendsContentIntoTitleBar="True">
 
     <Grid>

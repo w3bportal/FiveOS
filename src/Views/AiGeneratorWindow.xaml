@@ -10,7 +10,7 @@
                  Title="AI generator"
                  Height="720" Width="1080"
                  MinHeight="560" MinWidth="900"
-                 WindowBackdropType="Mica"
+                 WindowBackdropType="None"
                  ExtendsContentIntoTitleBar="True"
                  WindowStartupLocation="CenterOwner">
 
@@ -31,11 +31,6 @@
             </ui:TitleBar.Icon>
         </ui:TitleBar>
 
-        <!-- Left: the full Image → 3D experience, hosted as-is. Right: an
-             interactive 3D preview of the generated model (reuses viewer.html,
-             so orbit + zoom come for free). DataContext is set in code-behind
-             to MainWindow's MainViewModel.ImageTo3DVm so generation history
-             and provider selection persist across window opens. -->
         <Grid Grid.Row="1">
             <Grid.ColumnDefinitions>
                 <ColumnDefinition Width="452" />
@@ -50,8 +45,7 @@
                     BorderBrush="{DynamicResource ControlElevationBorderBrush}"
                     Background="{DynamicResource ApplicationBackgroundBrush}">
                 <Grid>
-                    <!-- Empty state (shown until the first model is generated;
-                         WebView2 is collapsed underneath so no airspace clash). -->
+
                     <StackPanel x:Name="PreviewEmpty"
                                 HorizontalAlignment="Center"
                                 VerticalAlignment="Center">
@@ -68,8 +62,6 @@
             </Border>
         </Grid>
 
-        <!-- Footer: take the latest generated model into the viewer. The
-             button is enabled only after at least one successful run. -->
         <Border Grid.Row="2"
                 Padding="14,10"
                 BorderThickness="0,1,0,0"

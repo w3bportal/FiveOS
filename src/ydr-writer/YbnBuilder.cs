@@ -3,6 +3,7 @@
 
 using Assimp;
 using CodeWalker.GameFiles;
+using g3;
 using SharpDX;
 using SDXVector3 = SharpDX.Vector3;
 
@@ -73,6 +74,18 @@ public static class YbnBuilder
         var (verts, tris, triMatIndex) = CollectGeometry(scene, excludeMeshNames, ResolveMeshMaterial);
         if (verts.Count == 0 || tris.Count == 0)
             throw new InvalidOperationException("scene contained no triangles");
+
+        // Physics never needs visual density. A 200k-tri import used to
+        // spend minutes in BVH build + XML roundtrip and ship a bound far
+        // heavier than anything in the base game — cap the collision soup
+        // by welding + edge-collapsing before the BVH. Per-material groups
+        // reduce independently so breakable glass keeps its material.
+        if (tris.Count > MaxCollisionTriangles)
+        {
+            int before = tris.Count;
+            (verts, tris, triMatIndex) = DecimateCollisionSoup(verts, tris, triMatIndex, MaxCollisionTriangles);
+            Console.WriteLine($"[ydr-writer]   collision capped: {before:N0} -> {tris.Count:N0} tris (visuals untouched)");
+        }
 
         // GeometryBVH not BoundBox. Verified by dumping bob74_ipl's 13
         // collision YBNs to XML: every working static-map YBN in the
@@ -517,6 +530,100 @@ public static class YbnBuilder
         var comp = BuildComposite(scene, materialName, excludeMeshNames, partMaterials, breakableGlass);
         var ybn = new YbnFile { Bounds = comp };
         return ybn.Save();
+    }
+
+    /// <summary>Collision polygon budget. Base-game props sit far below
+    /// this; anything denser only slows the BVH (build AND runtime) with
+    /// zero gameplay difference.</summary>
+    private const int MaxCollisionTriangles = 30_000;
+
+    /// <summary>Weld + edge-collapse the collected collision soup down to
+    /// <paramref name="maxTris"/>. The soup bakes every mesh's verts
+    /// independently, so duplicates are welded first — without shared
+    /// edges the reducer cannot collapse anything (the LOD generator
+    /// learned the same lesson). Groups by collision material and reduces
+    /// each proportionally so a small glass group isn't starved out.</summary>
+    private static (List<SDXVector3>, List<(int A, int B, int C)>, byte[]) DecimateCollisionSoup(
+        List<SDXVector3> verts, List<(int A, int B, int C)> tris, byte[] triMatIndex, int maxTris)
+    {
+        // Position-quantized weld (0.2 mm) — merges the per-mesh duplicate
+        // verts the node-walk baking produces.
+        var remap = new int[verts.Count];
+        var welded = new List<SDXVector3>(verts.Count / 2);
+        var seen = new Dictionary<(int, int, int), int>(verts.Count);
+        for (int i = 0; i < verts.Count; i++)
+        {
+            var v = verts[i];
+            var key = ((int)MathF.Round(v.X * 5000f), (int)MathF.Round(v.Y * 5000f), (int)MathF.Round(v.Z * 5000f));
+            if (!seen.TryGetValue(key, out var idx))
+            {
+                idx = welded.Count;
+                welded.Add(v);
+                seen[key] = idx;
+            }
+            remap[i] = idx;
+        }
+
+        var outVerts = new List<SDXVector3>();
+        var outTris = new List<(int A, int B, int C)>();
+        var outMats = new List<byte>();
+
+        foreach (var group in tris
+                     .Select((t, i) => (Tri: t, Mat: triMatIndex[i]))
+                     .GroupBy(x => x.Mat))
+        {
+            var groupTris = group.ToList();
+            int target = Math.Max(64, (int)((long)maxTris * groupTris.Count / tris.Count));
+
+            var dmesh = new DMesh3();
+            var localMap = new Dictionary<int, int>(groupTris.Count);
+            int LocalIndex(int weldedIdx)
+            {
+                if (!localMap.TryGetValue(weldedIdx, out var li))
+                {
+                    var p = welded[weldedIdx];
+                    li = dmesh.AppendVertex(new Vector3d(p.X, p.Y, p.Z));
+                    localMap[weldedIdx] = li;
+                }
+                return li;
+            }
+            foreach (var (tri, _) in groupTris)
+            {
+                int a = LocalIndex(remap[tri.A]);
+                int b = LocalIndex(remap[tri.B]);
+                int c = LocalIndex(remap[tri.C]);
+                if (a == b || b == c || a == c) continue;
+                // Non-manifold extras are rejected by DMesh3 — dropping the
+                // 3rd+ triangle on an over-shared edge is fine for physics.
+                dmesh.AppendTriangle(a, b, c);
+            }
+
+            if (dmesh.TriangleCount > target)
+            {
+                var reducer = new Reducer(dmesh);
+                reducer.ReduceToTriangleCount(target);
+            }
+
+            var dense = new Dictionary<int, int>(dmesh.VertexCount);
+            foreach (var vi in dmesh.VertexIndices())
+            {
+                var p = dmesh.GetVertex(vi);
+                dense[vi] = outVerts.Count;
+                outVerts.Add(new SDXVector3((float)p.x, (float)p.y, (float)p.z));
+            }
+            foreach (var ti in dmesh.TriangleIndices())
+            {
+                var t = dmesh.GetTriangle(ti);
+                outTris.Add((dense[t.a], dense[t.b], dense[t.c]));
+                outMats.Add(group.Key);
+            }
+        }
+
+        // Reduction failing to produce anything usable would mean broken
+        // physics — fall back to the original soup rather than ship holes.
+        if (outTris.Count < 16)
+            return (verts, tris, triMatIndex);
+        return (outVerts, outTris, outMats.ToArray());
     }
 
     private static (List<SDXVector3> verts, List<(int A, int B, int C)> tris, byte[] triMatIndex) CollectGeometry(

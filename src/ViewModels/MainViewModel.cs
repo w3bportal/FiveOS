@@ -4,9 +4,12 @@
 using System.Collections.ObjectModel;
 using System.ComponentModel;
 using System.IO;
+using System.Linq;
 using System.Threading.Tasks;
+using System.Windows.Threading;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
+using FiveOS.Services;
 
 namespace FiveOS.ViewModels;
 
@@ -27,13 +30,23 @@ public enum ExportMode { Prop }
 /// drills into one of the feature panes when a tile is clicked. The
 /// header back button (visible when not on Dashboard) returns to it.
 /// </summary>
-public enum AppView { Dashboard, Props, Optimize, Rpf, Vehicles, ImageTo3D, Emotes }
+public enum AppView { Dashboard, Props, AnimatedProps, Optimize, Rpf, Vehicles, ImageTo3D, Emotes }
 
-/// <summary>Per-part visual material preset. Drives both the RAGE shader
-/// written into the YDR (glass / emissive / emissivestrong / emissivenight)
-/// and, for glass, the collision material index assigned to that part's
-/// polygons so the engine plays shatter VFX on hit.</summary>
-public enum MaterialPreset { Standard, Glass, Emissive, EmissiveStrong, EmissiveNight }
+/// <summary>One rotation key on the Animated props timeline (degrees, seconds).</summary>
+public sealed partial class PropAnimKey : ObservableObject
+{
+    [ObservableProperty] private double _time;
+    [ObservableProperty] private double _rotX;
+    [ObservableProperty] private double _rotY;
+    [ObservableProperty] private double _rotZ;
+}
+
+/// <summary>Per-part visual material preset. Drives the RAGE shader written
+/// into the YDR (glass / emissive* / metal / cutout) and, for glass, the
+/// collision material index assigned to that part's polygons so the engine
+/// plays shatter VFX on hit. Metal emits a spec shader (a synthesized highlight
+/// when the source has no spec map); Cutout forces the alpha-tested shader.</summary>
+public enum MaterialPreset { Standard, Glass, Emissive, EmissiveStrong, EmissiveNight, Metal, Cutout }
 
 public partial class MainViewModel : ObservableObject
 {
@@ -62,12 +75,151 @@ public partial class MainViewModel : ObservableObject
 
         // Keep the GLASS sidebar section in sync with layer Material → Glass.
         ModelParts.CollectionChanged += OnModelPartsCollectionChanged;
+        ModelParts.CollectionChanged += (_, _) => RebuildOutlinerWorking();
+        PackSession.Entries.CollectionChanged += (_, _) => EnsureOutlinerStructure();
+        // Queue changes can park/un-park the loaded model's top row
+        // (drag-into-group hides it; removing the pending row restores it).
+        PackSession.ConvertQueue.CollectionChanged += (_, _) => RebuildOutlinerWorking();
+        // Session rebuilds recreate its nodes, so mirror them into
+        // OutlinerRoots every time the tree changes shape.
+        PackSession.TreeChanged += (_, _) => SyncPackOutlinerRoot();
+        PackSession.PropertyChanged += (_, e) =>
+        {
+            if (e.PropertyName is nameof(Services.PropPackSession.HasEntries)
+                or nameof(Services.PropPackSession.HasConvertQueue)
+                or nameof(Services.PropPackSession.Count))
+                EnsureOutlinerStructure();
+        };
+        EnsureOutlinerStructure();
+        RebuildOutlinerWorking();
 
         // Undo/redo: capture the initial state and start listening for
         // changes to the tracked properties. Has to happen at the end of
         // construction so all field initialisers have already run.
         _currentSnapshot = TakeSnapshot();
         PropertyChanged += OnTrackedPropertyChanged;
+
+        // Chrome document tabs — restore last session (or seed Assets).
+        WorkspaceDocs = new WorkspaceDocumentSet();
+        RestoreWorkspaceSession();
+        WorkspaceDocs.Documents.CollectionChanged += (_, _) => ScheduleSaveWorkspaceSession();
+        WorkspaceDocs.PropertyChanged += (_, e) =>
+        {
+            if (e.PropertyName is nameof(WorkspaceDocumentSet.ActiveDocument)
+                or nameof(WorkspaceDocumentSet.ActiveDocumentId))
+                ScheduleSaveWorkspaceSession();
+        };
+    }
+
+    /// <summary>App-chrome document tabs — one entry per open section
+    /// document (Assets / Optimize / Emotes / …). Emotes multi-docs link
+    /// via <see cref="WorkspaceDocument.EmoteDocumentId"/>.</summary>
+    public WorkspaceDocumentSet WorkspaceDocs { get; }
+
+    /// <summary>When true, <see cref="SyncWorkspaceTabForActiveView"/> is a
+    /// no-op (startup Emotes viewer warm must not spawn chrome tabs).</summary>
+    public bool SuppressWorkspaceTabSync { get; set; }
+
+    /// <summary>Set by MainWindow: close the emote document whose chrome tab
+    /// was just navigated to another section, so the orphaned doc can't
+    /// resurrect as a duplicate tab. Arg is the EmoteDocument id.</summary>
+    public System.Action<string>? DetachEmoteDocument { get; set; }
+
+    private System.Windows.Threading.DispatcherTimer? _workspaceSessionSaveTimer;
+
+    private void ScheduleSaveWorkspaceSession()
+    {
+        if (SuppressWorkspaceTabSync) return;
+        _workspaceSessionSaveTimer ??= new System.Windows.Threading.DispatcherTimer
+        {
+            Interval = TimeSpan.FromMilliseconds(400),
+        };
+        _workspaceSessionSaveTimer.Tick -= OnWorkspaceSessionSaveTick;
+        _workspaceSessionSaveTimer.Tick += OnWorkspaceSessionSaveTick;
+        _workspaceSessionSaveTimer.Stop();
+        _workspaceSessionSaveTimer.Start();
+    }
+
+    private void OnWorkspaceSessionSaveTick(object? sender, EventArgs e)
+    {
+        _workspaceSessionSaveTimer?.Stop();
+        SaveWorkspaceSessionNow();
+    }
+
+    public void SaveWorkspaceSessionNow()
+    {
+        var tabs = WorkspaceDocs.Documents.Select(d => new Services.WorkspaceSessionTabBlob
+        {
+            Kind = d.Kind.ToString(),
+            Title = d.Title,
+        }).ToList();
+        var activeIdx = 0;
+        if (WorkspaceDocs.ActiveDocument != null)
+        {
+            var i = WorkspaceDocs.Documents.IndexOf(WorkspaceDocs.ActiveDocument);
+            if (i >= 0) activeIdx = i;
+        }
+        Services.UserSettings.SaveWorkspaceSession(tabs, activeIdx, ActiveView.ToString());
+    }
+
+    private void RestoreWorkspaceSession()
+    {
+        // Open a single tab for the last active page — not the whole prior
+        // strip (Assets + leftover Emotes / GTA Male, etc.).
+        var viewName = Services.UserSettings.LoadLastActiveView();
+        AppView view = AppView.Props;
+        if (!string.IsNullOrWhiteSpace(viewName)
+            && Enum.TryParse<AppView>(viewName, ignoreCase: true, out var parsed)
+            && parsed is not AppView.Dashboard)
+            view = parsed;
+
+        var saved = Services.UserSettings.LoadWorkspaceSessionTabs();
+        WorkspaceKind kind;
+        string title;
+        if (saved.Count > 0)
+        {
+            var idx = Math.Clamp(Services.UserSettings.LoadWorkspaceSessionActiveIndex(), 0, saved.Count - 1);
+            var t = saved[idx];
+            kind = Enum.TryParse<WorkspaceKind>(t.Kind, ignoreCase: true, out var k)
+                ? k
+                : WorkspaceDocument.KindFromAppView(view) ?? WorkspaceKind.Assets;
+            title = string.IsNullOrWhiteSpace(t.Title)
+                ? WorkspaceDocument.DefaultTitleFor(kind)
+                : t.Title.Trim();
+            // Prefer LastActiveView when it disagrees with a stale tab kind
+            // (e.g. saved Emotes title but user left on Assets).
+            var viewKind = WorkspaceDocument.KindFromAppView(view);
+            if (viewKind != null && viewKind != kind)
+            {
+                kind = viewKind.Value;
+                title = WorkspaceDocument.DefaultTitleFor(kind);
+            }
+        }
+        else
+        {
+            kind = WorkspaceDocument.KindFromAppView(view) ?? WorkspaceKind.Assets;
+            title = WorkspaceDocument.DefaultTitleFor(kind);
+        }
+
+        // Emotes tabs need a live EmoteDocument link — open as Untitled;
+        // SyncEmoteWorkspaceTabs binds when Emotes is shown.
+        if (kind == WorkspaceKind.Emotes
+            && (string.IsNullOrWhiteSpace(title)
+                || title.StartsWith("GTA ", StringComparison.OrdinalIgnoreCase)))
+            title = "Untitled";
+
+        var doc = new WorkspaceDocument { Kind = kind, Title = title };
+        WorkspaceDocs.ReplaceAll(new[] { doc }, doc);
+
+        ActiveView = kind switch
+        {
+            WorkspaceKind.Assets => view is AppView.AnimatedProps ? AppView.AnimatedProps : AppView.Props,
+            WorkspaceKind.Optimize => AppView.Optimize,
+            WorkspaceKind.Emotes => AppView.Emotes,
+            WorkspaceKind.Vehicles => AppView.Vehicles,
+            WorkspaceKind.Rpf => AppView.Rpf,
+            _ => AppView.Props,
+        };
     }
 
     // ── Reference ped (scale-comparison) ──────────────────────────────
@@ -235,6 +387,78 @@ public partial class MainViewModel : ObservableObject
     public System.Collections.Generic.Dictionary<string, string> PartDiffuseOverrides { get; } =
         new(System.StringComparer.OrdinalIgnoreCase);
 
+    /// <summary>Diffuse maps found on the loaded model (sidebar thumbnails).</summary>
+    public ObservableCollection<ModelTextureItem> ModelTextures { get; } = new();
+
+    /// <summary>Extra recolor textures the user added — each becomes its own
+    /// prop when Build pack runs.</summary>
+    public TextureVariantsViewModel TextureVariants { get; private set; } =
+        new(System.Array.Empty<string>(), "");
+
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(ShowModelTexturesEmpty))]
+    private bool _modelTexturesLoading;
+
+    public bool ShowModelTexturesEmpty =>
+        !ModelTexturesLoading && ModelTextures.Count == 0;
+
+    public bool HasExtraTextures =>
+        ModelTextures.Any(t => t.CanRemove && !string.IsNullOrEmpty(t.Path));
+
+    [ObservableProperty]
+    private ModelTextureItem? _selectedTexture;
+
+    /// <summary>Create a fresh variants VM only when empty — never wipe staged
+    /// textures mid-session (parts-sync used to DisposeStage and break Build pack).
+    /// Also keep the stage alive when the library still lists user images even
+    /// if Variants was Cleared after a pack — otherwise Ensure would DisposeStage
+    /// and Build would claim the list is empty.</summary>
+    public void EnsureTextureVariants(System.Collections.Generic.IReadOnlyList<string> partNames, string propBaseName)
+    {
+        bool libraryExtras = ModelTextures.Any(t =>
+            t.CanRemove && !string.IsNullOrWhiteSpace(t.Path));
+        if (TextureVariants.HasItems || libraryExtras)
+        {
+            TextureVariants.UpdatePartNames(partNames);
+            return;
+        }
+        ResetTextureVariants(partNames, propBaseName);
+    }
+
+    public void ResetTextureVariants(System.Collections.Generic.IReadOnlyList<string> partNames, string propBaseName)
+    {
+        TextureVariants.DisposeStage();
+        TextureVariants = new TextureVariantsViewModel(partNames, propBaseName);
+        TextureVariants.Variants.CollectionChanged += (_, _) =>
+        {
+            OnPropertyChanged(nameof(HasExtraTextures));
+            OnPropertyChanged(nameof(ShowModelTexturesEmpty));
+            OnPropertyChanged(nameof(SimplePrimaryButtonLabel));
+            OnPropertyChanged(nameof(SimplePrimaryButtonHint));
+        };
+        OnPropertyChanged(nameof(TextureVariants));
+        OnPropertyChanged(nameof(HasExtraTextures));
+        OnPropertyChanged(nameof(ShowModelTexturesEmpty));
+        OnPropertyChanged(nameof(SimplePrimaryButtonLabel));
+        OnPropertyChanged(nameof(SimplePrimaryButtonHint));
+    }
+
+    public void ClearModelTextures()
+    {
+        SelectedTexture = null;
+        ModelTextures.Clear();
+        ModelTexturesLoading = false;
+        NotifyTextureListUi();
+    }
+
+    public void NotifyTextureListUi()
+    {
+        OnPropertyChanged(nameof(ShowModelTexturesEmpty));
+        OnPropertyChanged(nameof(HasExtraTextures));
+        OnPropertyChanged(nameof(SimplePrimaryButtonLabel));
+        OnPropertyChanged(nameof(SimplePrimaryButtonHint));
+    }
+
     [ObservableProperty]
     private bool _isLayersPanelOpen = true;
 
@@ -246,7 +470,43 @@ public partial class MainViewModel : ObservableObject
     /// outright; the panel's own X button collapses instead so the user
     /// doesn't lose the dock spot.</summary>
     [ObservableProperty]
-    private bool _isLayersPanelCollapsed;
+    private bool _isLayersPanelCollapsed = Services.UserSettings.LoadLayersPanelCollapsed();
+
+    partial void OnIsLayersPanelCollapsedChanged(bool value)
+        => Services.UserSettings.SaveLayersPanelCollapsed(value);
+
+    /// <summary>True = PANELS sidebar left of the viewport; false = right.</summary>
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(LayersDockColumn))]
+    [NotifyPropertyChangedFor(nameof(LayersPanelMargin))]
+    [NotifyPropertyChangedFor(nameof(PanelsResizeThumbAlign))]
+    private bool _isLayersDockedLeft = Services.UserSettings.LoadLayersDockedLeft();
+
+    partial void OnIsLayersDockedLeftChanged(bool value)
+        => Services.UserSettings.SaveLayersDockedLeft(value);
+
+    /// <summary>Expanded width of the PANELS sidebar (drag the edge to resize).</summary>
+    [ObservableProperty]
+    private double _layersPanelWidth = Services.UserSettings.LoadLayersPanelWidth();
+
+    /// <summary>Persist width after a resize drag ends (not on every pixel).</summary>
+    public void CommitLayersPanelWidth()
+    {
+        if (LayersPanelWidth >= 280 && LayersPanelWidth <= 640)
+            Services.UserSettings.SaveLayersPanelWidth(LayersPanelWidth);
+    }
+
+    /// <summary>Column index inside PropsCenterGrid (0 left / 2 right).</summary>
+    public int LayersDockColumn => IsLayersDockedLeft ? 0 : 2;
+
+    public System.Windows.Thickness LayersPanelMargin => IsLayersDockedLeft
+        ? new System.Windows.Thickness(0, 0, 4, 0)
+        : new System.Windows.Thickness(4, 0, 0, 0);
+
+    /// <summary>Resize grip sits on the viewport-facing edge.</summary>
+    public System.Windows.HorizontalAlignment PanelsResizeThumbAlign => IsLayersDockedLeft
+        ? System.Windows.HorizontalAlignment.Right
+        : System.Windows.HorizontalAlignment.Left;
 
     [RelayCommand]
     private void ToggleLayersPanel() => IsLayersPanelOpen = !IsLayersPanelOpen;
@@ -566,6 +826,139 @@ public partial class MainViewModel : ObservableObject
     [ObservableProperty]
     private bool _spinReverse;
 
+    // ── Animated props keys timeline ────────────────────────────────
+    // Author rotation keys for rigid animated props. On convert with 2+
+    // keys the engine builds a .ycd from the timeline instead of (or in
+    // addition to) sampling a source clip / auto-spin.
+
+    public ObservableCollection<PropAnimKey> PropAnimKeys { get; } = new();
+
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(PropAnimPlayheadLabel))]
+    private double _propAnimDuration = 4.0;
+
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(PropAnimPlayheadLabel))]
+    private double _propAnimPlayhead;
+
+    [ObservableProperty]
+    private int _propAnimFps = 30;
+
+    [ObservableProperty]
+    private bool _isPropAnimPlaying;
+
+    public string PropAnimPlayheadLabel =>
+        $"{PropAnimPlayhead:0.00}s / {PropAnimDuration:0.00}s  ·  {PropAnimKeys.Count} key{(PropAnimKeys.Count == 1 ? "" : "s")}";
+
+    public void EnsureDefaultPropAnimKeys()
+    {
+        if (PropAnimKeys.Count > 0) return;
+        PropAnimDuration = SpinSeconds > 0.05 ? SpinSeconds : 4.0;
+        PropAnimPlayhead = 0;
+        // Default loop: identity → full turn on the chosen spin axis.
+        PropAnimKeys.Add(new PropAnimKey { Time = 0, RotX = 0, RotY = 0, RotZ = 0 });
+        PropAnimKeys.Add(SpinAxisIndex switch
+        {
+            0 => new PropAnimKey { Time = PropAnimDuration, RotX = 360, RotY = 0, RotZ = 0 },
+            1 => new PropAnimKey { Time = PropAnimDuration, RotX = 0, RotY = 360, RotZ = 0 },
+            _ => new PropAnimKey { Time = PropAnimDuration, RotX = 0, RotY = 0, RotZ = 360 },
+        });
+        OnPropertyChanged(nameof(PropAnimPlayheadLabel));
+    }
+
+    [RelayCommand]
+    private void AddPropAnimKey()
+    {
+        EnsureDefaultPropAnimKeys();
+        var t = Math.Clamp(PropAnimPlayhead, 0, PropAnimDuration);
+        // Replace an existing key at the same frame snap, otherwise insert.
+        var frame = 1.0 / Math.Max(1, PropAnimFps);
+        var existing = PropAnimKeys.FirstOrDefault(k => Math.Abs(k.Time - t) < frame * 0.5);
+        if (existing != null)
+        {
+            existing.RotX = TransformRotX;
+            existing.RotY = TransformRotY;
+            existing.RotZ = TransformRotZ;
+        }
+        else
+        {
+            PropAnimKeys.Add(new PropAnimKey
+            {
+                Time = t,
+                RotX = TransformRotX,
+                RotY = TransformRotY,
+                RotZ = TransformRotZ,
+            });
+            SortPropAnimKeys();
+        }
+        OnPropertyChanged(nameof(PropAnimPlayheadLabel));
+    }
+
+    [RelayCommand]
+    private void DeletePropAnimKey()
+    {
+        if (PropAnimKeys.Count == 0) return;
+        var frame = 1.0 / Math.Max(1, PropAnimFps);
+        var hit = PropAnimKeys
+            .OrderBy(k => Math.Abs(k.Time - PropAnimPlayhead))
+            .FirstOrDefault();
+        if (hit == null || Math.Abs(hit.Time - PropAnimPlayhead) > frame * 1.5) return;
+        // Keep at least two keys so export still has a motion span.
+        if (PropAnimKeys.Count <= 2) return;
+        PropAnimKeys.Remove(hit);
+        OnPropertyChanged(nameof(PropAnimPlayheadLabel));
+    }
+
+    [RelayCommand]
+    private void ClearPropAnimKeys()
+    {
+        PropAnimKeys.Clear();
+        EnsureDefaultPropAnimKeys();
+    }
+
+    public void SortPropAnimKeys()
+    {
+        var sorted = PropAnimKeys.OrderBy(k => k.Time).ToList();
+        PropAnimKeys.Clear();
+        foreach (var k in sorted) PropAnimKeys.Add(k);
+    }
+
+    public void NotifyPropAnimKeysChanged() => OnPropertyChanged(nameof(PropAnimPlayheadLabel));
+
+    /// <summary>Lerp rotation at the playhead and push into the gizmo for preview.</summary>
+    public void ApplyPropAnimPlayheadToTransform()
+    {
+        if (PropAnimKeys.Count == 0) return;
+        var sorted = PropAnimKeys.OrderBy(k => k.Time).ToList();
+        var t = Math.Clamp(PropAnimPlayhead, 0, PropAnimDuration);
+        if (t <= sorted[0].Time)
+        {
+            TransformRotX = sorted[0].RotX;
+            TransformRotY = sorted[0].RotY;
+            TransformRotZ = sorted[0].RotZ;
+            return;
+        }
+        var last = sorted[^1];
+        if (t >= last.Time)
+        {
+            TransformRotX = last.RotX;
+            TransformRotY = last.RotY;
+            TransformRotZ = last.RotZ;
+            return;
+        }
+        for (int i = 0; i < sorted.Count - 1; i++)
+        {
+            var a = sorted[i];
+            var b = sorted[i + 1];
+            if (t < a.Time || t > b.Time) continue;
+            var u = (b.Time - a.Time) < 1e-9 ? 0 : (t - a.Time) / (b.Time - a.Time);
+            TransformRotX = a.RotX + (b.RotX - a.RotX) * u;
+            TransformRotY = a.RotY + (b.RotY - a.RotY) * u;
+            TransformRotZ = a.RotZ + (b.RotZ - a.RotZ) * u;
+            return;
+        }
+    }
+
     /// <summary>When true the exporter deep-clones the High DrawableModels
     /// into Med/Low/VLow slots and decimates each clone via g3sharp. RAGE
     /// then streams the lower-detail tiers at distance instead of always
@@ -610,6 +1003,29 @@ public partial class MainViewModel : ObservableObject
 
     public string ConvertButtonLabel => IsPackMode ? "Add to Pack" : "Convert";
 
+    /// <summary>Yes = each added texture becomes its own prop in a pack
+    /// (TextureVariantPipeline). No = embed the selected texture into
+    /// this one model on Convert.</summary>
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(SimplePrimaryButtonLabel))]
+    [NotifyPropertyChangedFor(nameof(SimplePrimaryButtonHint))]
+    private bool _packTextureVariants;
+
+    /// <summary>Primary action on the simple Props panel.</summary>
+    public string SimplePrimaryButtonLabel
+    {
+        get
+        {
+            if (PackTextureVariants && HasExtraTextures)
+                return "Build pack";
+            return IsPackMode ? "Add to Pack" : "Convert";
+        }
+    }
+
+    public string SimplePrimaryButtonHint => PackTextureVariants
+        ? "Each added texture becomes its own prop (Ctrl+Enter / File → Convert)."
+        : "Embed the current texture into this one model (Ctrl+Enter / File → Convert).";
+
     // ── Pack mode ────────────────────────────────────────────────────
     //
     // When IsPackMode is on, the Convert button accumulates each
@@ -620,6 +1036,7 @@ public partial class MainViewModel : ObservableObject
     // bundling story via weapons.meta and aren't built up incrementally.
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(ConvertButtonLabel))]
+    [NotifyPropertyChangedFor(nameof(SimplePrimaryButtonLabel))]
     [NotifyPropertyChangedFor(nameof(IsPackPanelVisible))]
     private bool _isPackMode;
 
@@ -627,9 +1044,312 @@ public partial class MainViewModel : ObservableObject
     /// process-wide singleton — quitting the app drops the pack.</summary>
     public Services.PropPackSession PackSession => Services.PropPackSession.Current;
 
+    /// <summary>Unified Layers outliner roots: current prop + pack tree.</summary>
+    public System.Collections.ObjectModel.ObservableCollection<Services.PropPackTreeNode> OutlinerRoots { get; } = new();
+
+    /// <summary>Multi-part prop container (named after <see cref="PropName"/>).</summary>
+    private Services.PropPackTreeNode? _workingRoot;
+
+    /// <summary>Single-mesh prop root (a Part node labeled with the prop name).</summary>
+    private Services.PropPackTreeNode? _flatPropRoot;
+
+    /// <summary>Multi-select set for outliner context actions.</summary>
+    public System.Collections.ObjectModel.ObservableCollection<Services.PropPackTreeNode> SelectedOutlinerNodes { get; } = new();
+
+    /// <summary>Prop leaf selected in the pack outliner — drives the
+    /// compact housing-field editors under the tree.</summary>
+    [ObservableProperty]
+    private Services.PropPackEntry? _selectedPackEntry;
+
+    /// <summary>Part selected under the current prop — drives mesh-optimize strip.</summary>
+    [ObservableProperty]
+    private ModelPart? _selectedModelPart;
+
     /// <summary>Footer pack panel collapses when pack mode is off so the
     /// regular convert flow has the full footer width.</summary>
     public bool IsPackPanelVisible => IsPackMode;
+
+    public void EnsureOutlinerStructure()
+    {
+        // Model roots are owned by RebuildOutlinerWorking; only sync pack here.
+        if (ModelParts.Count > 0 && _workingRoot is null && _flatPropRoot is null)
+            RebuildOutlinerWorking();
+        SyncPackOutlinerRoot();
+    }
+
+    private void SyncPackOutlinerRoot()
+    {
+        // Photoshop layout: model roots stay on top, then every session
+        // root (group folders, loose staged layers, loose queue rows) in
+        // session order. Session rebuilds recreate nodes wholesale, so
+        // drop all non-model roots and re-add the current set.
+        for (int i = OutlinerRoots.Count - 1; i >= 0; i--)
+        {
+            var n = OutlinerRoots[i];
+            if (n.IsPack || n.IsProp || n.IsQueueItem || n.IsStream || n.IsQueue)
+                OutlinerRoots.RemoveAt(i);
+        }
+
+        if (PackSession.HasOutlinerContent)
+        {
+            foreach (var root in PackSession.TreeRoots)
+                OutlinerRoots.Add(root);
+        }
+
+        // Session rebuilds recreate their nodes, which would silently drop
+        // the highlight (IsSelected lives on node objects). Rebind the
+        // selection to the NEW nodes by identity so it survives.
+        RestoreOutlinerSelection();
+    }
+
+    /// <summary>Re-point <see cref="SelectedOutlinerNodes"/> at the current
+    /// tree's nodes after a rebuild, matching by what a node REPRESENTS
+    /// (entry / queue item / part reference, group key) rather than object
+    /// identity.</summary>
+    private void RestoreOutlinerSelection()
+    {
+        if (SelectedOutlinerNodes.Count == 0) return;
+
+        var wanted = SelectedOutlinerNodes.ToList();
+        var fresh = new System.Collections.Generic.List<Services.PropPackTreeNode>();
+        foreach (var old in wanted)
+        {
+            var match = FindEquivalentNode(old);
+            if (match is not null && !fresh.Contains(match))
+                fresh.Add(match);
+        }
+
+        // Nothing changed object-wise? Leave everything alone.
+        if (fresh.Count == wanted.Count && fresh.Zip(wanted, ReferenceEquals).All(x => x))
+            return;
+
+        foreach (var n in wanted) n.IsSelected = false;
+        SelectedOutlinerNodes.Clear();
+        foreach (var n in fresh)
+        {
+            n.IsSelected = true;
+            SelectedOutlinerNodes.Add(n);
+        }
+    }
+
+    private Services.PropPackTreeNode? FindEquivalentNode(Services.PropPackTreeNode old)
+    {
+        Services.PropPackTreeNode? Walk(System.Collections.Generic.IEnumerable<Services.PropPackTreeNode> nodes)
+        {
+            foreach (var n in nodes)
+            {
+                bool match =
+                    (old.Entry is not null && ReferenceEquals(n.Entry, old.Entry)) ||
+                    (old.QueueItem is not null && ReferenceEquals(n.QueueItem, old.QueueItem)) ||
+                    (old.Part is not null && ReferenceEquals(n.Part, old.Part) && n.Kind == old.Kind) ||
+                    (old.IsPack && n.IsPack && string.Equals(n.GroupKey, old.GroupKey, System.StringComparison.OrdinalIgnoreCase)) ||
+                    (old.IsWorking && n.IsWorking);
+                if (match) return n;
+                var inner = Walk(n.Children);
+                if (inner is not null) return inner;
+            }
+            return null;
+        }
+        return Walk(OutlinerRoots);
+    }
+
+    /// <summary>First selected group in the outliner — new converts and
+    /// "Add model(s)" target it; with nothing selected they land loose.</summary>
+    public string? TargetOutlinerGroup =>
+        SelectedOutlinerNodes.FirstOrDefault(n => n.IsPack)?.GroupKey
+        ?? SelectedOutlinerNodes.FirstOrDefault(n => n.Entry?.GroupName is not null)?.Entry?.GroupName;
+
+    /// <summary>Photoshop "new group" — empty folder, named uniquely;
+    /// the view starts an inline rename on the fresh row.</summary>
+    public string CreateOutlinerGroup() => PackSession.AddGroup();
+
+    /// <summary>Ctrl+G — move the selected staged layers into a fresh
+    /// group. Selected queue rows retarget too. Returns the group name,
+    /// or null when the selection holds no groupable rows.</summary>
+    public string? GroupSelectedOutlinerLayers()
+    {
+        var entries = SelectedOutlinerNodes.Where(n => n.Entry is not null).Select(n => n.Entry!).ToList();
+        var queued = SelectedOutlinerNodes.Where(n => n.QueueItem is not null).Select(n => n.QueueItem!).ToList();
+        if (entries.Count == 0 && queued.Count == 0) return null;
+
+        var name = PackSession.AddGroup();
+        foreach (var e in entries) e.GroupName = name;
+        foreach (var q in queued) q.GroupName = name;
+        PackSession.RebuildTree();
+        return name;
+    }
+
+    private void RemoveModelOutlinerRoots()
+    {
+        for (int i = OutlinerRoots.Count - 1; i >= 0; i--)
+        {
+            var n = OutlinerRoots[i];
+            if (n.IsWorking || n.IsPart)
+                OutlinerRoots.RemoveAt(i);
+        }
+        _workingRoot = null;
+        _flatPropRoot = null;
+    }
+
+    /// <summary>Outliner root label — prop name, else first mesh name.</summary>
+    private string ResolveOutlinerPropName()
+    {
+        if (!string.IsNullOrWhiteSpace(PropName))
+            return PropName.Trim();
+        if (ModelParts.Count > 0 && !string.IsNullOrWhiteSpace(ModelParts[0].Name))
+            return ModelParts[0].Name;
+        return "Untitled";
+    }
+
+    partial void OnPropNameChanged(string value) => UpdateOutlinerPropRootName();
+
+    private void UpdateOutlinerPropRootName()
+    {
+        var name = ResolveOutlinerPropName();
+        if (_workingRoot is not null)
+            _workingRoot.Name = name;
+        if (_flatPropRoot is not null)
+            _flatPropRoot.Name = name;
+    }
+
+    /// <summary>True while the LOADED model has been dragged into a group:
+    /// its pending queue row inside the group IS its layer row, so the
+    /// top-level working root hides (no duplicate). The model itself stays
+    /// in the viewport.</summary>
+    public bool IsModelParkedInPack =>
+        !string.IsNullOrEmpty(SourcePath) &&
+        PackSession.ConvertQueue.Any(q => q.IsPending &&
+            string.Equals(q.SourcePath, SourcePath, System.StringComparison.OrdinalIgnoreCase));
+
+    public void RebuildOutlinerWorking()
+    {
+        foreach (var p in ModelParts)
+            p.PropertyChanged -= OnOutlinerPartPropertyChanged;
+
+        RemoveModelOutlinerRoots();
+
+        if (ModelParts.Count == 0 || IsModelParkedInPack)
+        {
+            SyncPackOutlinerRoot();
+            return;
+        }
+
+        var propName = ResolveOutlinerPropName();
+
+        // One mesh: tree starts at the prop name (no "Working" wrapper).
+        if (ModelParts.Count == 1)
+        {
+            var p = ModelParts[0];
+            _flatPropRoot = new Services.PropPackTreeNode
+            {
+                Kind = Services.PropPackTreeNode.NodeKind.Part,
+                Name = propName,
+                Part = p,
+                IsExpanded = false,
+                IsEyeOn = p.IsVisible,
+            };
+            OutlinerRoots.Insert(0, _flatPropRoot);
+            p.PropertyChanged += OnOutlinerPartPropertyChanged;
+            SyncPackOutlinerRoot();
+            return;
+        }
+
+        // Several meshes: prop name is the parent, parts underneath.
+        _workingRoot = new Services.PropPackTreeNode
+        {
+            Kind = Services.PropPackTreeNode.NodeKind.Working,
+            Name = propName,
+            IsExpanded = true,
+            Detail = $"{ModelParts.Count} parts",
+            IsEyeOn = ModelParts.Any(p => p.IsVisible),
+        };
+        foreach (var p in ModelParts)
+        {
+            var node = new Services.PropPackTreeNode
+            {
+                Kind = Services.PropPackTreeNode.NodeKind.Part,
+                Name = p.Name,
+                Part = p,
+                IsExpanded = false,
+                IsEyeOn = p.IsVisible,
+            };
+            _workingRoot.Children.Add(node);
+            p.PropertyChanged += OnOutlinerPartPropertyChanged;
+        }
+        OutlinerRoots.Insert(0, _workingRoot);
+        SyncPackOutlinerRoot();
+    }
+
+    private void OnOutlinerPartPropertyChanged(object? sender, System.ComponentModel.PropertyChangedEventArgs e)
+    {
+        if (sender is not ModelPart part) return;
+        if (e.PropertyName is not (nameof(ModelPart.Name) or nameof(ModelPart.IsVisible))) return;
+
+        // Flat prop root mirrors visibility but keeps the PropName label.
+        if (_flatPropRoot is not null && ReferenceEquals(_flatPropRoot.Part, part))
+        {
+            if (e.PropertyName == nameof(ModelPart.IsVisible))
+                _flatPropRoot.IsEyeOn = part.IsVisible;
+            return;
+        }
+
+        if (_workingRoot is null) return;
+        foreach (var n in _workingRoot.Children)
+        {
+            if (!ReferenceEquals(n.Part, part)) continue;
+            if (e.PropertyName == nameof(ModelPart.Name))
+                n.Name = part.Name;
+            else if (e.PropertyName == nameof(ModelPart.IsVisible))
+                n.IsEyeOn = part.IsVisible;
+            break;
+        }
+        // Group eye = aggregate of the parts.
+        _workingRoot.IsEyeOn = ModelParts.Any(p => p.IsVisible);
+    }
+
+    public void ClearOutlinerSelection()
+    {
+        foreach (var n in SelectedOutlinerNodes)
+            n.IsSelected = false;
+        SelectedOutlinerNodes.Clear();
+        SelectedPackEntry = null;
+        SelectedModelPart = null;
+    }
+
+    public void SetOutlinerSelection(IEnumerable<Services.PropPackTreeNode> nodes, bool additive)
+    {
+        var list = nodes as IList<Services.PropPackTreeNode> ?? nodes.ToList();
+
+        // Re-selecting the exact current selection is a no-op — the click
+        // path fires from BOTH PreviewMouseDown and SelectedItemChanged,
+        // and clearing + re-adding made the highlight flicker.
+        if (!additive && list.Count == SelectedOutlinerNodes.Count &&
+            list.All(n => SelectedOutlinerNodes.Contains(n)))
+            return;
+
+        if (!additive)
+            ClearOutlinerSelection();
+        nodes = list;
+
+        foreach (var n in nodes)
+        {
+            if (n is null) continue;
+            if (SelectedOutlinerNodes.Contains(n))
+            {
+                if (additive)
+                {
+                    n.IsSelected = false;
+                    SelectedOutlinerNodes.Remove(n);
+                }
+                continue;
+            }
+            n.IsSelected = true;
+            SelectedOutlinerNodes.Add(n);
+        }
+
+        SelectedPackEntry = SelectedOutlinerNodes.Select(x => x.Entry).FirstOrDefault(e => e is not null);
+        SelectedModelPart = SelectedOutlinerNodes.Select(x => x.Part).FirstOrDefault(p => p is not null);
+    }
 
     partial void OnIsPackModeChanged(bool value)
     {
@@ -638,6 +1358,15 @@ public partial class MainViewModel : ObservableObject
         // panel isn't blank.
         if (value && string.IsNullOrWhiteSpace(PackSession.PackName))
             PackSession.PackName = string.IsNullOrWhiteSpace(PropName) ? "props_pack" : PropName + "_pack";
+
+        if (value)
+        {
+            IsLayersPanelOpen = true;
+            IsLayersPanelCollapsed = false;
+            if (LayersPanelWidth < 300)
+                LayersPanelWidth = 340;
+        }
+        EnsureOutlinerStructure();
     }
 
     [RelayCommand]
@@ -754,14 +1483,17 @@ public partial class MainViewModel : ObservableObject
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(IsDashboard))]
     [NotifyPropertyChangedFor(nameof(IsPropsView))]
+    [NotifyPropertyChangedFor(nameof(IsAnimatedPropsView))]
     [NotifyPropertyChangedFor(nameof(IsOptimizeView))]
     [NotifyPropertyChangedFor(nameof(IsRpfView))]
     [NotifyPropertyChangedFor(nameof(IsVehiclesView))]
     [NotifyPropertyChangedFor(nameof(IsImageTo3DView))]
     [NotifyPropertyChangedFor(nameof(IsEmotesView))]
     [NotifyPropertyChangedFor(nameof(Is3DView))]
+    [NotifyPropertyChangedFor(nameof(ShowAssetsEditMenu))]
+    [NotifyPropertyChangedFor(nameof(ShowAssetsViewMenu))]
     [NotifyPropertyChangedFor(nameof(ActiveViewTitle))]
-    private AppView _activeView = AppView.Props;   // boot into the 3D Model tool; the Welcome splash floats over it
+    private AppView _activeView = AppView.Props;   // boot into Props; Welcome splash floats over it
 
     // ── Experience level (UI complexity tier) ──────────────────────────
     // 0=Beginner, 1=Standard, 2=Advanced. Controls across the app bind
@@ -794,17 +1526,27 @@ public partial class MainViewModel : ObservableObject
     // All built-in IsXView flags suppress when a plugin is the active
     // pane content — otherwise the previously-active built-in Grid would
     // still render under the plugin host because Visibility binds to
-    // these flags directly.
-    public bool IsDashboard      => !IsPluginActive && ActiveView == AppView.Dashboard;
-    public bool IsPropsView      => !IsPluginActive && ActiveView == AppView.Props;
-    public bool IsOptimizeView   => !IsPluginActive && ActiveView == AppView.Optimize;
-    public bool IsRpfView        => !IsPluginActive && ActiveView == AppView.Rpf;
-    public bool IsVehiclesView   => !IsPluginActive && ActiveView == AppView.Vehicles;
-    public bool IsImageTo3DView  => !IsPluginActive && ActiveView == AppView.ImageTo3D;
-    public bool IsEmotesView => !IsPluginActive && ActiveView == AppView.Emotes;
-    /// <summary>True when the 3D Model rail entry is active. Optimize now
-    /// has its own rail slot so it no longer counts toward this flag.</summary>
-    public bool Is3DView         => !IsPluginActive && ActiveView == AppView.Props;
+    // these flags directly. Same when Settings is open, so WebView2
+    // HwndHosts drop their native windows (airspace) and Settings paints cleanly.
+    public bool IsDashboard      => !IsPluginActive && !IsSettingsOpen && ActiveView == AppView.Dashboard;
+    /// <summary>Static Props and Animated share the same convert workspace.</summary>
+    public bool IsPropsView      => !IsPluginActive && !IsSettingsOpen && ActiveView is AppView.Props or AppView.AnimatedProps;
+    public bool IsAnimatedPropsView => !IsPluginActive && !IsSettingsOpen && ActiveView == AppView.AnimatedProps;
+    public bool IsOptimizeView   => !IsPluginActive && !IsSettingsOpen && ActiveView == AppView.Optimize;
+    public bool IsRpfView        => !IsPluginActive && !IsSettingsOpen && ActiveView == AppView.Rpf;
+    public bool IsVehiclesView   => !IsPluginActive && !IsSettingsOpen && ActiveView == AppView.Vehicles;
+    public bool IsImageTo3DView  => !IsPluginActive && !IsSettingsOpen && ActiveView == AppView.ImageTo3D;
+    public bool IsEmotesView     => !IsPluginActive && !IsSettingsOpen && ActiveView == AppView.Emotes;
+    /// <summary>True when the Assets rail entry is active — Props and
+    /// Animated (prop) share one rail slot and the top segmented toggle.
+    /// Vehicles is its own rail peer.</summary>
+    public bool Is3DView         => !IsPluginActive && !IsSettingsOpen
+        && ActiveView is AppView.Props or AppView.AnimatedProps;
+
+    /// <summary>True when Edit (undo/redo) applies — Assets prop workspace.</summary>
+    public bool ShowAssetsEditMenu => Is3DView;
+    /// <summary>True when View (reference ped / layers) applies.</summary>
+    public bool ShowAssetsViewMenu => Is3DView;
 
     /// <summary>True if any addon is enabled — drives the visibility of the
     /// rail's "ADDONS" divider + caption so they only appear once at least
@@ -831,6 +1573,9 @@ public partial class MainViewModel : ObservableObject
     /// the same id is still discovered.</summary>
     public async Task RefreshPluginsAsync()
     {
+        foreach (var old in AllPlugins)
+            old.PropertyChanged -= OnPluginEntryChanged;
+
         var records = await FiveOS.Plugins.PluginManager.DiscoverAsync();
         AllPlugins.Clear();
         EnabledPluginRailEntries.Clear();
@@ -853,6 +1598,9 @@ public partial class MainViewModel : ObservableObject
     /// at runtime when the user clicks Refresh.</summary>
     public void RefreshPlugins()
     {
+        foreach (var old in AllPlugins)
+            old.PropertyChanged -= OnPluginEntryChanged;
+
         AllPlugins.Clear();
         EnabledPluginRailEntries.Clear();
         foreach (var rec in FiveOS.Plugins.PluginManager.Discover())
@@ -904,12 +1652,15 @@ public partial class MainViewModel : ObservableObject
         // attributes on ActiveView don't fire when ActivePluginId changes.
         OnPropertyChanged(nameof(IsDashboard));
         OnPropertyChanged(nameof(IsPropsView));
+        OnPropertyChanged(nameof(IsAnimatedPropsView));
         OnPropertyChanged(nameof(IsOptimizeView));
         OnPropertyChanged(nameof(IsRpfView));
         OnPropertyChanged(nameof(IsVehiclesView));
         OnPropertyChanged(nameof(IsImageTo3DView));
         OnPropertyChanged(nameof(IsEmotesView));
         OnPropertyChanged(nameof(Is3DView));
+        OnPropertyChanged(nameof(ShowAssetsEditMenu));
+        OnPropertyChanged(nameof(ShowAssetsViewMenu));
         OnPropertyChanged(nameof(ActivePluginView));
     }
 
@@ -930,13 +1681,14 @@ public partial class MainViewModel : ObservableObject
 
     public string ActiveViewTitle => ActiveView switch
     {
-        AppView.Props      => "3D Model",
-        AppView.Optimize   => "Optimize",
-        AppView.Rpf        => "RPF",
-        AppView.Vehicles   => "Vehicles",
-        AppView.ImageTo3D  => "Image → 3D",
-        AppView.Emotes     => "Emotes",
-        _                  => "FiveOS",
+        AppView.Props          => "Props",
+        AppView.AnimatedProps  => "Animated",
+        AppView.Optimize       => "Optimize",
+        AppView.Rpf            => "RPF",
+        AppView.Vehicles       => "Vehicles",
+        AppView.ImageTo3D      => "Image → 3D",
+        AppView.Emotes         => "Emotes",
+        _                      => "FiveOS",
     };
 
     /// <summary>Bound to dashboard tiles AND the rail click handler. Accepts
@@ -955,12 +1707,18 @@ public partial class MainViewModel : ObservableObject
             return;
         }
 
-        // Built-in target — drop any active plugin first.
+        // Built-in target — drop any active plugin / Settings pane first.
         ActivePluginId = null;
+        IsSettingsOpen = false;
 
-        if (string.Equals(view, "3D", System.StringComparison.OrdinalIgnoreCase))
+        // Assets rail entry — keep the current sub-mode if already inside
+        // Assets; otherwise open Props.
+        if (string.Equals(view, "3D", System.StringComparison.OrdinalIgnoreCase)
+            || string.Equals(view, "Assets", System.StringComparison.OrdinalIgnoreCase))
         {
-            ActiveView = AppView.Props;
+            if (ActiveView is not (AppView.Props or AppView.AnimatedProps))
+                ActiveView = AppView.Props;
+            SyncWorkspaceTabForActiveView();
             return;
         }
 
@@ -968,6 +1726,17 @@ public partial class MainViewModel : ObservableObject
         {
             ExportMode = ExportMode.Prop;
             ActiveView = AppView.Props;
+            SyncWorkspaceTabForActiveView();
+            return;
+        }
+
+        if (string.Equals(view, "Animated", System.StringComparison.OrdinalIgnoreCase))
+        {
+            ExportMode = ExportMode.Prop;
+            AnimatedProp = true;
+            EnsureDefaultPropAnimKeys();
+            ActiveView = AppView.AnimatedProps;
+            SyncWorkspaceTabForActiveView();
             return;
         }
 
@@ -978,16 +1747,16 @@ public partial class MainViewModel : ObservableObject
         {
             OptimizeVm.Mode = OptimizeMode.TxAdmin;
             ActiveView = AppView.Optimize;
+            SyncWorkspaceTabForActiveView();
             return;
         }
 
-        // Carcols Fixer is a mode inside the Vehicles tab rather than its own
-        // AppView — keep the old rail/deep-link name as an alias that lands on
-        // Vehicles with the Carcols pane preselected.
-        if (string.Equals(view, "Carcols", System.StringComparison.OrdinalIgnoreCase))
+        if (string.Equals(view, "Carcols", System.StringComparison.OrdinalIgnoreCase)
+            || string.Equals(view, "Livery", System.StringComparison.OrdinalIgnoreCase)
+            || string.Equals(view, "Vehicles", System.StringComparison.OrdinalIgnoreCase))
         {
-            VehiclesVm.IsCarcolsMode = true;
             ActiveView = AppView.Vehicles;
+            SyncWorkspaceTabForActiveView();
             return;
         }
 
@@ -998,6 +1767,7 @@ public partial class MainViewModel : ObservableObject
         {
             OpenEmotesAsAnimLibrary = false;
             ActiveView = AppView.Emotes;
+            SyncWorkspaceTabForActiveView();
             return;
         }
 
@@ -1007,6 +1777,7 @@ public partial class MainViewModel : ObservableObject
         {
             OpenEmotesAsAnimLibrary = true;
             ActiveView = AppView.Emotes;
+            SyncWorkspaceTabForActiveView();
             return;
         }
 
@@ -1015,7 +1786,59 @@ public partial class MainViewModel : ObservableObject
             if (parsed == AppView.Emotes)
                 OpenEmotesAsAnimLibrary = false;
             ActiveView = parsed;
+            SyncWorkspaceTabForActiveView();
         }
+    }
+
+    public void SyncWorkspaceTabForActiveView()
+    {
+        if (SuppressWorkspaceTabSync) return;
+        var kind = WorkspaceDocument.KindFromAppView(ActiveView);
+        if (kind == null) return;
+
+        var active = WorkspaceDocs.ActiveDocument;
+        if (active != null && active.Kind == kind.Value)
+        {
+            WorkspaceDocs.Activate(active);
+            return;
+        }
+
+        // The workspace bar navigates the CURRENT tab, browser-style:
+        // switching workspaces converts this tab in place — never jumps to a
+        // sibling tab and never opens a new one. An Emotes tab converted this
+        // way starts unlinked; SyncEmoteWorkspaceTabs binds it to an
+        // EmoteDocument once the view is shown.
+        if (active != null)
+        {
+            // Converting an Emotes tab detaches its EmoteDocument. Close that
+            // document, otherwise it stays alive with no tab and later gets a
+            // fresh tab re-materialised — the "duplicate tab" bug.
+            var detachEmoteId = active.Kind == WorkspaceKind.Emotes
+                ? active.EmoteDocumentId : null;
+            WorkspaceDocs.Repurpose(active, kind.Value);
+            if (!string.IsNullOrEmpty(detachEmoteId))
+                DetachEmoteDocument?.Invoke(detachEmoteId);
+            return;
+        }
+
+        WorkspaceDocs.EnsureKind(kind.Value, activate: true);
+    }
+
+    /// <summary>Create a new chrome tab for the current section (+ button).</summary>
+    public WorkspaceDocument NewWorkspaceTabForActiveView()
+    {
+        var kind = WorkspaceDocument.KindFromAppView(ActiveView) ?? WorkspaceKind.Assets;
+        // Number duplicate non-emote tabs: "Assets", "Assets 2", …
+        string? title = null;
+        if (kind != WorkspaceKind.Emotes)
+        {
+            var baseTitle = WorkspaceDocument.DefaultTitleFor(kind);
+            int n = 0;
+            foreach (var d in WorkspaceDocs.Documents)
+                if (d.Kind == kind) n++;
+            title = n == 0 ? baseTitle : $"{baseTitle} {n + 1}";
+        }
+        return WorkspaceDocs.NewDocument(kind, activate: true, title: title);
     }
 
     /// <summary>When true, opening Emotes should land on Animation Library
@@ -1023,7 +1846,12 @@ public partial class MainViewModel : ObservableObject
     public bool OpenEmotesAsAnimLibrary { get; set; }
 
     [RelayCommand]
-    private void GoHome() => ActiveView = AppView.Dashboard;
+    private void GoHome()
+    {
+        IsSettingsOpen = false;
+        ActivePluginId = null;
+        ActiveView = AppView.Dashboard;
+    }
 
     // ── Activity rail (collapsible left nav) ───────────────────────
     //
@@ -1050,10 +1878,22 @@ public partial class MainViewModel : ObservableObject
     [RelayCommand]
     private void ToggleRailPin() => IsRailPinned = !IsRailPinned;
 
-    /// <summary>Toggles the Settings overlay (replaces the old Settings tab).
-    /// Driven by the gear icon in the corner of the menu bar.</summary>
+    /// <summary>Toggles the Settings pane (rail entry + menu Ctrl+,).
+    /// When open, built-in IsXView flags go false so WebView2 airspace
+    /// collapses and the Settings host fills the content column.</summary>
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(IsViewportVisible))]
+    [NotifyPropertyChangedFor(nameof(IsDashboard))]
+    [NotifyPropertyChangedFor(nameof(IsPropsView))]
+    [NotifyPropertyChangedFor(nameof(IsAnimatedPropsView))]
+    [NotifyPropertyChangedFor(nameof(IsOptimizeView))]
+    [NotifyPropertyChangedFor(nameof(IsRpfView))]
+    [NotifyPropertyChangedFor(nameof(IsVehiclesView))]
+    [NotifyPropertyChangedFor(nameof(IsImageTo3DView))]
+    [NotifyPropertyChangedFor(nameof(IsEmotesView))]
+    [NotifyPropertyChangedFor(nameof(Is3DView))]
+    [NotifyPropertyChangedFor(nameof(ShowAssetsEditMenu))]
+    [NotifyPropertyChangedFor(nameof(ShowAssetsViewMenu))]
     private bool _isSettingsOpen;
 
     [ObservableProperty]
@@ -1129,13 +1969,40 @@ public partial class MainViewModel : ObservableObject
     private bool _suppressSnapshot;
     private System.Windows.Threading.DispatcherTimer? _transformDebounceTimer;
 
-    // Gated to the 3D-model tab: these snapshots belong to the Props
-    // workspace, but the window-level Ctrl+Z/Ctrl+Y KeyBindings fire from
-    // ANY tab — without the gate, pressing Ctrl+Z with focus on the nav
-    // rail while e.g. the Emotes tab is open silently mutated the hidden
-    // 3D tab instead of undoing the visible pose edit.
-    public bool CanUndo => ActiveView == AppView.Props && !IsPluginActive && _undoStack.Count > 0;
-    public bool CanRedo => ActiveView == AppView.Props && !IsPluginActive && _redoStack.Count > 0;
+    // Universal undo/redo: Assets form history, Emotes pose/timeline (via
+    // External* hooks wired by MainWindow), otherwise nothing to undo.
+    // Window-level Ctrl+Z/Y KeyBindings always hit these commands — without
+    // the view gate, Emotes focus would silently mutate the hidden Assets stack.
+    public Func<bool>? ExternalCanUndo { get; set; }
+    public Func<bool>? ExternalCanRedo { get; set; }
+    public Action? ExternalUndo { get; set; }
+    public Action? ExternalRedo { get; set; }
+
+    public bool CanUndo
+    {
+        get
+        {
+            if (IsPluginActive || IsSettingsOpen) return false;
+            if (ActiveView is AppView.Props or AppView.AnimatedProps)
+                return _undoStack.Count > 0;
+            if (ActiveView == AppView.Emotes)
+                return ExternalCanUndo?.Invoke() ?? false;
+            return false;
+        }
+    }
+
+    public bool CanRedo
+    {
+        get
+        {
+            if (IsPluginActive || IsSettingsOpen) return false;
+            if (ActiveView is AppView.Props or AppView.AnimatedProps)
+                return _redoStack.Count > 0;
+            if (ActiveView == AppView.Emotes)
+                return ExternalCanRedo?.Invoke() ?? false;
+            return false;
+        }
+    }
 
     private EditSnapshot TakeSnapshot() => new(
         PropName, UpAxisIndex, IncludeCollision, EmbedCollision,
@@ -1198,6 +2065,12 @@ public partial class MainViewModel : ObservableObject
     [RelayCommand(CanExecute = nameof(CanUndo))]
     private void Undo()
     {
+        if (ActiveView == AppView.Emotes)
+        {
+            ExternalUndo?.Invoke();
+            NotifyHistoryChanged();
+            return;
+        }
         // Flush any in-flight debounced drag so the most recent state
         // lands on the stack before we pop. Otherwise a Ctrl+Z mid-drag
         // would undo something older than what the user can see.
@@ -1212,6 +2085,12 @@ public partial class MainViewModel : ObservableObject
     [RelayCommand(CanExecute = nameof(CanRedo))]
     private void Redo()
     {
+        if (ActiveView == AppView.Emotes)
+        {
+            ExternalRedo?.Invoke();
+            NotifyHistoryChanged();
+            return;
+        }
         FlushPendingSnapshot();
         if (_redoStack.Count == 0) return;
         if (_currentSnapshot != null) _undoStack.Push(_currentSnapshot);
@@ -1292,7 +2171,7 @@ public partial class MainViewModel : ObservableObject
         }
     }
 
-    private void NotifyHistoryChanged()
+    public void NotifyHistoryChanged()
     {
         OnPropertyChanged(nameof(CanUndo));
         OnPropertyChanged(nameof(CanRedo));
@@ -1302,7 +2181,12 @@ public partial class MainViewModel : ObservableObject
 
     // CanUndo/CanRedo are gated on the active tab, so the window-level
     // Ctrl+Z KeyBinding must re-query CanExecute whenever the tab changes.
-    partial void OnActiveViewChanged(AppView value) => NotifyHistoryChanged();
+    partial void OnActiveViewChanged(AppView value)
+    {
+        NotifyHistoryChanged();
+        if (!SuppressWorkspaceTabSync)
+            ScheduleSaveWorkspaceSession();
+    }
 }
 
 /// <summary>One selectable resolution in the texture-optimize preview —

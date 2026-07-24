@@ -3,22 +3,15 @@
                  xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
                  xmlns:ui="http://schemas.lepo.co/wpfui/2022/xaml"
                  xmlns:vm="clr-namespace:FiveOS.ViewModels"
-                 xmlns:conv="clr-namespace:FiveOS.Converters"
                  Title="Batch convert"
                  Height="640" Width="720"
                  MinHeight="540" MinWidth="640"
                  WindowStartupLocation="CenterOwner"
-                 WindowBackdropType="Mica"
+                 WindowBackdropType="None"
                  ExtendsContentIntoTitleBar="True"
                  AllowDrop="True"
                  DragOver="OnWindowDragOver"
                  Drop="OnWindowDrop">
-
-    <ui:FluentWindow.Resources>
-        <conv:BooleanToVisibilityConverter x:Key="BooleanToVisibility" />
-        <conv:InverseBooleanToVisibilityConverter x:Key="InverseBooleanToVisibility" />
-        <conv:InverseBooleanConverter x:Key="InverseBoolean" />
-    </ui:FluentWindow.Resources>
 
     <Grid>
         <Grid.RowDefinitions>
@@ -34,7 +27,6 @@
                      ShowMaximize="False"
                      ShowMinimize="False" />
 
-        <!-- ─── Header: pack name + drop hint ─────────────────────── -->
         <Border Grid.Row="1" Margin="20,8,20,0">
             <Grid>
                 <Grid.ColumnDefinitions>
@@ -84,7 +76,6 @@
             </Grid>
         </Border>
 
-        <!-- ─── Body: queue list with empty-state drop zone ───────── -->
         <Border Grid.Row="2"
                 Margin="20,12,20,0"
                 CornerRadius="8"
@@ -92,7 +83,7 @@
                 BorderBrush="{DynamicResource ControlElevationBorderBrush}"
                 Background="{DynamicResource ControlFillColorDefaultBrush}">
             <Grid>
-                <!-- Empty state: clickable drop zone -->
+
                 <Border x:Name="EmptyDropZone"
                         Background="Transparent"
                         Cursor="Hand"
@@ -122,7 +113,6 @@
                     </StackPanel>
                 </Border>
 
-                <!-- Populated state: scrollable item list -->
                 <ScrollViewer VerticalScrollBarVisibility="Auto"
                               Visibility="{Binding HasItems, Converter={StaticResource BooleanToVisibility}}">
                     <ItemsControl ItemsSource="{Binding Items}">
@@ -209,7 +199,6 @@
             </Grid>
         </Border>
 
-        <!-- ─── Options ───────────────────────────────────────────── -->
         <Border Grid.Row="3" Margin="20,12,20,0">
             <Grid IsEnabled="{Binding IsIdle}">
                 <Grid.ColumnDefinitions>
@@ -249,7 +238,6 @@
             </Grid>
         </Border>
 
-        <!-- ─── Status + actions ──────────────────────────────────── -->
         <Border Grid.Row="4"
                 Margin="20,12,20,16"
                 Padding="0,12,0,0"

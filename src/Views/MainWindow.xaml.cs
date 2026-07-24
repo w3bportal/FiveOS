@@ -3,6 +3,7 @@
 
 using System.Diagnostics;
 using System.IO;
+using System.IO.Compression;
 using System.Linq;
 using System.Runtime.InteropServices;
 using System.Text.RegularExpressions;
@@ -14,6 +15,9 @@ using Microsoft.Win32;
 using FiveOS.Services;
 using FiveOS.ViewModels;
 using Wpf.Ui.Controls;
+using WpfMenuItem = System.Windows.Controls.MenuItem;
+using WpfSeparator = System.Windows.Controls.Separator;
+using WpfContextMenu = System.Windows.Controls.ContextMenu;
 
 namespace FiveOS.Views;
 
@@ -45,6 +49,10 @@ public partial class MainWindow : FluentWindow
     // textures. Paths in PartDiffuseOverrides point here so convert still
     // finds them after the picker closes.
     private string? _partTexOverrideDir;
+    // PNGs extracted from the loaded model for the sidebar Textures list.
+    private string? _modelTexPreviewDir;
+    private int _modelTexRefreshGen;
+    private bool _suppressTextureSelection;
 
     // Latest transform values posted from the three.js gizmo. Applied to
     // the model on Convert so what you see in the preview is what gets baked.
@@ -99,18 +107,75 @@ public partial class MainWindow : FluentWindow
     {
         InitializeComponent();
 
-        // Locked to the Fluent DARK theme (user preference — dark only). Mica
-        // backdrop comes from WindowBackdropType="Mica" on the FluentWindow, and
-        // the accent follows the Windows system accent. We deliberately do NOT
-        // use SystemThemeWatcher so the app stays dark even when Windows is set
-        // to Light.
-        Wpf.Ui.Appearance.ApplicationThemeManager.Apply(Wpf.Ui.Appearance.ApplicationTheme.Dark);
+        // Locked charcoal IDE dark. Accent comes from Settings (default blue).
+        // Pass None for backdrop (flat panels, not Mica) and skip system-accent
+        // update so Windows personalization colors never leak in.
+        Wpf.Ui.Appearance.ApplicationThemeManager.Apply(
+            Wpf.Ui.Appearance.ApplicationTheme.Dark,
+            Wpf.Ui.Controls.WindowBackdropType.None,
+            updateAccent: false);
+        // Re-apply after theme manager so WPF-UI dark resources don't overwrite
+        // the accent pinned at App startup.
+        ThemeAccent.ApplyFromSettings();
+        ThemeAccent.Changed += OnThemeAccentChanged;
+
+        // Parked-ghost lifecycle: a queue row leaving the session (deleted,
+        // converted at export, cleared) takes its viewport ghost with it.
+        Services.PropPackSession.Current.ConvertQueue.CollectionChanged += (_, args) =>
+        {
+            if (args.Action == System.Collections.Specialized.NotifyCollectionChangedAction.Reset)
+            {
+                _ = Dispatcher.InvokeAsync(async () =>
+                {
+                    if (Viewport?.CoreWebView2 == null) return;
+                    try
+                    {
+                        await Viewport.CoreWebView2.ExecuteScriptAsync(
+                            "window.clearParkedModels && window.clearParkedModels()");
+                    }
+                    catch { /* viewer may be mid-navigate */ }
+                });
+                return;
+            }
+            if (args.OldItems is null) return;
+            foreach (Services.PropPackQueueItem it in args.OldItems)
+                _ = Dispatcher.InvokeAsync(() => RemoveParkedInstanceAsync(it.AssetName));
+        };
 
         DataContext = _vm;
-        Title = BuildVersionTitle();
+        RefreshWindowTitle();
+        ApplySavedPropsSidebarWidth();
+        ApplyPropAnimTimelineHeight();
+        if (_vm.LayersPanelWidth < 280)
+            _vm.LayersPanelWidth = 340;
+        _vm.IsLayersPanelCollapsed = false;
+        _vm.CommitLayersPanelWidth();
+        _vm.WorkspaceDocs.PropertyChanged += (_, e) =>
+        {
+            if (e.PropertyName is nameof(WorkspaceDocumentSet.ActiveDocument)
+                or nameof(WorkspaceDocumentSet.ActiveDocumentId))
+                RefreshWindowTitle();
+        };
+        _vm.WorkspaceDocs.Documents.CollectionChanged += (_, _) => RefreshWindowTitle();
+        // Mirror Emotes document tabs into the chrome tab strip.
+        AttachEmoteWorkspaceTabSync();
+        // Universal Undo/Redo: chrome buttons + Ctrl+Z/Y route through
+        // MainViewModel, which calls into Emotes when that section is active.
+        _vm.ExternalCanUndo = () => EmotesWorkspace.CanUndoPose;
+        _vm.ExternalCanRedo = () => EmotesWorkspace.CanRedoPose;
+        _vm.ExternalUndo = () => EmotesWorkspace.RunUndoPose();
+        _vm.ExternalRedo = () => EmotesWorkspace.RunRedoPose();
+        // Close an emote document when its chrome tab is navigated to another
+        // section, so it can't resurrect as a duplicate tab later.
+        _vm.DetachEmoteDocument = id => EmotesWorkspace.DetachEmoteDocumentById(id);
+        EmotesWorkspace.HistoryChanged += (_, _) => _vm.NotifyHistoryChanged();
         // WebView2 is initialized lazily on first model load (see EnsureWebViewAsync)
         // so the Edge process tree (manager + GPU + storage utility, ~40 MB)
         // doesn't spawn for users who never open the 3D viewer this session.
+
+        // Pack dock / splitter layout changes often skip window.resize inside
+        // the viewer — poke it when the host control's size changes.
+        ViewportRoot.SizeChanged += (_, _) => _ = NudgeViewerResizeAsync();
 
         // Reference ped: react to VM-side changes by pushing into the viewer.
         // Toggle uses cheap visibility-only path; path swap re-stages.
@@ -124,6 +189,12 @@ public partial class MainWindow : FluentWindow
                 ClearLoadedModel();
             else if (e.PropertyName == nameof(MainViewModel.GlassOpacity))
                 await SetGlassAppearanceAsync(_vm.GlassOpacity);
+            else if (e.PropertyName == nameof(MainViewModel.IsPackMode)
+                     || e.PropertyName == nameof(MainViewModel.IsLayersPanelCollapsed)
+                     || e.PropertyName == nameof(MainViewModel.IsLayersPanelOpen))
+            {
+                _ = NudgeViewerResizeAsync();
+            }
             else if (IsTransformProperty(e.PropertyName) && !_suppressTransformPush)
                 await PushTransformToViewerAsync();
             else if (e.PropertyName == nameof(MainViewModel.ActiveView)
@@ -133,6 +204,8 @@ public partial class MainWindow : FluentWindow
                 _vm.OpenEmotesAsAnimLibrary = false;
                 EmotesWorkspace.OpenAnimLibraryMode();
             }
+            else if (e.PropertyName == nameof(MainViewModel.IsAnimatedPropsView))
+                ApplyPropAnimTimelineHeight();
         };
 
         // The update check now runs on the boot splash ("Checking for
@@ -164,6 +237,8 @@ public partial class MainWindow : FluentWindow
         {
             if (_welcome != null)
                 ev.Cancel = true;
+            else
+                _vm.SaveWorkspaceSessionNow();
         };
 
         // Dev hook: FIVEOS_DEV_AUTOIMPORT=<path> opens the Emotes workspace
@@ -189,6 +264,9 @@ public partial class MainWindow : FluentWindow
             _warmCap = new System.Windows.Threading.DispatcherTimer { Interval = TimeSpan.FromSeconds(15) };
             _warmCap.Tick += (_, _) => OnEmotesWarmReady();
             _warmCap.Start();
+            // Suppress chrome-tab sync so warming doesn't leave an Emotes tab
+            // the user never opened this session.
+            _vm.SuppressWorkspaceTabSync = true;
             _vm.ActiveView = AppView.Emotes;   // realize + build the rig off-screen
         };
     }
@@ -208,6 +286,9 @@ public partial class MainWindow : FluentWindow
         try { EmotesWorkspace.ViewerFirstReady -= OnEmotesWarmReady; } catch { }
         if (_vm.ActiveView == AppView.Emotes)
             _vm.ActiveView = _warmRestoreView;
+        _vm.SuppressWorkspaceTabSync = false;
+        // Do NOT SyncWorkspaceTabForActiveView here — session restore already
+        // placed the correct chrome tabs; EnsureKind would spawn extras.
     }
 
     private async void MaybeDevAutoImport(object? sender, RoutedEventArgs e)
@@ -319,18 +400,30 @@ public partial class MainWindow : FluentWindow
 
     protected override void OnClosed(EventArgs e)
     {
-        // Dispose the WebView2 (frees the Edge process tree) and delete this
-        // session's viewer temp dir — it holds the full viewer bundle plus the
-        // staged model + all sibling textures (often hundreds of MB). Without
-        // this every run leaks a Viewer-<guid> dir under %TEMP%\FiveOS forever.
+        try { ThemeAccent.Changed -= OnThemeAccentChanged; } catch { /* */ }
+
+        // Tear down every WebView2 host so Edge process trees + session dirs
+        // don't leak across launches (~40 MB+ each).
+        try { EmotesWorkspace?.Teardown(); } catch { /* */ }
+        try { FindVehiclesView()?.Teardown(); } catch { /* */ }
+        try { FindOptimizeView()?.Teardown(); } catch { /* */ }
+
+        // Dispose the main props WebView2 and delete this session's viewer
+        // temp dir — staged models + textures can be hundreds of MB.
         try { Viewport?.Dispose(); } catch { /* already gone */ }
         if (!string.IsNullOrEmpty(_viewerSessionDir))
         {
             try { if (Directory.Exists(_viewerSessionDir)) Directory.Delete(_viewerSessionDir, true); }
             catch { /* locked/best-effort — CacheService.Clear sweeps leftovers */ }
         }
+
+        try { CacheService.PruneStaleViewerCaches(); } catch { /* best-effort */ }
+
         base.OnClosed(e);
     }
+
+    private void OnThemeAccentChanged(object? sender, EventArgs e) =>
+        Dispatcher.Invoke(PushAccentToViewer);
 
     /// <summary>
     /// Hand the splash-time update check's result to the window: light the
@@ -425,24 +518,35 @@ public partial class MainWindow : FluentWindow
     // Drop " BETA" here when cutting a stable release.
     private const bool IsBeta = false;
 
-    private static string BuildVersionTitle()
+    private static string AppVersionString()
     {
         var asm = typeof(MainWindow).Assembly;
         var info = asm.GetCustomAttributes(typeof(System.Reflection.AssemblyInformationalVersionAttribute), false);
-        string version;
         if (info.Length > 0)
         {
             var raw = ((System.Reflection.AssemblyInformationalVersionAttribute)info[0]).InformationalVersion;
-            // Strip "+commit-sha" suffix that SourceLink/CI sometimes appends.
             var plus = raw.IndexOf('+');
-            version = plus > 0 ? raw[..plus] : raw;
+            return plus > 0 ? raw[..plus] : raw;
         }
-        else
-        {
-            var v = asm.GetName().Version;
-            version = v is null ? "0.0.0" : $"{v.Major}.{v.Minor}.{v.Build}";
-        }
+        var v = asm.GetName().Version;
+        return v is null ? "0.0.0" : $"{v.Major}.{v.Minor}.{v.Build}";
+    }
+
+    /// <summary>C4D-style chrome title: <c>FiveOS vX.Y.Z - [tab] - Main</c>.</summary>
+    private void RefreshWindowTitle()
+    {
+        var version = AppVersionString();
+        var tab = _vm.WorkspaceDocs.ActiveDocument?.DisplayTitle?.TrimEnd(' ', '*', '•');
+        if (string.IsNullOrWhiteSpace(tab)) tab = "Main";
+        var beta = IsBeta ? " BETA" : "";
+        Title = $"FiveOS {version}{beta} - [{tab}] - Main";
+    }
+
+    private static string BuildVersionTitle()
+    {
+        // Kept for callers that want the slogan form; chrome uses RefreshWindowTitle.
         const string slogan = "All in One FiveM Modding Tool.";
+        var version = AppVersionString();
         return IsBeta ? $"FiveOS - {slogan} - v{version} BETA" : $"FiveOS - {slogan} - v{version}";
     }
 
@@ -541,11 +645,13 @@ public partial class MainWindow : FluentWindow
     private void PushAccentToViewer()
     {
         if (Viewport?.CoreWebView2 is null) return;
-        if (System.Windows.Application.Current?.TryFindResource("SystemAccentColorBrush") is not System.Windows.Media.SolidColorBrush brush) return;
-        var c = brush.Color;
+        var c = ThemeAccent.Current;
+        if (System.Windows.Application.Current?.TryFindResource("SystemAccentColorBrush")
+            is System.Windows.Media.SolidColorBrush brush)
+            c = brush.Color;
         var hex = $"#{c.R:X2}{c.G:X2}{c.B:X2}";
         _ = Viewport.CoreWebView2.ExecuteScriptAsync(
-            $"document.documentElement.style.setProperty('--pose-accent','{hex}')");
+            $"(function(h){{var r=document.documentElement.style;r.setProperty('--pose-accent',h);r.setProperty('--vscode-accent',h);}})('{hex}')");
     }
 
     private void OnViewerMessage(object? sender, CoreWebView2WebMessageReceivedEventArgs e)
@@ -693,6 +799,17 @@ public partial class MainWindow : FluentWindow
                     // Sync the new model's glass to the current Appearance slider
                     // (the viewer defaults to 0.6 per load until told otherwise).
                     await SetGlassAppearanceAsync(_vm.GlassOpacity);
+                    var partNames = _vm.ModelParts.Select(p => p.OriginalName).ToList();
+                    _vm.EnsureTextureVariants(partNames, _vm.PropName);
+
+                    // Queued-layer preview: restore the transform the layer
+                    // was dropped with (the load reset it to identity).
+                    if (_pendingPreviewTransform is { } t)
+                    {
+                        _pendingPreviewTransform = null;
+                        _vm.TransformScaleX = t.Sx; _vm.TransformScaleY = t.Sy; _vm.TransformScaleZ = t.Sz;
+                        _vm.TransformRotX = t.Rx; _vm.TransformRotY = t.Ry; _vm.TransformRotZ = t.Rz;
+                    }
                 });
             }
             else if (json.Contains("\"transform\""))
@@ -882,7 +999,12 @@ public partial class MainWindow : FluentWindow
             _vm.OptimizeVm.AddPaths(new[] { dlg.FolderName });
     }
 
-    private void EnsureEmotesView() => _vm.ActiveView = AppView.Emotes;
+    private void EnsureEmotesView()
+    {
+        _vm.ActiveView = AppView.Emotes;
+        _vm.SyncWorkspaceTabForActiveView();
+        SyncEmoteWorkspaceTabs();
+    }
 
     private void OnFileEmoteOpenRig(object sender, RoutedEventArgs e)
     {
@@ -963,7 +1085,7 @@ public partial class MainWindow : FluentWindow
             // file + sibling textures into the WebView2 session dir and
             // updates VM stats just like a drag-drop would.
             SketchfabUrlBox.Clear();
-            TryLoad(dlg.ResultModelPath);
+            TryLoad(dlg.ResultModelPath, dlg.ResultModelName);
         }
     }
 
@@ -981,60 +1103,39 @@ public partial class MainWindow : FluentWindow
         }
     }
 
-    private SettingsView? _settingsPage;
-
     /// <summary>
-    /// Lazily build the Settings page on first open. Done this way so the
-    /// SettingsView (and its on-load cache-size scan) doesn't run during
-    /// MainWindow construction — that was making the splash feel broken.
+    /// Open Settings as a medium, themed modal dialog (it used to fill the
+    /// whole content column). The <see cref="SettingsView"/> is built on
+    /// demand — so its on-load cache scan runs only when the user opens
+    /// Settings — and handed the MainViewModel as DataContext for the few
+    /// bindings that need it (e.g. the addons list). <paramref name="onReady"/>
+    /// runs once the window has rendered, for deep-links into a section.
     /// </summary>
-    private SettingsView EnsureSettingsPage()
+    private void OpenSettingsModal(Action<SettingsView>? onReady = null)
     {
-        if (_settingsPage == null)
-        {
-            _settingsPage = new SettingsView();
-            SettingsHost.Content = _settingsPage;
-        }
-        return _settingsPage;
+        Services.FosLogger.Info("settings", "settings modal opened");
+        var view = new SettingsView { DataContext = _vm };
+        var win = new SettingsWindow(view) { Owner = this };
+        if (onReady != null)
+            win.ContentRendered += (_, _) => onReady(view);
+        win.ShowDialog();
     }
 
-    private void OnSettingsOpen(object sender, RoutedEventArgs e)
-    {
-        Services.FosLogger.Info("settings", "settings overlay opened");
-        EnsureSettingsPage();
-        _vm.IsSettingsOpen = true;
-    }
+    private void OnSettingsOpen(object sender, RoutedEventArgs e) => OpenSettingsModal();
 
     private void OnSettingsClose(object sender, RoutedEventArgs e)
     {
-        Services.FosLogger.Info("settings", "settings overlay closed");
+        // Legacy inline-overlay back button — the overlay is retired in favour
+        // of the modal, but the dormant XAML still binds this handler.
         _vm.IsSettingsOpen = false;
     }
 
-    /// <summary>Click on the dimmed backdrop (outside the modal card) closes the
-    /// Settings dialog. Clicks inside the card bubble up with a different
-    /// OriginalSource, so they're ignored.</summary>
-    private void OnSettingsBackdropClick(object sender, System.Windows.Input.MouseButtonEventArgs e)
-    {
-        if (ReferenceEquals(e.OriginalSource, sender))
-            _vm.IsSettingsOpen = false;
-    }
-
     /// <summary>
-    /// Open the Settings overlay, optionally focusing a specific provider
-    /// card. Called by child views (MeshOptimizeView) that need to send the
-    /// user to Settings when a key is missing.
+    /// Open Settings focused on a specific section. Called by child views
+    /// (MeshOptimizeView) that send the user to Settings when a key is missing.
     /// </summary>
     public void NavigateToSettings(SettingsView.FocusSection section = SettingsView.FocusSection.None)
-    {
-        var page = EnsureSettingsPage();
-        _vm.IsSettingsOpen = true;
-        // Defer the focus call until after the SettingsView's first layout
-        // pass — Focus() pokes named child controls that aren't yet
-        // realised on a freshly-built UserControl.
-        Dispatcher.BeginInvoke(new Action(() => page.Focus(section)),
-            System.Windows.Threading.DispatcherPriority.Loaded);
-    }
+        => OpenSettingsModal(view => view.Focus(section));
 
     /// <summary>
     /// Open Settings and scroll to the API-key card for the given AI
@@ -1042,12 +1143,7 @@ public partial class MainWindow : FluentWindow
     /// ImageTo3DView when the user-selected provider has no key saved.
     /// </summary>
     public void NavigateToAiProviderSettings(string providerId)
-    {
-        var page = EnsureSettingsPage();
-        _vm.IsSettingsOpen = true;
-        Dispatcher.BeginInvoke(new Action(() => page.FocusAiProvider(providerId)),
-            System.Windows.Threading.DispatcherPriority.Loaded);
-    }
+        => OpenSettingsModal(view => view.FocusAiProvider(providerId));
 
     private void OnFileOpenOutput(object sender, RoutedEventArgs e)
     {
@@ -1071,6 +1167,457 @@ public partial class MainWindow : FluentWindow
     }
 
     private void OnFileExit(object sender, RoutedEventArgs e) => Close();
+
+    // ── Context menus (page-specific) ────────────────────────────────
+
+    private void OnMenuAssetsProps(object sender, RoutedEventArgs e)
+        => _vm.OpenViewCommand.Execute("Props");
+
+    private void OnMenuAssetsAnimated(object sender, RoutedEventArgs e)
+        => _vm.OpenViewCommand.Execute("Animated");
+
+    private void OnMenuOptimizeModeProps(object sender, RoutedEventArgs e)
+        => _vm.OptimizeVm.Mode = OptimizeMode.Props;
+
+    private void OnMenuOptimizeModeClothing(object sender, RoutedEventArgs e)
+        => _vm.OptimizeVm.Mode = OptimizeMode.Clothing;
+
+    private void OnMenuOptimizeModeTextures(object sender, RoutedEventArgs e)
+        => _vm.OptimizeVm.Mode = OptimizeMode.Textures;
+
+    private void OnMenuOptimizeModeEmbedded(object sender, RoutedEventArgs e)
+        => _vm.OptimizeVm.Mode = OptimizeMode.EmbeddedTextures;
+
+    private void OnMenuOptimizeModeTxAdmin(object sender, RoutedEventArgs e)
+        => _vm.OptimizeVm.Mode = OptimizeMode.TxAdmin;
+
+    private void OnMenuOptimizeAddFiles(object sender, RoutedEventArgs e)
+    {
+        var ov = _vm.OptimizeVm;
+        var dlg = new OpenFileDialog
+        {
+            Title = ov.IsEmbeddedTexturesMode
+                ? "Add model files (.ydd / .ydr / .yft) to optimize"
+                : $"Add {ov.ActiveExtension.TrimStart('.').ToUpperInvariant()} files to optimize",
+            Filter = ov.ActiveBrowseFilter,
+            Multiselect = true,
+        };
+        if (dlg.ShowDialog(this) == true)
+            ov.AddPaths(dlg.FileNames);
+    }
+
+    private void OnMenuOptimizeAddFolder(object sender, RoutedEventArgs e)
+    {
+        var dlg = new OpenFolderDialog
+        {
+            Title = "Pick a folder (a resource or clothing pack) to optimize",
+            Multiselect = true,
+            InitialDirectory = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
+        };
+        if (dlg.ShowDialog(this) == true)
+            _vm.OptimizeVm.AddPaths(dlg.FolderNames);
+    }
+
+    private void OnMenuVehiclesCarPack(object sender, RoutedEventArgs e)
+        => _vm.OpenViewCommand.Execute("Vehicles");
+
+    private async void OnMenuVehiclesBrowse(object sender, RoutedEventArgs e)
+    {
+        _vm.OpenViewCommand.Execute("Vehicles");
+        await Dispatcher.InvokeAsync(() => { }, DispatcherPriority.Loaded);
+        if (FindVehiclesView() is { } vv)
+            await vv.RunBrowseInputFromMenuAsync();
+        else
+        {
+            // Template not materialized yet — fall back to VM inputs only.
+            var dlg = new OpenFileDialog
+            {
+                Title = "Pick SP car dlc.rpf file(s) — multi-select for a pack",
+                Filter = "RAGE package (*.rpf)|*.rpf|All files (*.*)|*.*",
+                Multiselect = true,
+                InitialDirectory = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
+            };
+            if (dlg.ShowDialog(this) != true) return;
+            var vm = _vm.VehiclesVm;
+            if (vm.IsProcessing) return;
+            if (vm.MergeIntoPack) vm.AddInputs(dlg.FileNames);
+            else vm.SetInputs(dlg.FileNames);
+        }
+    }
+
+    private void OnMenuVehiclesBrowseOutput(object sender, RoutedEventArgs e)
+    {
+        var dlg = new OpenFolderDialog
+        {
+            Title = "Choose FiveM resource output folder",
+            InitialDirectory = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
+        };
+        if (dlg.ShowDialog(this) == true)
+            _vm.VehiclesVm.SetOutputFolder(dlg.FolderName);
+    }
+
+    private void OnMenuRpfBrowseInput(object sender, RoutedEventArgs e)
+    {
+        var dlg = new OpenFolderDialog
+        {
+            Title = "Pick the FiveM resource folder to pack",
+            InitialDirectory = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
+        };
+        if (dlg.ShowDialog(this) == true)
+            _vm.RpfVm.SetInputFolder(dlg.FolderName);
+    }
+
+    private void OnMenuRpfBrowseOutput(object sender, RoutedEventArgs e)
+    {
+        var rpf = _vm.RpfVm;
+        if (rpf.IsFolderOutput)
+        {
+            var dlg = new OpenFolderDialog
+            {
+                Title = "Choose output folder",
+                InitialDirectory = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
+            };
+            if (dlg.ShowDialog(this) == true)
+                rpf.OutputPath = dlg.FolderName;
+        }
+        else
+        {
+            var dlg = new SaveFileDialog
+            {
+                Title = "Save .rpf",
+                Filter = "RAGE package (*.rpf)|*.rpf|All files (*.*)|*.*",
+                FileName = string.IsNullOrWhiteSpace(rpf.OutputPath) ? "pack.rpf" : Path.GetFileName(rpf.OutputPath),
+            };
+            if (dlg.ShowDialog(this) == true)
+                rpf.OutputPath = dlg.FileName;
+        }
+    }
+
+    private async void OnMenuRpfConvert(object sender, RoutedEventArgs e)
+        => await _vm.RpfVm.ConvertAsync();
+
+    private void OnMenuRpfModeRaw(object sender, RoutedEventArgs e) => _vm.RpfVm.OutputModeIndex = 0;
+    private void OnMenuRpfModeSp(object sender, RoutedEventArgs e) => _vm.RpfVm.OutputModeIndex = 1;
+    private void OnMenuRpfModeOpenIv(object sender, RoutedEventArgs e) => _vm.RpfVm.OutputModeIndex = 2;
+    private void OnMenuRpfModeAddon(object sender, RoutedEventArgs e) => _vm.RpfVm.OutputModeIndex = 3;
+
+    private void OnMenuEmoteNewTab(object sender, RoutedEventArgs e)
+        => OnWorkspaceNewTab(sender, e);
+
+    private async void OnWorkspaceNewTab(object sender, RoutedEventArgs e)
+    {
+        var kind = WorkspaceDocument.KindFromAppView(_vm.ActiveView) ?? WorkspaceKind.Assets;
+        if (kind == WorkspaceKind.Emotes)
+        {
+            EnsureEmotesView();
+            // Create the emote doc + its chrome tab, then select that chrome tab
+            // UP FRONT. Activating the emote document is async (it awaits a
+            // viewer snapshot first); SyncEmoteWorkspaceTabs keeps whichever
+            // chrome Emotes tab is active in charge, so unless the NEW tab is
+            // already the active chrome tab, the sync snaps selection back to
+            // the old tab and the new one looks inactive.
+            var newTitle = EmotesWorkspace.EmoteDocs.NextUntitledTitle();
+            var newEmote = EmotesWorkspace.EmoteDocs.NewDocument(activate: false, title: newTitle);
+            SyncEmoteWorkspaceTabs();
+            var chromeTab = _vm.WorkspaceDocs.FindByEmoteId(newEmote.Id);
+            if (chromeTab != null)
+                _vm.WorkspaceDocs.Activate(chromeTab);
+            await EmotesWorkspace.ActivateEmoteDocumentByIdAsync(newEmote.Id);
+            SyncEmoteWorkspaceTabs();
+            _vm.SaveWorkspaceSessionNow();
+            return;
+        }
+
+        // Open the section if needed, then add a new chrome tab for it.
+        if (WorkspaceDocument.KindFromAppView(_vm.ActiveView) != kind)
+            _vm.OpenViewCommand.Execute(kind.ToString());
+        _vm.NewWorkspaceTabForActiveView();
+    }
+
+    private async void OnWorkspaceTabClick(object sender, System.Windows.Input.MouseButtonEventArgs e)
+    {
+        if (sender is not FrameworkElement fe) return;
+        if (fe.DataContext is not WorkspaceDocument doc) return;
+        if (e.OriginalSource is DependencyObject src
+            && FindVisualAncestor<System.Windows.Controls.Primitives.ButtonBase>(src) != null)
+            return;
+
+        _vm.WorkspaceDocs.Activate(doc);
+        if (doc.Kind == WorkspaceKind.Emotes)
+        {
+            EnsureEmotesView();
+            if (!string.IsNullOrEmpty(doc.EmoteDocumentId))
+                await EmotesWorkspace.ActivateEmoteDocumentByIdAsync(doc.EmoteDocumentId);
+            SyncEmoteWorkspaceTabs();
+            return;
+        }
+
+        _vm.OpenViewCommand.Execute(doc.OpenViewTag);
+    }
+
+    private async void OnWorkspaceCloseTab(object sender, RoutedEventArgs e)
+    {
+        e.Handled = true;
+        if (sender is not FrameworkElement fe) return;
+        var doc = fe.DataContext as WorkspaceDocument
+                  ?? (fe.Parent as FrameworkElement)?.DataContext as WorkspaceDocument;
+        if (doc == null) return;
+
+        var title = doc.DisplayTitle.TrimEnd(' ', '*', '•');
+        var pick = AppDialog.Show(
+            $"Close \"{title}\"?\n\nUnsaved work in this tab will be lost.",
+            "Close tab",
+            System.Windows.MessageBoxButton.YesNo,
+            System.Windows.MessageBoxImage.Warning,
+            this);
+        if (pick != System.Windows.MessageBoxResult.Yes) return;
+
+        // Emotes: close the linked pose document, then drop the chrome tab.
+        // Do NOT EnsureEmotesView / reload GTA Male — that was resurrecting
+        // the tab every time the user hit X.
+        if (doc.Kind == WorkspaceKind.Emotes)
+        {
+            if (!string.IsNullOrEmpty(doc.EmoteDocumentId))
+            {
+                var closed = await EmotesWorkspace.CloseEmoteDocumentByIdAsync(
+                    doc.EmoteDocumentId, alreadyConfirmed: true);
+                if (!closed) return;
+            }
+
+            bool otherEmotes = false;
+            foreach (var w in _vm.WorkspaceDocs.Documents)
+            {
+                if (w.Kind == WorkspaceKind.Emotes && !ReferenceEquals(w, doc))
+                { otherEmotes = true; break; }
+            }
+            if (!otherEmotes)
+                EmotesWorkspace.DiscardEmptyEmoteSession();
+
+            // Sole chrome tab was Emotes — swap to Assets (CloseDocument would
+            // only reset the same Emotes tab in place).
+            if (_vm.WorkspaceDocs.Documents.Count <= 1)
+            {
+                var assets = new WorkspaceDocument { Kind = WorkspaceKind.Assets, Title = "Assets" };
+                _vm.WorkspaceDocs.ReplaceAll(new[] { assets }, assets);
+                _vm.OpenViewCommand.Execute("Assets");
+                SyncEmoteWorkspaceTabs();
+                _vm.SaveWorkspaceSessionNow();
+                return;
+            }
+
+            var nextEmote = _vm.WorkspaceDocs.CloseDocument(doc);
+            if (nextEmote.Kind == WorkspaceKind.Emotes && !string.IsNullOrEmpty(nextEmote.EmoteDocumentId))
+            {
+                _vm.OpenViewCommand.Execute("Emotes");
+                _vm.WorkspaceDocs.Activate(nextEmote);
+                await EmotesWorkspace.ActivateEmoteDocumentByIdAsync(nextEmote.EmoteDocumentId);
+            }
+            else
+            {
+                _vm.OpenViewCommand.Execute(nextEmote.OpenViewTag);
+                _vm.WorkspaceDocs.Activate(nextEmote);
+            }
+            SyncEmoteWorkspaceTabs();
+            _vm.SaveWorkspaceSessionNow();
+            return;
+        }
+
+        var next = _vm.WorkspaceDocs.CloseDocument(doc);
+        _vm.OpenViewCommand.Execute(next.OpenViewTag);
+        _vm.WorkspaceDocs.Activate(next);
+        if (next.Kind == WorkspaceKind.Emotes && !string.IsNullOrEmpty(next.EmoteDocumentId))
+            await EmotesWorkspace.ActivateEmoteDocumentByIdAsync(next.EmoteDocumentId);
+        _vm.SaveWorkspaceSessionNow();
+    }
+
+    private bool _emoteTabSyncBusy;
+
+    private void AttachEmoteWorkspaceTabSync()
+    {
+        var set = EmotesWorkspace.EmoteDocs;
+        set.PropertyChanged += (_, e) =>
+        {
+            if (e.PropertyName is nameof(EmoteDocumentSet.ActiveDocument)
+                or nameof(EmoteDocumentSet.ActiveDocumentId))
+                SyncEmoteWorkspaceTabs();
+        };
+        foreach (var d in set.Documents)
+            d.PropertyChanged += OnEmoteDocumentPropertyChanged;
+        set.Documents.CollectionChanged += (_, e) =>
+        {
+            if (e.NewItems != null)
+                foreach (EmoteDocument d in e.NewItems)
+                    d.PropertyChanged += OnEmoteDocumentPropertyChanged;
+            if (e.OldItems != null)
+                foreach (EmoteDocument d in e.OldItems)
+                    d.PropertyChanged -= OnEmoteDocumentPropertyChanged;
+            SyncEmoteWorkspaceTabs();
+        };
+        _vm.PropertyChanged += (_, e) =>
+        {
+            if (e.PropertyName == nameof(MainViewModel.ActiveView) && _vm.IsEmotesView)
+            {
+                // OpenView sets ActiveView then immediately calls
+                // SyncWorkspaceTabForActiveView. Defer so the current tab is
+                // repurposed to Emotes first; then we mirror / attach
+                // EmoteDocuments.
+                Dispatcher.BeginInvoke(
+                    new Action(SyncEmoteWorkspaceTabs),
+                    System.Windows.Threading.DispatcherPriority.Loaded);
+            }
+        };
+    }
+
+    private void OnEmoteDocumentPropertyChanged(object? sender, System.ComponentModel.PropertyChangedEventArgs e)
+    {
+        if (e.PropertyName is nameof(EmoteDocument.Title)
+            or nameof(EmoteDocument.IsDirty)
+            or nameof(EmoteDocument.DisplayTitle)
+            or nameof(EmoteDocument.LoadedModelPath))
+            SyncEmoteWorkspaceTabs();
+    }
+
+    /// <summary>Mirror PoseToEmoteView's EmoteDocumentSet into chrome
+    /// WorkspaceDocuments of kind Emotes.</summary>
+    private void SyncEmoteWorkspaceTabs()
+    {
+        if (_emoteTabSyncBusy || _vm.SuppressWorkspaceTabSync) return;
+        _emoteTabSyncBusy = true;
+        try
+        {
+            var emoteSet = EmotesWorkspace.EmoteDocs;
+            bool anyChromeEmotes = _vm.WorkspaceDocs.FindLastOfKind(WorkspaceKind.Emotes) != null;
+            // Only mirror Emotes into the chrome strip when the user is on
+            // Emotes or already has Emotes tabs open. A warm/blank GTA load
+            // must not spawn tabs the user closed.
+            bool needEmotes = _vm.IsEmotesView || anyChromeEmotes
+                || emoteSet.Documents.Count > 1;
+            if (!needEmotes) return;
+
+            var liveIds = new HashSet<string>(StringComparer.Ordinal);
+            foreach (var ed in emoteSet.Documents)
+            {
+                liveIds.Add(ed.Id);
+                var title = string.IsNullOrWhiteSpace(ed.Title)
+                    ? (string.IsNullOrEmpty(ed.LoadedModelPath)
+                        ? "Untitled"
+                        : Path.GetFileNameWithoutExtension(ed.LoadedModelPath))
+                    : ed.Title.Trim();
+                var existing = _vm.WorkspaceDocs.FindByEmoteId(ed.Id);
+                if (existing == null)
+                {
+                    // Reuse an orphan Emotes chrome tab (created by workspace-bar
+                    // navigation before EmoteDocs were linked). Never repurpose a
+                    // non-Emotes tab from here — the workspace bar navigates the
+                    // current tab in place, so a tab the user pointed at another
+                    // section must stay there.
+                    WorkspaceDocument? orphan = null;
+                    foreach (var w in _vm.WorkspaceDocs.Documents)
+                    {
+                        if (w.Kind == WorkspaceKind.Emotes && string.IsNullOrEmpty(w.EmoteDocumentId))
+                        { orphan = w; break; }
+                    }
+                    if (orphan != null)
+                    {
+                        orphan.EmoteDocumentId = ed.Id;
+                        orphan.Title = title;
+                        orphan.IsDirty = ed.IsDirty;
+                    }
+                    else
+                    {
+                        _vm.WorkspaceDocs.NewDocument(
+                            WorkspaceKind.Emotes,
+                            activate: false,
+                            title: title,
+                            emoteDocumentId: ed.Id);
+                    }
+                }
+                else
+                {
+                    existing.Title = title;
+                    existing.IsDirty = ed.IsDirty;
+                }
+            }
+
+            for (int i = _vm.WorkspaceDocs.Documents.Count - 1; i >= 0; i--)
+            {
+                var w = _vm.WorkspaceDocs.Documents[i];
+                if (w.Kind != WorkspaceKind.Emotes) continue;
+                if (!string.IsNullOrEmpty(w.EmoteDocumentId) && !liveIds.Contains(w.EmoteDocumentId))
+                    _vm.WorkspaceDocs.Documents.RemoveAt(i);
+            }
+
+            // Chrome Emotes tabs created by converting a "+" placeholder still
+            // need a backing EmoteDocument when every existing doc already had
+            // a chrome row.
+            foreach (var w in _vm.WorkspaceDocs.Documents.ToList())
+            {
+                if (w.Kind != WorkspaceKind.Emotes || !string.IsNullOrEmpty(w.EmoteDocumentId))
+                    continue;
+                var ed = emoteSet.NewDocument(activate: false);
+                w.EmoteDocumentId = ed.Id;
+                w.Title = string.IsNullOrWhiteSpace(ed.Title) ? "Untitled" : ed.Title.Trim();
+                w.IsDirty = ed.IsDirty;
+                liveIds.Add(ed.Id);
+            }
+
+            if (_vm.IsEmotesView)
+            {
+                var activeChrome = _vm.WorkspaceDocs.ActiveDocument;
+                // Keep the converted "+" tab selected — don't jump to an older Emotes row.
+                if (activeChrome != null
+                    && activeChrome.Kind == WorkspaceKind.Emotes
+                    && !string.IsNullOrEmpty(activeChrome.EmoteDocumentId))
+                {
+                    var ed = emoteSet.Find(activeChrome.EmoteDocumentId!);
+                    if (ed != null)
+                        emoteSet.ActiveDocument = ed;
+                }
+                else if (emoteSet.ActiveDocument != null)
+                {
+                    var match = _vm.WorkspaceDocs.FindByEmoteId(emoteSet.ActiveDocument.Id);
+                    if (match != null)
+                        _vm.WorkspaceDocs.Activate(match);
+                }
+            }
+            RefreshWindowTitle();
+        }
+        finally
+        {
+            _emoteTabSyncBusy = false;
+        }
+    }
+
+    private static T? FindVisualAncestor<T>(DependencyObject? start) where T : DependencyObject
+    {
+        while (start != null)
+        {
+            if (start is T match) return match;
+            start = System.Windows.Media.VisualTreeHelper.GetParent(start);
+        }
+        return null;
+    }
+
+    private VehiclesView? FindVehiclesView()
+    {
+        if (FindName("VehiclesHost") is not DependencyObject host) return null;
+        return FindVisualChild<VehiclesView>(host);
+    }
+
+    private OptimizeView? FindOptimizeView() => FindVisualChild<OptimizeView>(this);
+
+    private static T? FindVisualChild<T>(DependencyObject parent) where T : DependencyObject
+    {
+        var count = System.Windows.Media.VisualTreeHelper.GetChildrenCount(parent);
+        for (int i = 0; i < count; i++)
+        {
+            var child = System.Windows.Media.VisualTreeHelper.GetChild(parent, i);
+            if (child is T match) return match;
+            var nested = FindVisualChild<T>(child);
+            if (nested != null) return nested;
+        }
+        return null;
+    }
 
     // ─────────────── Help menu ───────────────
 
@@ -1157,7 +1704,7 @@ public partial class MainWindow : FluentWindow
             case Services.UpdateChecker.Status.UpToDate:
                 _vm.StatusText = $"You're up to date (v{result.Current.Major}.{result.Current.Minor}.{result.Current.Build}).";
                 AppDialog.Show(
-                    $"You're running the latest release.\n\nCurrent: v{result.Current.Major}.{result.Current.Minor}.{result.Current.Build}",
+                    $"You're running the latest release.\nCurrent: v{result.Current.Major}.{result.Current.Minor}.{result.Current.Build}",
                     "Up to date",
                     System.Windows.MessageBoxButton.OK,
                     System.Windows.MessageBoxImage.Information,
@@ -1285,6 +1832,11 @@ public partial class MainWindow : FluentWindow
         // active view's own drop target.
         if (!_vm.Is3DView) return;
 
+        // Panel reorder (PanelLayout) — do not claim; let the inspector
+        // stack handle Move effects. Claiming here used to set Effects=None
+        // and kill every ⠿ drag on Layers / Textures / Pack.
+        if (e.Data.GetDataPresent("FiveOS.PanelCard")) return;
+
         e.Effects = DragDropEffects.None;
         if (e.Data.GetDataPresent(DataFormats.FileDrop))
         {
@@ -1332,7 +1884,7 @@ public partial class MainWindow : FluentWindow
 
         if (ctrl && e.Key == Key.Return && _vm.CanConvert)
         {
-            OnConvert(this, new RoutedEventArgs());
+            OnSimplePrimaryAction(this, new RoutedEventArgs());
             e.Handled = true;
             return;
         }
@@ -1363,17 +1915,15 @@ public partial class MainWindow : FluentWindow
             e.Handled = true;
             return;
         }
+        if (e.Key == Key.K && _vm.IsAnimatedPropsView && !ctrl)
+        {
+            _vm.AddPropAnimKeyCommand.Execute(null);
+            e.Handled = true;
+            return;
+        }
         if (ctrl && e.Key == Key.OemComma)
         {
-            if (_vm.IsSettingsOpen)
-            {
-                _vm.IsSettingsOpen = false;
-            }
-            else
-            {
-                EnsureSettingsPage();
-                _vm.IsSettingsOpen = true;
-            }
+            OpenSettingsModal();
             e.Handled = true;
             return;
         }
@@ -1389,8 +1939,21 @@ public partial class MainWindow : FluentWindow
 
     private async void OnConvert(object sender, RoutedEventArgs e)
     {
-        if (string.IsNullOrEmpty(_vm.SourcePath) || string.IsNullOrWhiteSpace(_vm.PropName))
+        if (string.IsNullOrEmpty(_vm.SourcePath))
             return;
+        if (string.IsNullOrWhiteSpace(_vm.PropName))
+        {
+            // Session-restored loads can arrive with a blank prop name —
+            // derive one from the source file instead of silently ignoring
+            // the convert (drag-to-group and Ctrl+Enter both land here).
+            var stem = Path.GetFileNameWithoutExtension(_vm.SourcePath);
+            if (string.IsNullOrWhiteSpace(stem))
+            {
+                _vm.StatusText = "Give the prop a name first (SOURCE card).";
+                return;
+            }
+            _vm.PropName = stem;
+        }
 
         if (!EngineRunner.IsEngineAvailable())
         {
@@ -1416,6 +1979,12 @@ public partial class MainWindow : FluentWindow
 
         var runner = new EngineRunner();
         _convertCts = new System.Threading.CancellationTokenSource();
+        // Keep the destination visible through every engine stage line —
+        // "scene → pack: [5/6] Building collision…" — so a drag-to-group
+        // convert doesn't read like unrelated background work.
+        _convertStatusContext = req.RouteToPack
+            ? $"{_vm.PropName} → {req.PackGroup ?? "layers"}: "
+            : null;
         EngineRunner.ConvertOutcome outcome;
         bool wasCancelled;
         try
@@ -1430,6 +1999,7 @@ public partial class MainWindow : FluentWindow
             // stays locked forever (IsConverting never resets) with no error.
             Services.FosLogger.Err("convert", "failed: " + ex.Message);
             StopEngineStepTimer();
+            _convertStatusContext = null;
             _vm.IsConverting = false;
             _convertCts?.Dispose();
             _convertCts = null;
@@ -1441,6 +2011,7 @@ public partial class MainWindow : FluentWindow
         _convertCts = null;
 
         StopEngineStepTimer();
+        _convertStatusContext = null;
         _vm.IsConverting = false;
 
         if (outcome.Success && outcome.ResultPath != null)
@@ -1479,6 +2050,10 @@ public partial class MainWindow : FluentWindow
                     EngineRunner.OutputMode.ServerPerAsset  => $"✓ Done · {Path.GetFileName(outcome.ResultPath)} ready in server folder",
                     _                                       => $"✓ Done{sizePart} · {Path.GetFileName(outcome.ResultPath)}",
                 };
+
+                // Swap the Textures list from source embeds → compiled TXD
+                // names/thumbs pulled from the output .ydr.
+                _ = LoadCompiledTexturesFromOutcomeAsync(outcome, _vm.PropName);
             }
         }
         else if (wasCancelled)
@@ -1544,20 +2119,25 @@ public partial class MainWindow : FluentWindow
             LodDistLow:     _vm.LodDistLow,
             LodDistVlow:    _vm.LodDistVlow,
             RouteToPack:    routeToPack,
+            // Converts land in the group selected in the Layers outliner;
+            // with none selected they stage as a loose top-level layer.
+            PackGroup:      routeToPack ? _vm.TargetOutlinerGroup : null,
             PartMaterials:  BuildPartMaterialMap(),
             BreakableGlass: _vm.BreakableGlass,
             GlassOpacity:   _vm.GlassOpacity,
             PartDiffuseTextures: _vm.PartDiffuseOverrides.Count > 0
                 ? new Dictionary<string, string>(_vm.PartDiffuseOverrides, StringComparer.OrdinalIgnoreCase)
                 : null,
-            AnimatedProp: _vm.AnimatedProp,
+            AnimatedProp: _vm.IsAnimatedPropsView || _vm.AnimatedProp,
             // Gate AutoSpin on AnimatedProp: the auto-spin controls only SHOW
             // under Animated prop, so a user who enabled auto-spin then turned
             // Animated prop back off must not still ship a spinning prop.
-            AutoSpin: _vm.AnimatedProp && _vm.AutoSpin,
+            // Animated workspace prefers timeline keys over auto-spin.
+            AutoSpin: !_vm.IsAnimatedPropsView && _vm.AnimatedProp && _vm.AutoSpin,
             SpinAxis: _vm.SpinAxisIndex switch { 0 => "X", 1 => "Y", _ => "Z" },
             SpinSeconds: _vm.SpinSeconds,
-            SpinReverse: _vm.SpinReverse);
+            SpinReverse: _vm.SpinReverse,
+            AnimKeysPath: WritePropAnimKeysSidecar());
     }
 
     /// <summary>Snapshot the per-part material presets the user picked
@@ -1721,6 +2301,10 @@ public partial class MainWindow : FluentWindow
     /// progress callbacks, so the status text would otherwise sit
     /// unchanged for the entire conversion.
     /// </summary>
+    /// <summary>"scene → pack: " while a convert targets an outliner group,
+    /// so engine stage chatter stays attributable to the user's action.</summary>
+    private string? _convertStatusContext;
+
     private void OnEngineLog(string line)
     {
         Dispatcher.Invoke(() =>
@@ -1732,12 +2316,13 @@ public partial class MainWindow : FluentWindow
 
             var cleaned = EngineSelfTag.Replace(line, "");
             var truncated = Truncate(cleaned, 120);
-            _vm.StatusText = "FiveOS · " + truncated;
+            var prefix = "FiveOS · " + (_convertStatusContext ?? "");
+            _vm.StatusText = prefix + truncated;
 
             if (!EngineStepHeader.IsMatch(line))
                 return;
 
-            _engineStepBaseStatus = "FiveOS · " + truncated;
+            _engineStepBaseStatus = prefix + truncated;
             _engineStepStartUtc = DateTime.UtcNow;
             _engineStepTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(1) };
             _engineStepTimer.Tick += (_, _) =>
@@ -1789,78 +2374,1443 @@ public partial class MainWindow : FluentWindow
 
     private void OnClearSource(object sender, RoutedEventArgs e) => ClearLoadedModel();
 
+    private void ApplySavedPropsSidebarWidth()
+    {
+        var w = Services.UserSettings.LoadPropsSidebarWidth();
+        if (w >= LeftSidebarColumn.MinWidth && w <= LeftSidebarColumn.MaxWidth)
+            LeftSidebarColumn.Width = new GridLength(w);
+    }
+
+    private void OnSidebarSplitterDragCompleted(object sender, System.Windows.Controls.Primitives.DragCompletedEventArgs e)
+    {
+        Services.UserSettings.SavePropsSidebarWidth(LeftSidebarColumn.ActualWidth);
+    }
+
+    /// <summary>Give the animated-keys timeline its saved (or default) height
+    /// in animated-prop mode; collapse the row to 0 otherwise so it reserves no
+    /// space for the modes that never show a timeline.</summary>
+    private void ApplyPropAnimTimelineHeight()
+        => PropAnimTimelineRow.Height = _vm.IsAnimatedPropsView
+            ? new GridLength(Services.UserSettings.LoadPropsAnimTimelineHeight())
+            : new GridLength(0);
+
+    private void OnPropAnimTimelineSplitterDragCompleted(object sender, System.Windows.Controls.Primitives.DragCompletedEventArgs e)
+    {
+        Services.UserSettings.SavePropsAnimTimelineHeight(PropAnimTimelineRow.ActualHeight);
+    }
+
+    // ─── PANELS sidebar dock (drag whole sidebar left/right of viewport) ──
+
+    private Point _panelsDockPress;
+    private bool _panelsDockDragging;
+
+    private void OnPanelsDockHeaderDown(object sender, MouseButtonEventArgs e)
+    {
+        if (e.OriginalSource is DependencyObject src &&
+            FindVisualAncestor<System.Windows.Controls.Primitives.ButtonBase>(src) is not null)
+            return;
+
+        _panelsDockPress = e.GetPosition(this);
+        _panelsDockDragging = false;
+        ((UIElement)sender).CaptureMouse();
+        e.Handled = true;
+    }
+
+    private void OnPanelsDockHeaderMove(object sender, MouseEventArgs e)
+    {
+        if (e.LeftButton != MouseButtonState.Pressed) return;
+        if (!((UIElement)sender).IsMouseCaptured) return;
+
+        var pos = e.GetPosition(this);
+        if (!_panelsDockDragging)
+        {
+            if (Math.Abs(pos.X - _panelsDockPress.X) < 4 && Math.Abs(pos.Y - _panelsDockPress.Y) < 4)
+                return;
+            _panelsDockDragging = true;
+            LayersPanel.Opacity = 0.55;
+            Mouse.OverrideCursor = Cursors.SizeWE;
+        }
+
+        // Live preview: which side would we dock to?
+        var local = e.GetPosition(PropsCenterGrid);
+        bool wantLeft = local.X < PropsCenterGrid.ActualWidth * 0.5;
+        if (wantLeft != _vm.IsLayersDockedLeft)
+        {
+            _vm.IsLayersDockedLeft = wantLeft;
+            _ = NudgeViewerResizeAsync();
+        }
+        e.Handled = true;
+    }
+
+    private void OnPanelsDockHeaderUp(object sender, MouseButtonEventArgs e)
+    {
+        FinishPanelsDockDrag(sender as UIElement);
+        e.Handled = true;
+    }
+
+    private void OnPanelsDockHeaderLostCapture(object sender, MouseEventArgs e)
+        => FinishPanelsDockDrag(sender as UIElement);
+
+    private void FinishPanelsDockDrag(UIElement? handle)
+    {
+        if (handle is not null && Mouse.Captured == handle)
+            handle.ReleaseMouseCapture();
+        LayersPanel.Opacity = 1.0;
+        Mouse.OverrideCursor = null;
+        if (_panelsDockDragging)
+        {
+            _vm.StatusText = _vm.IsLayersDockedLeft
+                ? "PANELS docked on the left."
+                : "PANELS docked on the right.";
+            _ = NudgeViewerResizeAsync();
+        }
+        _panelsDockDragging = false;
+    }
+
+    // ─── PANELS sidebar resize (drag edge to extend) ───────────────────
+
+    private bool _panelsResizing;
+    private double _panelsResizeStartWidth;
+    private double _panelsResizeStartX;
+
+    private void OnPanelsResizeDown(object sender, MouseButtonEventArgs e)
+    {
+        if (_vm.IsLayersPanelCollapsed) return;
+        _panelsResizing = true;
+        _panelsResizeStartWidth = _vm.LayersPanelWidth;
+        _panelsResizeStartX = e.GetPosition(PropsCenterGrid).X;
+        ((UIElement)sender).CaptureMouse();
+        Mouse.OverrideCursor = Cursors.SizeWE;
+        e.Handled = true;
+    }
+
+    private void OnPanelsResizeMove(object sender, MouseEventArgs e)
+    {
+        if (!_panelsResizing || e.LeftButton != MouseButtonState.Pressed) return;
+
+        double x = e.GetPosition(PropsCenterGrid).X;
+        double delta = x - _panelsResizeStartX;
+        // Docked on the right: drag grip left (negative delta) = wider.
+        // Docked on the left: drag grip right (positive delta) = wider.
+        double next = _vm.IsLayersDockedLeft
+            ? _panelsResizeStartWidth + delta
+            : _panelsResizeStartWidth - delta;
+        _vm.LayersPanelWidth = Math.Clamp(next, 280, 560);
+        e.Handled = true;
+    }
+
+    private void OnPanelsResizeUp(object sender, MouseButtonEventArgs e)
+    {
+        FinishPanelsResize(sender as UIElement);
+        e.Handled = true;
+    }
+
+    private void OnPanelsResizeLostCapture(object sender, MouseEventArgs e)
+        => FinishPanelsResize(sender as UIElement);
+
+    private void FinishPanelsResize(UIElement? handle)
+    {
+        if (!_panelsResizing) return;
+        _panelsResizing = false;
+        if (handle is not null && Mouse.Captured == handle)
+            handle.ReleaseMouseCapture();
+        Mouse.OverrideCursor = null;
+        _vm.CommitLayersPanelWidth();
+        _ = NudgeViewerResizeAsync();
+    }
+
+    /// <summary>
+    /// Primary action on the simple Props panel: build a one-prop-per-texture
+    /// pack when that mode is on and extras exist; otherwise Convert / Add to Pack.
+    /// </summary>
+    private void OnSimplePrimaryAction(object sender, RoutedEventArgs e)
+    {
+        if (_vm.PackTextureVariants && _vm.HasExtraTextures)
+        {
+            OnBuildTexturePack(sender, e);
+            return;
+        }
+        OnConvert(sender, e);
+    }
+
     /// <summary>
     /// Compile the running prop-pack into a single FiveM resource.
     /// Reuses the same success-screen overlay the per-prop convert flow
     /// uses, then clears the staging directory so the next pack starts
     /// fresh.
     /// </summary>
-    private void OnFinalizePack(object sender, RoutedEventArgs e)
+    /// <summary>Photoshop-style export: every group with eye-on members
+    /// builds into ONE pack resource; every eye-on loose layer exports as
+    /// its own standalone resource. Eye-off layers are skipped.</summary>
+    private async void OnFinalizePack(object sender, RoutedEventArgs e) => await ExportOutlinerLayers(onlyGroup: null);
+
+    private async Task ExportOutlinerLayers(string? onlyGroup)
     {
         var session = _vm.PackSession;
-        if (session.Entries.Count == 0)
+
+        // Exporting one group by name → settings modal first: final pack
+        // name + Regular vs Furniture (nolag_properties catalog).
+        bool emitHousing = false;
+        if (onlyGroup is not null)
         {
-            _vm.StatusText = "Pack is empty — add at least one prop before finalising.";
+            int propCount = session.Entries.Count(en => en.IsIncluded &&
+                    string.Equals(en.GroupName, onlyGroup, StringComparison.OrdinalIgnoreCase))
+                + session.ConvertQueue.Count(q => q.IsPending && q.IsIncluded &&
+                    string.Equals(q.GroupName, onlyGroup, StringComparison.OrdinalIgnoreCase));
+            var dlg = new ExportPackDialog(onlyGroup, propCount) { Owner = this };
+            if (dlg.ShowDialog() != true) return;
+            emitHousing = dlg.EmitHousing;
+            if (!string.Equals(dlg.PackName, onlyGroup, StringComparison.OrdinalIgnoreCase) &&
+                session.RenameGroup(onlyGroup, dlg.PackName) is { } applied)
+            {
+                onlyGroup = applied;
+            }
+        }
+
+        // Dragging into a group defers the conversion — export is where
+        // the pending rows actually convert. Drain them (scoped to the
+        // exported group when one was named) before building.
+        // Hidden groups sit this export out entirely — unless the user
+        // explicitly exported that one group by name.
+        var pendingForScope = session.ConvertQueue.Where(q => q.IsPending && q.IsIncluded &&
+            (onlyGroup is null
+                ? q.GroupName is null || !session.IsGroupHidden(q.GroupName)
+                : string.Equals(q.GroupName, onlyGroup, StringComparison.OrdinalIgnoreCase))).ToList();
+        if (pendingForScope.Count > 0)
+        {
+            if (session.IsQueueRunning || _vm.IsConverting)
+            {
+                _vm.StatusText = "Conversions are still running — export again when they finish.";
+                return;
+            }
+
+            // The model may still be open in the viewport after its drag —
+            // re-freeze its request now so scale/rotation/eye edits made
+            // since the drop are what actually export.
+            foreach (var q in pendingForScope.Where(q => q.RequestSnapshot is not null &&
+                         string.Equals(q.SourcePath, _vm.SourcePath, StringComparison.OrdinalIgnoreCase)))
+            {
+                var liveExcludes = _vm.ModelParts.Where(p => !p.IsVisible).Select(p => p.OriginalName)
+                    .Concat(_vm.DeletedPartNames)
+                    .Distinct(StringComparer.Ordinal)
+                    .ToList();
+                q.RequestSnapshot = BuildConvertRequest(q.AssetName, liveExcludes, routeToPack: true)
+                    with { PackGroup = q.GroupName };
+            }
+
+            _packQueueFilter = pendingForScope.ToHashSet();
+            _vm.StatusText = $"Converting {pendingForScope.Count} layer(s) for export…";
+            await RunPackQueueAsync();
+            if (pendingForScope.Any(q => q.IsFailed))
+            {
+                _vm.StatusText = "Some layers failed to convert — hover the failed rows for the error, then export again.";
+                return;
+            }
+        }
+
+        var included = session.Entries.Where(en => en.IsIncluded &&
+            (en.GroupName is null || onlyGroup is not null || !session.IsGroupHidden(en.GroupName))).ToList();
+        if (onlyGroup is not null)
+            included = included.Where(en =>
+                string.Equals(en.GroupName, onlyGroup, StringComparison.OrdinalIgnoreCase)).ToList();
+        if (included.Count == 0)
+        {
+            _vm.StatusText = "Nothing to export — add layers first (hidden layers are skipped).";
             return;
         }
 
-        _vm.StatusText = $"Finalising pack '{session.PackName}' ({session.Count} props)…";
-        FiveOS.Services.PropPackBuilder.BuildResult result;
-        try
+        // One build per group, one build per loose layer.
+        var jobs = new List<(string Name, List<Services.PropPackEntry> Entries)>();
+        foreach (var group in included
+                     .Where(en => en.GroupName is not null)
+                     .GroupBy(en => en.GroupName!, StringComparer.OrdinalIgnoreCase))
+            jobs.Add((group.Key, group.ToList()));
+        foreach (var loose in included.Where(en => en.GroupName is null))
+            jobs.Add((loose.AssetName, new List<Services.PropPackEntry> { loose }));
+
+        var results = new List<(string Name, FiveOS.Services.PropPackBuilder.BuildResult Result)>();
+        foreach (var (name, entries) in jobs)
         {
-            result = FiveOS.Services.PropPackBuilder.Build(session, _vm.LodDistVlow);
+            _vm.StatusText = $"Exporting '{name}' ({entries.Count} prop{(entries.Count == 1 ? "" : "s")})…";
+            try
+            {
+                results.Add((name, FiveOS.Services.PropPackBuilder.Build(entries, name, _vm.LodDistVlow, emitHousing)));
+            }
+            catch (Exception ex)
+            {
+                results.Add((name, new FiveOS.Services.PropPackBuilder.BuildResult(
+                    false, null, ex.Message, EngineRunner.OutputMode.SingleZip)));
+            }
         }
-        catch (Exception ex)
+
+        var failed = results.Where(r => !r.Result.Success || r.Result.ResultPath is null).ToList();
+        var succeeded = results.Where(r => r.Result.Success && r.Result.ResultPath is not null).ToList();
+
+        if (succeeded.Count == 0)
         {
-            CrashDialog.ShowEngineFailure(this, $"Pack finalize failed: {ex.Message}", ex.ToString());
-            _vm.StatusText = $"✗ Pack finalize failed: {ex.Message}";
+            var first = failed.FirstOrDefault();
+            CrashDialog.ShowEngineFailure(this, first.Result?.Error ?? "Export failed.", "");
+            _vm.StatusText = $"✗ Export failed: {first.Result?.Error}";
             return;
         }
 
-        if (!result.Success || result.ResultPath is null)
-        {
-            CrashDialog.ShowEngineFailure(this, result.Error ?? "Pack finalize failed.", "");
-            _vm.StatusText = $"✗ Pack finalize failed: {result.Error}";
-            return;
-        }
-
-        _vm.ResultZipPath = result.ResultPath;
+        var last = succeeded[^1].Result;
+        _vm.ResultZipPath = last.ResultPath;
         _vm.ShowSuccessScreen = true;
-        string sizePart = "";
-        try
+        if (succeeded.Count == 1)
         {
-            if (result.Mode == EngineRunner.OutputMode.SingleZip && File.Exists(result.ResultPath))
-                sizePart = " · " + FormatBytes(new FileInfo(result.ResultPath).Length);
+            string sizePart = "";
+            try
+            {
+                if (last.Mode == EngineRunner.OutputMode.SingleZip && File.Exists(last.ResultPath))
+                    sizePart = " · " + FormatBytes(new FileInfo(last.ResultPath!).Length);
+            }
+            catch { /* size cosmetic */ }
+            _vm.StatusText = last.Mode switch
+            {
+                EngineRunner.OutputMode.ServerShared   => $"✓ Merged into {last.ResultPath}",
+                EngineRunner.OutputMode.ServerPerAsset => $"✓ '{Path.GetFileName(last.ResultPath)}' ready in server folder",
+                _                                      => $"✓ Ready{sizePart} · {Path.GetFileName(last.ResultPath)}",
+            };
         }
-        catch { /* size cosmetic */ }
-        _vm.StatusText = result.Mode switch
+        else
         {
-            EngineRunner.OutputMode.ServerShared   => $"✓ Pack merged into {result.ResultPath}",
-            EngineRunner.OutputMode.ServerPerAsset => $"✓ Pack '{Path.GetFileName(result.ResultPath)}' ready in server folder",
-            _                                      => $"✓ Pack ready{sizePart} · {Path.GetFileName(result.ResultPath)}",
-        };
-        if (result.Warning is not null)
+            _vm.StatusText = $"✓ Exported {succeeded.Count} resource(s): " +
+                string.Join(", ", succeeded.Select(r => r.Name));
+        }
+
+        var warnings = succeeded.Where(r => r.Result.Warning is not null).ToList();
+        if (warnings.Count > 0)
         {
             _vm.StatusText += " · ⚠ see warning";
-            AppDialog.Show(result.Warning, "Pack delivered with a warning",
+            AppDialog.Show(string.Join("\n\n", warnings.Select(w => $"{w.Name}: {w.Result.Warning}")),
+                "Delivered with warnings",
                 System.Windows.MessageBoxButton.OK, System.Windows.MessageBoxImage.Warning, this);
         }
 
-        // Drop the staging tree + clear entries so the next pack starts
-        // clean. The success overlay still references ResultZipPath for
-        // the "Open folder" action, so the on-disk pack zip / folder is
-        // untouched — only the in-progress staging goes away.
+        if (failed.Count > 0)
+        {
+            AppDialog.Show(string.Join("\n", failed.Select(f => $"{f.Name}: {f.Result.Error}")),
+                $"{failed.Count} export(s) failed — their layers stay staged",
+                System.Windows.MessageBoxButton.OK, System.Windows.MessageBoxImage.Warning, this);
+            // Keep failed layers staged for a retry; drop only what shipped.
+            foreach (var job in jobs.Where(j => succeeded.Any(s =>
+                         string.Equals(s.Name, j.Name, StringComparison.OrdinalIgnoreCase))))
+            {
+                foreach (var entry in job.Entries)
+                    session.Remove(entry);
+            }
+            return;
+        }
+
+        if (onlyGroup is not null)
+        {
+            // Exported one group — drop just its layers, keep the rest staged.
+            foreach (var entry in included)
+                session.Remove(entry);
+            _vm.PackSession.UngroupGroup(onlyGroup);
+            return;
+        }
+
+        // Everything shipped (hidden layers too — they were deliberately
+        // excluded, so they don't survive the export either): start clean.
         session.Clear();
+        _vm.SelectedPackEntry = null;
         _vm.IsPackMode = false;
     }
 
     private void OnRemovePackEntry(object sender, RoutedEventArgs e)
     {
         if (sender is System.Windows.FrameworkElement fe && fe.DataContext is Services.PropPackEntry entry)
+        {
+            if (ReferenceEquals(_vm.SelectedPackEntry, entry))
+                _vm.SelectedPackEntry = null;
             _vm.PackSession.Remove(entry);
+        }
     }
 
-    private void OnClearPack(object sender, RoutedEventArgs e) => _vm.PackSession.Clear();
+    private void OnClearPack(object sender, RoutedEventArgs e)
+    {
+        _vm.SelectedPackEntry = null;
+        _vm.PackSession.Clear();
+    }
+
+    private void OnPackTreeSelected(object sender, RoutedPropertyChangedEventArgs<object> e)
+    {
+        // Legacy single-select path — unified outliner uses OnOutlinerSelectedItemChanged.
+        _vm.SelectedPackEntry = e.NewValue is Services.PropPackTreeNode { Entry: { } entry }
+            ? entry
+            : null;
+    }
+
+    private static Services.PropPackTreeNode? FindOutlinerNode(DependencyObject? origin)
+    {
+        for (var d = origin; d != null; d = System.Windows.Media.VisualTreeHelper.GetParent(d))
+        {
+            if (d is FrameworkElement { DataContext: Services.PropPackTreeNode node })
+                return node;
+        }
+        return null;
+    }
+
+    private void OnOutlinerPreviewMouseDown(object sender, MouseButtonEventArgs e)
+    {
+        var node = FindOutlinerNode(e.OriginalSource as DependencyObject);
+        if (node is null)
+        {
+            // 3D-app outliner: clicking empty panel space deselects.
+            _vm.ClearOutlinerSelection();
+            return;
+        }
+
+        // Any layer can be dragged: staged props and queue rows move
+        // between groups; the loaded model's row converts into the group
+        // it's dropped on.
+        if ((node.Entry is not null || node.QueueItem is not null ||
+             node.IsWorking || node.IsPart) &&
+            e.OriginalSource is not System.Windows.Controls.TextBox)
+        {
+            _outlinerDragNode = node;
+            _outlinerDragStart = e.GetPosition(OutlinerTree);
+            _outlinerDragging = false;
+            Services.FosLogger.Info("drag", $"down on '{node.Name}' at {_outlinerDragStart.X:0},{_outlinerDragStart.Y:0} src={e.OriginalSource?.GetType().Name}");
+        }
+
+        bool ctrl = (Keyboard.Modifiers & ModifierKeys.Control) == ModifierKeys.Control;
+        bool shift = (Keyboard.Modifiers & ModifierKeys.Shift) == ModifierKeys.Shift;
+        if (ctrl || shift)
+        {
+            _vm.SetOutlinerSelection(new[] { node }, additive: true);
+            e.Handled = true;
+        }
+        else
+        {
+            // Assert selection on every plain press — WPF's TreeView only
+            // raises SelectedItemChanged when the item CHANGES, so after an
+            // empty-space deselect a re-click on the same row would
+            // otherwise never re-highlight.
+            _vm.SetOutlinerSelection(new[] { node }, additive: false);
+        }
+    }
+
+    private void OnOutlinerPreviewMouseRightDown(object sender, MouseButtonEventArgs e)
+    {
+        var node = FindOutlinerNode(e.OriginalSource as DependencyObject);
+        if (node is null) return;
+        if (!_vm.SelectedOutlinerNodes.Contains(node))
+            _vm.SetOutlinerSelection(new[] { node }, additive: false);
+    }
+
+    private void OnOutlinerSelectedItemChanged(object sender, RoutedPropertyChangedEventArgs<object> e)
+    {
+        if (e.NewValue is not Services.PropPackTreeNode node) return;
+        if ((Keyboard.Modifiers & ModifierKeys.Control) == ModifierKeys.Control) return;
+        _vm.SetOutlinerSelection(new[] { node }, additive: false);
+        // NOTE: queued-layer preview intentionally does NOT fire here —
+        // selection changes mid-press, and the preview reflows the tree
+        // (parked row hides, rows shift), which used to turn an ordinary
+        // click into an accidental "drag out of group". The preview runs
+        // from OnOutlinerMouseUp once the click completes cleanly.
+    }
+
+    private void TryPreviewQueuedNode(Services.PropPackTreeNode? node)
+    {
+        if (node is null) return;
+
+        // Clicking the ACTIVE model's row (or its parts) puts the gizmo
+        // back on it — park/preview swaps can leave it detached.
+        if ((node.IsWorking || node.IsPart) && _vm.HasModel)
+        {
+            _ = AttachGizmoToCurrentAsync();
+            return;
+        }
+
+        if (node.QueueItem is { IsPending: true } qi &&
+            !_vm.IsConverting &&
+            File.Exists(qi.SourcePath) &&
+            !string.Equals(qi.SourcePath, _vm.SourcePath, StringComparison.OrdinalIgnoreCase))
+        {
+            ActivateQueuedLayer(qi);
+        }
+        else if (node.QueueItem is { IsPending: true } samePending &&
+                 string.Equals(samePending.SourcePath, _vm.SourcePath, StringComparison.OrdinalIgnoreCase))
+        {
+            // Clicking the layer of the model that's ALREADY active —
+            // just re-assert the gizmo on it.
+            _ = AttachGizmoToCurrentAsync();
+        }
+    }
+
+    /// <summary>3D-software selection: promote the clicked layer's PARKED
+    /// object to active in place (no reload, transform untouched). Only
+    /// when no parked object exists (fresh session) does it fall back to
+    /// loading the layer's source file.</summary>
+    private async void ActivateQueuedLayer(Services.PropPackQueueItem item)
+    {
+        // Whatever is active right now becomes/stays a layer + parks.
+        await ParkActiveModelAsLayerAsync(item.SourcePath);
+
+        if (Viewport?.CoreWebView2 != null)
+        {
+            var id = System.Text.Json.JsonSerializer.Serialize(item.AssetName);
+            string? res = null;
+            try
+            {
+                res = await Viewport.CoreWebView2.ExecuteScriptAsync(
+                    $"window.activateParkedModel && window.activateParkedModel({id})");
+            }
+            catch (Exception ex)
+            {
+                Services.FosLogger.Warn("viewer", "activateParkedModel: " + ex.Message);
+            }
+            if (string.Equals(res, "true", StringComparison.OrdinalIgnoreCase))
+            {
+                _vm.SourcePath = item.SourcePath;
+                _vm.PropName = item.AssetName;
+                _vm.HasModel = true;
+                _vm.IsModelLoading = false;
+                // Parts + transform arrive from the viewer; refresh the
+                // texture panel for the newly active source.
+                _ = LoadBaseTextureGroupAsync(item.SourcePath);
+                _vm.StatusText = $"'{item.AssetName}' selected.";
+                return;
+            }
+        }
+
+        // No parked object for this layer (e.g. app restarted) — load it.
+        PreviewQueuedLayer(item);
+    }
+
+    private async Task AttachGizmoToCurrentAsync()
+    {
+        if (Viewport?.CoreWebView2 == null) return;
+        try
+        {
+            await Viewport.CoreWebView2.ExecuteScriptAsync(
+                "window.attachGizmoToCurrent && window.attachGizmoToCurrent()");
+        }
+        catch (Exception ex)
+        {
+            Services.FosLogger.Warn("viewer", "attachGizmoToCurrent: " + ex.Message);
+        }
+    }
+
+    /// <summary>Saved gizmo state to re-apply once the previewed layer's
+    /// model finishes loading (the load pipeline resets transforms).</summary>
+    private (double Sx, double Sy, double Sz, double Rx, double Ry, double Rz)? _pendingPreviewTransform;
+
+    private void PreviewQueuedLayer(Services.PropPackQueueItem item)
+    {
+        _pendingPreviewTransform = null;
+        if (item.RequestSnapshot is { } snap)
+        {
+            var rot = ParseCsvVec3(snap.RotationHint);
+            _pendingPreviewTransform = (snap.ScaleHint.X, snap.ScaleHint.Y, snap.ScaleHint.Z, rot.X, rot.Y, rot.Z);
+        }
+        _vm.StatusText = $"Previewing '{item.AssetName}' — still queued in {(item.GroupName is null ? "the layer list" : $"'{item.GroupName}'")}.";
+        TryLoad(item.SourcePath);
+    }
+
+    private static (double X, double Y, double Z) ParseCsvVec3(string? csv)
+    {
+        var parts = (csv ?? "").Split(',');
+        double P(int i) => parts.Length > i && double.TryParse(parts[i],
+            System.Globalization.NumberStyles.Float,
+            System.Globalization.CultureInfo.InvariantCulture, out var d) ? d : 0;
+        return (P(0), P(1), P(2));
+    }
+
+    private void OnOutlinerPartVisibilityToggle(object sender, RoutedEventArgs e)
+    {
+        if (sender is not FrameworkElement fe) return;
+        var part = fe.Tag switch
+        {
+            MainViewModel.ModelPart p => p,
+            Services.PropPackTreeNode { Part: { } mp } => mp,
+            _ => null
+        };
+        if (part is null) return;
+        part.IsVisible = !part.IsVisible;
+    }
+
+    private void OnOutlinerContextMenuOpened(object sender, RoutedEventArgs e)
+    {
+        if (sender is not WpfContextMenu menu) return;
+        menu.Items.Clear();
+
+        var selected = _vm.SelectedOutlinerNodes.ToList();
+        if (selected.Count == 0 && menu.PlacementTarget is FrameworkElement fe)
+        {
+            var n = FindOutlinerNode(fe);
+            if (n != null) selected.Add(n);
+        }
+        if (selected.Count == 0) return;
+
+        bool allParts = selected.All(n => n.IsPart);
+        bool allProps = selected.All(n => n.IsProp);
+        bool anyPack = selected.Any(n => n.IsPack || n.IsStream);
+        bool anyWorking = selected.Any(n => n.IsWorking);
+
+        if (anyWorking && !allParts)
+        {
+            var add = new WpfMenuItem { Header = "Add files to queue…" };
+            add.Click += OnPackQueueAdd;
+            menu.Items.Add(add);
+            if (!anyPack) return;
+        }
+
+        if (allParts && selected.Count >= 1)
+        {
+            var part = selected[0].Part;
+            if (part is null) return;
+
+            void AddPartItem(string header, RoutedEventHandler handler, object? tag = null)
+            {
+                var mi = new WpfMenuItem { Header = header, Tag = tag ?? part };
+                mi.Click += handler;
+                menu.Items.Add(mi);
+            }
+
+            AddPartItem("Rename…", OnLayerRename);
+            var tex = new WpfMenuItem { Header = "Textures" };
+            var optTex = new WpfMenuItem { Header = "Optimize", Tag = part };
+            optTex.Click += OnLayerOptimizeTextures;
+            var chgTex = new WpfMenuItem { Header = "Change textures…", Tag = part };
+            chgTex.Click += OnLayerChangeTextures;
+            tex.Items.Add(optTex);
+            tex.Items.Add(chgTex);
+            menu.Items.Add(tex);
+            AddPartItem("Optimize Mesh…", OnLayerOptimizeMesh);
+            var mat = new WpfMenuItem { Header = "Material" };
+            void AddMat(string h, RoutedEventHandler hnd)
+            {
+                var mi = new WpfMenuItem { Header = h, Tag = part };
+                mi.Click += hnd;
+                mat.Items.Add(mi);
+            }
+            AddMat("Standard", OnLayerMaterialStandard);
+            AddMat("Glass", OnLayerMaterialGlass);
+            AddMat("Emissive", OnLayerMaterialEmissive);
+            AddMat("Emissive Strong", OnLayerMaterialEmissiveStrong);
+            AddMat("Emissive Night", OnLayerMaterialEmissiveNight);
+            AddMat("Metal", OnLayerMaterialMetal);
+            AddMat("Cutout", OnLayerMaterialCutout);
+            menu.Items.Add(mat);
+            menu.Items.Add(new WpfSeparator());
+            var split = new WpfMenuItem { Header = "Split into separate YDRs" };
+            split.Click += OnSplitLayersToYdrs;
+            menu.Items.Add(split);
+            if (selected.Count == 1)
+            {
+                menu.Items.Add(new WpfSeparator());
+                AddPartItem("Delete part", OnLayerDelete);
+            }
+            return;
+        }
+
+        if (allProps || selected.All(n => n.IsProp || n.IsQueueItem))
+        {
+            if (selected.Count == 1 && selected[0].Entry is { } soloEntry)
+            {
+                var renameLayer = new WpfMenuItem { Header = "Rename layer…" };
+                renameLayer.Click += (_, _) => PromptRenameStagedLayer(soloEntry);
+                menu.Items.Add(renameLayer);
+            }
+
+            var groupItem = new WpfMenuItem { Header = "Group into new pack\tCtrl+G" };
+            groupItem.Click += (_, _) =>
+            {
+                var name = _vm.GroupSelectedOutlinerLayers();
+                if (name is not null)
+                    _vm.StatusText = $"Grouped into '{name}' — the group exports as one pack.";
+            };
+            menu.Items.Add(groupItem);
+
+            if (selected.Any(n => n.Entry?.GroupName is not null || n.QueueItem?.GroupName is not null))
+            {
+                var loose = new WpfMenuItem { Header = "Move out of group" };
+                loose.Click += (_, _) =>
+                {
+                    foreach (var n in selected)
+                    {
+                        if (n.Entry is { } en) _vm.PackSession.MoveEntryToGroup(en, null);
+                        else if (n.QueueItem is { } qi) { qi.GroupName = null; }
+                    }
+                    _vm.PackSession.RebuildTree();
+                };
+                menu.Items.Add(loose);
+            }
+
+            var exportAll = new WpfMenuItem { Header = "Export all layers" };
+            exportAll.Click += OnFinalizePack;
+            menu.Items.Add(exportAll);
+
+            menu.Items.Add(new WpfSeparator());
+            var remove = new WpfMenuItem { Header = selected.Count == 1 ? "Remove layer" : $"Remove {selected.Count} layers" };
+            remove.Click += OnOutlinerRemoveSelected;
+            menu.Items.Add(remove);
+            return;
+        }
+
+        if (anyPack || selected.Any(n => n.IsPack))
+        {
+            var groupNode = selected.FirstOrDefault(n => n.IsPack);
+            var groupKey = groupNode?.GroupKey;
+
+            var add = new WpfMenuItem { Header = groupKey is null ? "Add model(s)…" : $"Add model(s) into '{groupKey}'…" };
+            add.Click += OnPackQueueAdd;
+            menu.Items.Add(add);
+
+            if (groupKey is not null)
+            {
+                var exportGroup = new WpfMenuItem
+                {
+                    Header = $"Export '{groupKey}' as pack",
+                    IsEnabled = _vm.PackSession.Entries.Any(en => en.IsIncluded &&
+                            string.Equals(en.GroupName, groupKey, StringComparison.OrdinalIgnoreCase))
+                        || _vm.PackSession.ConvertQueue.Any(q => q.IsPending &&
+                            string.Equals(q.GroupName, groupKey, StringComparison.OrdinalIgnoreCase)),
+                };
+                exportGroup.Click += async (_, _) => await ExportOutlinerLayers(onlyGroup: groupKey);
+                menu.Items.Add(exportGroup);
+
+                var rename = new WpfMenuItem { Header = "Rename group" };
+                rename.Click += (_, _) => { if (groupNode is not null) groupNode.IsRenaming = true; };
+                menu.Items.Add(rename);
+
+                var ungroup = new WpfMenuItem { Header = "Ungroup (layers export separately)" };
+                ungroup.Click += (_, _) => _vm.PackSession.UngroupGroup(groupKey);
+                menu.Items.Add(ungroup);
+            }
+
+            var fin = new WpfMenuItem
+            {
+                Header = "Export all layers",
+                IsEnabled = _vm.PackSession.HasEntries
+            };
+            fin.Click += OnFinalizePack;
+            menu.Items.Add(fin);
+
+            menu.Items.Add(new WpfSeparator());
+            if (groupKey is not null)
+            {
+                var delGroup = new WpfMenuItem { Header = "Delete group + layers" };
+                delGroup.Click += (_, _) => _vm.PackSession.RemoveGroupWithEntries(groupKey);
+                menu.Items.Add(delGroup);
+            }
+            var clear = new WpfMenuItem { Header = "Clear all layers" };
+            clear.Click += OnClearPack;
+            menu.Items.Add(clear);
+        }
+    }
+
+    private void OnQueueItemRemove(object sender, RoutedEventArgs e)
+    {
+        if (sender is not FrameworkElement { Tag: Services.PropPackQueueItem item }) return;
+        _vm.PackSession.RemoveQueueItem(item);
+    }
+
+    private void OnQueueRemoveSelected(object sender, RoutedEventArgs e)
+    {
+        var items = _vm.SelectedOutlinerNodes
+            .Where(n => n.QueueItem is not null)
+            .Select(n => n.QueueItem!)
+            .ToList();
+        foreach (var item in items)
+            _vm.PackSession.RemoveQueueItem(item);
+    }
+
+    private void OnQueueConvertSelected(object sender, RoutedEventArgs e)
+    {
+        var wanted = _vm.SelectedOutlinerNodes
+            .Where(n => n.QueueItem is { IsPending: true })
+            .Select(n => n.QueueItem!)
+            .ToHashSet();
+        if (wanted.Count == 0)
+        {
+            _vm.StatusText = "Select pending queue rows to convert.";
+            return;
+        }
+        _packQueueFilter = wanted;
+        OnPackQueueRun(sender, e);
+    }
+
+    private void OnOutlinerConvertSelectedQueue(object sender, RoutedEventArgs e)
+    {
+        // Kept for compatibility — queue rows now live inline in the tree.
+        OnQueueConvertSelected(sender, e);
+    }
+
+    // ── Photoshop-style Layers interactions ─────────────────────────────
+
+    /// <summary>Unified eye click: parts flip viewport visibility, staged
+    /// layers flip pack inclusion, group rows toggle every child at once.</summary>
+    private void OnOutlinerEyeToggle(object sender, RoutedEventArgs e)
+    {
+        if (sender is not FrameworkElement { Tag: Services.PropPackTreeNode node }) return;
+
+        if (node.Part is { } part)
+        {
+            part.IsVisible = !part.IsVisible;
+            return;
+        }
+        if (node.Entry is { } entry)
+        {
+            _vm.PackSession.SetEntryIncluded(entry, !entry.IsIncluded);
+            return;
+        }
+        if (node.QueueItem is { } queued)
+        {
+            queued.IsIncluded = !queued.IsIncluded;
+            _vm.PackSession.RebuildTree();
+            return;
+        }
+        if (node.IsWorking)
+        {
+            bool on = !node.IsEyeOn;
+            foreach (var p in _vm.ModelParts)
+                p.IsVisible = on;
+            node.IsEyeOn = on;
+            return;
+        }
+        if (node.IsPack && node.GroupKey is { } group)
+        {
+            // Group eye = hide/show the whole group (export skips hidden
+            // groups entirely); member eyes are preserved underneath.
+            bool hide = node.IsEyeOn;
+            _vm.PackSession.SetGroupHidden(group, hide);
+            _vm.StatusText = hide
+                ? $"'{group}' hidden — it won't export until you show it again."
+                : $"'{group}' visible again.";
+        }
+    }
+
+    private void OnOutlinerNewGroup(object sender, RoutedEventArgs e)
+    {
+        var name = _vm.CreateOutlinerGroup();
+        BeginGroupRename(name);
+        _vm.StatusText = $"Group '{name}' created — drag layers in, or drop model files straight onto it.";
+    }
+
+    // ── Pack menu (menu bar) ────────────────────────────────────────────
+
+    /// <summary>Group the outliner selection targets, else the only group
+    /// in the session (menu actions shouldn't require a click-first when
+    /// there's nothing to disambiguate).</summary>
+    private string? ResolvePackMenuGroup()
+    {
+        var fromSelection = _vm.TargetOutlinerGroup;
+        if (fromSelection is not null) return fromSelection;
+        return _vm.PackSession.Groups.Count == 1 ? _vm.PackSession.Groups[0] : null;
+    }
+
+    private void OnPackMenuOpened(object sender, RoutedEventArgs e)
+    {
+        bool hasGroup = ResolvePackMenuGroup() is not null;
+        bool hasSelection = _vm.SelectedOutlinerNodes.Any(n => n.Entry is not null || n.QueueItem is not null);
+        var groupKey = ResolvePackMenuGroup();
+        // Pending (drag-dropped, converts-on-export) rows count as content.
+        bool groupHasProps = groupKey is not null &&
+            (_vm.PackSession.Entries.Any(en => en.IsIncluded &&
+                 string.Equals(en.GroupName, groupKey, StringComparison.OrdinalIgnoreCase)) ||
+             _vm.PackSession.ConvertQueue.Any(q => q.IsPending &&
+                 string.Equals(q.GroupName, groupKey, StringComparison.OrdinalIgnoreCase)));
+
+        PackMenuGroupSelected.IsEnabled = hasSelection;
+        PackMenuRename.IsEnabled = hasGroup;
+        PackMenuUngroup.IsEnabled = hasGroup;
+        PackMenuExportGroup.IsEnabled = groupHasProps;
+        PackMenuExportGroup.Header = groupKey is null
+            ? "Export selected group"
+            : $"Export '{groupKey}' as pack";
+        PackMenuExportAll.IsEnabled = _vm.PackSession.Entries.Any(en => en.IsIncluded)
+            || _vm.PackSession.ConvertQueue.Any(q => q.IsPending);
+        PackMenuClear.IsEnabled = _vm.PackSession.HasOutlinerContent;
+    }
+
+    private void OnPackMenuGroupSelected(object sender, RoutedEventArgs e)
+    {
+        var name = _vm.GroupSelectedOutlinerLayers();
+        _vm.StatusText = name is null
+            ? "Select staged layers in the Layers panel first — then group them into a pack."
+            : $"Grouped into '{name}' — the group exports as one pack.";
+    }
+
+    private void OnPackMenuRename(object sender, RoutedEventArgs e)
+    {
+        var group = ResolvePackMenuGroup();
+        if (group is null)
+        {
+            _vm.StatusText = "Select a group in the Layers panel first.";
+            return;
+        }
+        _vm.IsLayersPanelOpen = true;
+        _vm.IsLayersPanelCollapsed = false;
+        BeginGroupRename(group);
+    }
+
+    private void OnPackMenuUngroup(object sender, RoutedEventArgs e)
+    {
+        var group = ResolvePackMenuGroup();
+        if (group is null)
+        {
+            _vm.StatusText = "Select a group in the Layers panel first.";
+            return;
+        }
+        _vm.PackSession.UngroupGroup(group);
+        _vm.StatusText = $"'{group}' ungrouped — its layers export separately now.";
+    }
+
+    private async void OnPackMenuExportGroup(object sender, RoutedEventArgs e)
+    {
+        var group = ResolvePackMenuGroup();
+        if (group is null)
+        {
+            _vm.StatusText = "Select a group in the Layers panel first.";
+            return;
+        }
+        await ExportOutlinerLayers(onlyGroup: group);
+    }
+
+    private void OnOutlinerAddModels(object sender, RoutedEventArgs e) => OnPackQueueAdd(sender, e);
+
+    private void OnOutlinerDeleteSelected(object sender, RoutedEventArgs e)
+    {
+        var nodes = _vm.SelectedOutlinerNodes.ToList();
+        if (nodes.Count == 0)
+        {
+            _vm.StatusText = "Select layers or groups to delete.";
+            return;
+        }
+        int removed = 0;
+        foreach (var node in nodes)
+        {
+            if (node.Entry is { } entry) { _vm.PackSession.Remove(entry); removed++; }
+            else if (node.QueueItem is { } qi) { _vm.PackSession.RemoveQueueItem(qi); removed++; }
+            else if (node.IsPack && node.GroupKey is { } group)
+            {
+                _vm.PackSession.RemoveGroupWithEntries(group);
+                removed++;
+            }
+        }
+        _vm.ClearOutlinerSelection();
+        if (removed == 0)
+            _vm.StatusText = "Nothing deletable selected — mesh parts are removed via right-click → Delete part.";
+    }
+
+    /// <summary>Kick the convert queue automatically — Photoshop flow has
+    /// no Run button; dropped/added models just start converting.</summary>
+    private void TryAutoRunPackQueue()
+    {
+        if (_vm.PackSession.CanRunConvertQueue && !_vm.IsConverting)
+            OnPackQueueRun(this, new RoutedEventArgs());
+    }
+
+    // Row drag: move layers between groups / out to the top level.
+    private Services.PropPackTreeNode? _outlinerDragNode;
+    private Services.PropPackTreeNode? _outlinerDropNode;
+    private Point _outlinerDragStart;
+    private bool _outlinerDragging;
+    /// <summary>True once the pointer actually hovered a different row than
+    /// the drag source — a "drag" that never left its own row is a click,
+    /// and must never move the layer (guards against tree reflow under a
+    /// wobbly click).</summary>
+    private bool _outlinerDragLeftSource;
+
+    private void OnOutlinerMouseMove(object sender, MouseEventArgs e)
+    {
+        if (e.LeftButton != MouseButtonState.Pressed || _outlinerDragNode is null) return;
+
+        var pos = e.GetPosition(OutlinerTree);
+        if (!_outlinerDragging)
+        {
+            if (Math.Abs(pos.X - _outlinerDragStart.X) < 4 && Math.Abs(pos.Y - _outlinerDragStart.Y) < 4)
+                return;
+            _outlinerDragging = true;
+            bool captured = Mouse.Capture(OutlinerTree, CaptureMode.SubTree);
+            Mouse.OverrideCursor = Cursors.Hand;
+            _vm.StatusText = _outlinerDragNode.IsWorking || _outlinerDragNode.IsPart
+                ? $"Moving '{_outlinerDragNode.Name}' — drop on a group to add it to that pack."
+                : $"Moving '{_outlinerDragNode.Name}' — drop on a group, or on empty space to keep it loose.";
+            Services.FosLogger.Info("drag", $"start '{_outlinerDragNode.Name}' captured={captured}");
+        }
+
+        var over = FindOutlinerNode(OutlinerTree.InputHitTest(pos) as DependencyObject);
+        if (over is not null && !ReferenceEquals(over, _outlinerDragNode))
+            _outlinerDragLeftSource = true;
+        var target = ResolveDropGroupNode(over);
+        if (!ReferenceEquals(target, _outlinerDropNode))
+        {
+            if (_outlinerDropNode is not null) _outlinerDropNode.IsDropTarget = false;
+            _outlinerDropNode = target;
+            if (_outlinerDropNode is not null) _outlinerDropNode.IsDropTarget = true;
+        }
+        e.Handled = true;
+    }
+
+    private void OnOutlinerMouseUp(object sender, MouseButtonEventArgs e)
+    {
+        Services.FosLogger.Info("drag", $"up dragging={_outlinerDragging} leftSource={_outlinerDragLeftSource} node={_outlinerDragNode?.Name ?? "<null>"} target={_outlinerDropNode?.Name ?? "<null>"}");
+        if (!_outlinerDragging)
+        {
+            var clicked = _outlinerDragNode;
+            _outlinerDragNode = null;
+            _outlinerDragLeftSource = false;
+            // Clean click on a queued row → preview its model (safe to
+            // reflow the tree now that the press is over).
+            TryPreviewQueuedNode(clicked ?? FindOutlinerNode(e.OriginalSource as DependencyObject));
+            return;
+        }
+
+        // Snapshot + clear the drag state BEFORE releasing capture:
+        // Mouse.Capture(null) raises LostMouseCapture synchronously, and
+        // the abandon-handler nulls these fields — releasing first made
+        // every drop read empty state and silently no-op.
+        var dragged = _outlinerDragNode;
+        var target = _outlinerDropNode;
+        bool leftSource = _outlinerDragLeftSource;
+        _outlinerDragNode = null;
+        _outlinerDropNode = null;
+        _outlinerDragging = false;
+        _outlinerDragLeftSource = false;
+        if (target is not null) target.IsDropTarget = false;
+        Mouse.Capture(null);
+        Mouse.OverrideCursor = null;
+
+        // A wobbly click that never hovered another row is NOT a move —
+        // treat it as a click (preview if it was a queued row).
+        if (!leftSource)
+        {
+            TryPreviewQueuedNode(dragged);
+            e.Handled = true;
+            return;
+        }
+
+        if (dragged is null) return;
+        var group = target?.GroupKey; // null = drop at top level → loose layer
+
+        if (dragged.Entry is { } entry)
+        {
+            _vm.PackSession.MoveEntryToGroup(entry, group);
+            _vm.StatusText = group is null
+                ? $"'{entry.SlotName}' is now a loose layer — it exports as its own resource."
+                : $"'{entry.SlotName}' moved into '{group}'.";
+        }
+        else if (dragged.QueueItem is { } qi)
+        {
+            qi.GroupName = group;
+            _vm.PackSession.RebuildTree();
+        }
+        else if (dragged.IsWorking || dragged.IsPart)
+        {
+            // The loaded model's row: dropping it on a group converts the
+            // model straight into that pack. "Root" = the whole-model row:
+            // the Working node, a single-mesh model's only row, or any row
+            // sitting at the top level of the outliner.
+            bool isRootRow = dragged.IsWorking
+                || _vm.ModelParts.Count <= 1
+                || _vm.OutlinerRoots.Contains(dragged);
+            if (group is null || target is null)
+            {
+                Services.FosLogger.Info("drag", "model drop: no group target");
+                _vm.StatusText = "Drop the model on a group to convert it into that pack.";
+            }
+            else if (!isRootRow)
+            {
+                Services.FosLogger.Info("drag", "model drop: child part row");
+                _vm.StatusText = "Parts convert together with their model — drag the model's top row, or right-click → Split into separate YDRs.";
+            }
+            else if (_vm.IsConverting)
+            {
+                Services.FosLogger.Info("drag", "model drop: already converting");
+                _vm.StatusText = "Finish the current convert first, then drop the model on the group.";
+            }
+            else if (string.IsNullOrEmpty(_vm.SourcePath) || !File.Exists(_vm.SourcePath))
+            {
+                Services.FosLogger.Info("drag", $"model drop: no source (path='{_vm.SourcePath}')");
+                _vm.StatusText = "No source model loaded.";
+            }
+            else
+            {
+                // Photoshop feel: the row lands in the group INSTANTLY as a
+                // queued layer; the conversion runs in the background on
+                // that row (chip: queued → converting…). The request is
+                // frozen now so gizmo scale/rotation, hidden parts and
+                // materials are exactly what the user sees in the viewport.
+                var stem = string.IsNullOrWhiteSpace(_vm.PropName)
+                    ? Path.GetFileNameWithoutExtension(_vm.SourcePath)
+                    : _vm.PropName.Trim();
+                var excludeMeshes = _vm.ModelParts.Where(p => !p.IsVisible).Select(p => p.OriginalName)
+                    .Concat(_vm.DeletedPartNames)
+                    .Distinct(StringComparer.Ordinal)
+                    .ToList();
+                var snapshot = BuildConvertRequest(stem, excludeMeshes, routeToPack: true)
+                    with { PackGroup = group };
+                Services.FosLogger.Info("drag", $"model drop: enqueue '{stem}' into '{group}'");
+                _vm.PackSession.EnqueueConvertSnapshot(_vm.SourcePath!, stem, group, snapshot);
+                if (!_vm.IsPackMode) _vm.IsPackMode = true;
+                // Deliberately NO conversion here — dragging is organizing.
+                // The layer MOVES into the group in the panel, but the
+                // model stays in the viewport (Photoshop: grouping a layer
+                // never clears the canvas). Its settings are re-frozen at
+                // export so continued viewport edits still count.
+                _vm.RebuildOutlinerWorking();
+                _vm.StatusText = $"'{stem}' moved into '{group}' — converts when you export the pack.";
+            }
+        }
+        e.Handled = true;
+    }
+
+    /// <summary>Popup/alt-tab stole the capture mid-drag — abandon cleanly
+    /// so the cursor and highlight don't stick.</summary>
+    private void OnOutlinerLostCapture(object sender, MouseEventArgs e)
+    {
+        if (!_outlinerDragging) return;
+        Mouse.OverrideCursor = null;
+        if (_outlinerDropNode is not null) _outlinerDropNode.IsDropTarget = false;
+        _outlinerDragNode = null;
+        _outlinerDropNode = null;
+        _outlinerDragging = false;
+        _outlinerDragLeftSource = false;
+    }
+
+    /// <summary>Map whatever row the pointer is over to the group it
+    /// represents: a group row targets itself; a member row targets its
+    /// parent group; anything else (empty space, model rows) = loose.</summary>
+    private Services.PropPackTreeNode? ResolveDropGroupNode(Services.PropPackTreeNode? over)
+    {
+        if (over is null) return null;
+        if (over.IsPack) return over;
+        var group = over.Entry?.GroupName ?? over.QueueItem?.GroupName;
+        if (group is null) return null;
+        return _vm.OutlinerRoots.FirstOrDefault(n =>
+            n.IsPack && string.Equals(n.GroupKey, group, StringComparison.OrdinalIgnoreCase));
+    }
+
+    private void OnOutlinerDoubleClick(object sender, MouseButtonEventArgs e)
+    {
+        var node = FindOutlinerNode(e.OriginalSource as DependencyObject);
+        if (node is null) return;
+        if (node.IsPack)
+        {
+            node.IsRenaming = true;
+            e.Handled = true;
+        }
+        else if (node.Entry is { } entry)
+        {
+            PromptRenameStagedLayer(entry);
+            e.Handled = true;
+        }
+    }
+
+    /// <summary>Rename a staged (converted) layer — renames the outliner
+    /// row AND the exported resource/archetype, since finalize derives
+    /// stream stems from SlotName and rewrites the YDR internal name.</summary>
+    private void PromptRenameStagedLayer(Services.PropPackEntry entry)
+    {
+        var newName = ShowInputDialog("Rename layer", "New name:", entry.SlotName);
+        if (string.IsNullOrWhiteSpace(newName)) return;
+        if (_vm.PackSession.RenameEntry(entry, newName))
+            _vm.StatusText = $"Renamed to '{entry.SlotName}' — the exported prop uses this name.";
+        else
+            _vm.StatusText = "Couldn't rename — name is empty or already taken.";
+    }
+
+    private void OnOutlinerKeyDown(object sender, KeyEventArgs e)
+    {
+        if (e.Key == Key.G && (Keyboard.Modifiers & ModifierKeys.Control) == ModifierKeys.Control)
+        {
+            var name = _vm.GroupSelectedOutlinerLayers();
+            _vm.StatusText = name is null
+                ? "Select staged layers first, then Ctrl+G groups them into a pack."
+                : $"Grouped into '{name}' — the group exports as one pack.";
+            e.Handled = true;
+        }
+        else if (e.Key == Key.Delete)
+        {
+            OnOutlinerDeleteSelected(sender, e);
+            e.Handled = true;
+        }
+    }
+
+    private void BeginGroupRename(string groupName)
+    {
+        var node = _vm.OutlinerRoots.FirstOrDefault(n =>
+            n.IsPack && string.Equals(n.GroupKey, groupName, StringComparison.OrdinalIgnoreCase));
+        if (node is not null) node.IsRenaming = true;
+    }
+
+    private void OnGroupRenameBoxVisible(object sender, DependencyPropertyChangedEventArgs e)
+    {
+        if (sender is not System.Windows.Controls.TextBox tb || e.NewValue is not true) return;
+        FocusRenameBox(tb);
+    }
+
+    /// <summary>Rows materialize asynchronously, so a rename box created
+    /// already-visible never fires IsVisibleChanged — hook Loaded too, or
+    /// keyboard focus stays on the "New group" button and Enter spawns
+    /// another group instead of committing the name.</summary>
+    private void OnGroupRenameBoxLoaded(object sender, RoutedEventArgs e)
+    {
+        if (sender is System.Windows.Controls.TextBox { IsVisible: true, Tag: Services.PropPackTreeNode { IsRenaming: true } } tb)
+            FocusRenameBox(tb);
+    }
+
+    private static void FocusRenameBox(System.Windows.Controls.TextBox tb)
+    {
+        tb.Dispatcher.BeginInvoke(new Action(() =>
+        {
+            tb.Focus();
+            Keyboard.Focus(tb);
+            tb.SelectAll();
+        }), System.Windows.Threading.DispatcherPriority.Input);
+    }
+
+    private void OnGroupRenameKeyDown(object sender, KeyEventArgs e)
+    {
+        if (sender is not System.Windows.Controls.TextBox { Tag: Services.PropPackTreeNode node } tb) return;
+        if (e.Key == Key.Enter)
+        {
+            CommitGroupRename(tb, node);
+            e.Handled = true;
+        }
+        else if (e.Key == Key.Escape)
+        {
+            node.IsRenaming = false;
+            e.Handled = true;
+        }
+    }
+
+    private void OnGroupRenameLostFocus(object sender, RoutedEventArgs e)
+    {
+        if (sender is System.Windows.Controls.TextBox { Tag: Services.PropPackTreeNode { IsRenaming: true } node } tb)
+            CommitGroupRename(tb, node);
+    }
+
+    private void CommitGroupRename(System.Windows.Controls.TextBox tb, Services.PropPackTreeNode node)
+    {
+        node.IsRenaming = false;
+        if (node.GroupKey is not { } oldName) return;
+        var newName = tb.Text?.Trim() ?? "";
+        if (newName.Length == 0 || string.Equals(newName, oldName, StringComparison.Ordinal)) return;
+        if (_vm.PackSession.RenameGroup(oldName, newName) is null)
+            _vm.StatusText = $"Couldn't rename '{oldName}' — that name is empty or already taken.";
+    }
+
+    // Explorer file drop → queue into the group under the cursor (auto-runs).
+    private void OnOutlinerFileDragOver(object sender, DragEventArgs e)
+    {
+        e.Effects = e.Data.GetDataPresent(DataFormats.FileDrop)
+            ? DragDropEffects.Copy
+            : DragDropEffects.None;
+        e.Handled = true;
+    }
+
+    private void OnOutlinerFileDrop(object sender, DragEventArgs e)
+    {
+        if (!e.Data.GetDataPresent(DataFormats.FileDrop)) return;
+        if (e.Data.GetData(DataFormats.FileDrop) is not string[] files || files.Length == 0) return;
+
+        var over = FindOutlinerNode(OutlinerTree.InputHitTest(e.GetPosition(OutlinerTree)) as DependencyObject);
+        var group = ResolveDropGroupNode(over)?.GroupKey;
+
+        int added = _vm.PackSession.EnqueueConvertPaths(files, group);
+        _vm.StatusText = added == 0
+            ? "Nothing queued (unsupported, missing, or already listed)."
+            : group is null
+                ? $"Queued {added} file(s) as loose layers — converting…"
+                : $"Queued {added} file(s) into '{group}' — converting…";
+        e.Handled = true;
+        TryAutoRunPackQueue();
+    }
+
+    private void OnOutlinerRemoveSelected(object sender, RoutedEventArgs e)
+    {
+        var nodes = _vm.SelectedOutlinerNodes.ToList();
+        foreach (var node in nodes)
+        {
+            if (node.Entry is { } entry)
+                _vm.PackSession.Remove(entry);
+            else if (node.QueueItem is { } qi)
+                _vm.PackSession.RemoveQueueItem(qi);
+        }
+        _vm.ClearOutlinerSelection();
+    }
+
+    /// <summary>When set, <see cref="OnPackQueueRun"/> only converts these pending items.</summary>
+    private HashSet<Services.PropPackQueueItem>? _packQueueFilter;
+
+    private void OnPackTreeRemoveNode(object sender, RoutedEventArgs e)
+    {
+        if (sender is not FrameworkElement { DataContext: Services.PropPackTreeNode node }) return;
+        if (node.Entry is { } entry)
+        {
+            if (ReferenceEquals(_vm.SelectedPackEntry, entry))
+                _vm.SelectedPackEntry = null;
+            _vm.PackSession.Remove(entry);
+        }
+        else if (node.QueueItem is { } qi)
+        {
+            _vm.PackSession.RemoveQueueItem(qi);
+        }
+    }
+
+    private void OnPackQueueAdd(object sender, RoutedEventArgs e)
+    {
+        if (_vm.PackSession.IsQueueRunning) return;
+        if (!_vm.IsPackMode) _vm.IsPackMode = true;
+
+        var dlg = new OpenFileDialog
+        {
+            Title = "Add props to convert queue",
+            Multiselect = true,
+            Filter = "3D models (*.obj;*.glb;*.gltf;*.fbx;*.dae;*.ply;*.stl)|" +
+                     "*.obj;*.glb;*.gltf;*.fbx;*.dae;*.ply;*.stl|" +
+                     "All files (*.*)|*.*"
+        };
+        if (dlg.ShowDialog(this) != true || dlg.FileNames.Length == 0) return;
+
+        // Land in the group selected in the outliner (loose when none) and
+        // start converting right away — the Photoshop flow has no Run button.
+        var group = _vm.TargetOutlinerGroup;
+        int added = _vm.PackSession.EnqueueConvertPaths(dlg.FileNames, group);
+        _vm.StatusText = added == 0
+            ? "Nothing new queued (unsupported, missing, or already listed)."
+            : group is null
+                ? $"Queued {added} file(s) as loose layers — converting…"
+                : $"Queued {added} file(s) into '{group}' — converting…";
+        TryAutoRunPackQueue();
+    }
+
+    private async void OnPackQueueRun(object sender, RoutedEventArgs e) => await RunPackQueueAsync();
+
+    private async Task RunPackQueueAsync()
+    {
+        var session = _vm.PackSession;
+        if (!session.CanRunConvertQueue) return;
+        if (_vm.IsConverting)
+        {
+            _vm.StatusText = "Finish the current convert first, then run the pack queue.";
+            return;
+        }
+        if (!_vm.IsPackMode) _vm.IsPackMode = true;
+
+        var filter = _packQueueFilter;
+        _packQueueFilter = null;
+        var snapshot = session.ConvertQueue
+            .Where(q => q.IsPending && (filter is null || filter.Contains(q)))
+            .ToList();
+        if (snapshot.Count == 0) return;
+
+        session.IsQueueRunning = true;
+        _vm.IsConverting = true;
+        var runner = new EngineRunner();
+        _convertCts = new System.Threading.CancellationTokenSource();
+        var token = _convertCts.Token;
+        int done = 0, failed = 0;
+
+        try
+        {
+            for (int i = 0; i < snapshot.Count; i++)
+            {
+                if (token.IsCancellationRequested) break;
+
+                var item = snapshot[i];
+                item.Status = "Converting";
+                item.Error = null;
+                session.RebuildTree();
+                _convertStatusContext = $"{item.AssetName} → {item.GroupName ?? "layers"}: ";
+                _vm.StatusText = $"Converting {i + 1}/{snapshot.Count} — {item.SourceName}";
+
+                // Drag-dropped models carry a frozen request (gizmo, parts,
+                // materials as seen at drop time); plain file drops build
+                // the default one below.
+                var req = item.RequestSnapshot is { } snap
+                    ? snap with
+                      {
+                          AssetName = item.AssetName,
+                          RouteToPack = true,
+                          PackGroup = item.GroupName,
+                      }
+                    : new EngineRunner.ConvertRequest(
+                    SourcePath: item.SourcePath,
+                    AssetName: item.AssetName,
+                    Up: EngineRunner.UpAxis.Auto,
+                    CollisionMaterial: string.IsNullOrWhiteSpace(_vm.CollisionMaterial) ? "CONCRETE" : _vm.CollisionMaterial,
+                    IncludeCollision: _vm.IncludeCollision,
+                    EmbedCollision: _vm.EmbedCollision,
+                    IncludeYtyp: _vm.IncludeYtyp,
+                    ExtractTextures: _vm.ExtractTextures,
+                    ScaleHint: (1d, 1d, 1d),
+                    PositionHint: "0,0,0",
+                    RotationHint: "0,0,0",
+                    ExcludeMeshes: null,
+                    GenerateLods: _vm.GenerateLods,
+                    LodDistHigh: _vm.LodDistHigh,
+                    LodDistMed: _vm.LodDistMed,
+                    LodDistLow: _vm.LodDistLow,
+                    LodDistVlow: _vm.LodDistVlow,
+                    RouteToPack: true,
+                    PackGroup: item.GroupName,
+                    BreakableGlass: _vm.BreakableGlass,
+                    GlassOpacity: _vm.GlassOpacity);
+
+                EngineRunner.ConvertOutcome outcome;
+                try
+                {
+                    outcome = await runner.RunAsync(req, onLog: OnEngineLog, cancel: token);
+                }
+                catch (OperationCanceledException)
+                {
+                    item.Status = "Failed";
+                    item.Error = "Cancelled.";
+                    session.RebuildTree();
+                    break;
+                }
+                catch (Exception ex)
+                {
+                    item.Status = "Failed";
+                    item.Error = ex.Message;
+                    failed++;
+                    session.RebuildTree();
+                    continue;
+                }
+
+                if (outcome.Success)
+                {
+                    item.Status = "Done";
+                    item.Error = null;
+                    done++;
+                    // Drop finished rows so the outliner stays pack → stream → props.
+                    session.ConvertQueue.Remove(item);
+                }
+                else
+                {
+                    item.Status = "Failed";
+                    item.Error = outcome.Error ?? "Engine reported failure.";
+                    failed++;
+                    session.RebuildTree();
+                }
+            }
+        }
+        finally
+        {
+            _convertCts?.Dispose();
+            _convertCts = null;
+            _convertStatusContext = null;
+            session.IsQueueRunning = false;
+            _vm.IsConverting = false;
+            session.NotifyQueueFinished();
+        }
+
+        _vm.StatusText = failed == 0
+            ? $"✓ {done} layer(s) converted — right-click to export, or keep building."
+            : $"Converted {done}, {failed} failed — failed rows stay in the outliner (hover for the error).";
+
+        // Files dropped while this run was busy queue up behind it —
+        // keep draining until the outliner has no pending rows left.
+        TryAutoRunPackQueue();
+    }
 
     /// <summary>
     /// Drop the currently loaded model and return the 3D-to-Props tab to
@@ -1883,6 +3833,7 @@ public partial class MainWindow : FluentWindow
         _vm.Verts = 0;
         _vm.Tris = 0;
         ClearPartDiffuseOverrides();
+        ClearModelTexturePreview();
         _ = ClearViewerAsync();
         _vm.StatusText = "Ready — drop a 3D file or use File → Open";
     }
@@ -1902,7 +3853,7 @@ public partial class MainWindow : FluentWindow
             TryLoad(dlg.FileName);
     }
 
-    private async void TryLoad(string path)
+    private async void TryLoad(string path, string? displayNameOverride = null)
     {
         Services.FosLogger.Info("load", $"TryLoad start: {path}");
         if (!File.Exists(path))
@@ -1930,17 +3881,48 @@ public partial class MainWindow : FluentWindow
 
         var originalNameNoExt = Path.GetFileNameWithoutExtension(path);
 
+        // Multi-model viewport: importing must NEVER delete the model
+        // that's already loaded. Whatever is currently active becomes a
+        // layer (auto-enqueued loose if the user hadn't grouped it) and
+        // its viewer object parks in place. If the model being LOADED is
+        // itself a parked layer (preview click), remove its ghost so it
+        // doesn't render twice.
+        await ParkActiveModelAsLayerAsync(path);
+        var pendingSelf = _vm.PackSession.ConvertQueue.FirstOrDefault(q =>
+            string.Equals(q.SourcePath, path, StringComparison.OrdinalIgnoreCase));
+        if (pendingSelf is not null)
+            await RemoveParkedInstanceAsync(pendingSelf.AssetName);
+
         _vm.SourcePath = path;
-        _vm.PropName = SanitizeAssetName(originalNameNoExt);
+        // Sketchfab archives all extract to "scene.gltf" — prefer the real
+        // model title when the caller knows it.
+        _vm.PropName = SanitizeAssetName(string.IsNullOrWhiteSpace(displayNameOverride)
+            ? originalNameNoExt
+            : displayNameOverride);
         _vm.HasModel = true;
         _vm.IsModelLoading = true;
         _vm.Verts = 0;
         _vm.Tris = 0;
         ClearPartDiffuseOverrides();
+        ClearModelTexturePreview();
         // Reset the optimization-health banner for the new model so a hint
         // dismissed on a previous file doesn't carry over.
         _vm.OptimizationSeverity = Services.MeshThresholds.Severity.Ok;
         _vm.OptimizationHintDismissed = false;
+
+        // Pull source diffuse maps into one "Base Texture" library row.
+        _ = LoadBaseTextureGroupAsync(path);
+
+        // Auto-switch Assets → Animated when the file ships animation clips.
+        var hasAnim = await Task.Run(() => SourceFileHasAnimation(path));
+        if (hasAnim)
+        {
+            _vm.ExportMode = ExportMode.Prop;
+            _vm.AnimatedProp = true;
+            _vm.EnsureDefaultPropAnimKeys();
+            _vm.ActiveView = AppView.AnimatedProps;
+        }
+
         // Surface the file size in the status so users can mentally judge
         // how long the load + viewer parse will take. "Loading X..." with
         // no other info reads as "stuck" on big files.
@@ -1972,6 +3954,23 @@ public partial class MainWindow : FluentWindow
             _vm.HasModel = false;
             _vm.IsModelLoading = false;
             _vm.StatusText = $"Failed to stage model: {ex.Message}";
+        }
+    }
+
+    /// <summary>True when Assimp finds at least one animation clip — used
+    /// to auto-open the Assets → Animated tab on load.</summary>
+    private static bool SourceFileHasAnimation(string path)
+    {
+        try
+        {
+            using var ctx = new Assimp.AssimpContext();
+            var scene = ctx.ImportFile(path, Assimp.PostProcessSteps.None);
+            return scene is not null && scene.HasAnimations && scene.AnimationCount > 0;
+        }
+        catch (Exception ex)
+        {
+            Services.FosLogger.Warn("load", "animation probe failed: " + ex.Message);
+            return false;
         }
     }
 
@@ -2071,6 +4070,74 @@ public partial class MainWindow : FluentWindow
             var target = Path.Combine(dest, Path.GetFileName(dir));
             CopyDirectory(dir, target, overwrite);
         }
+    }
+
+    /// <summary>Turn the CURRENT model into a persistent layer before a new
+    /// import takes the active slot: parks its viewer object in place and —
+    /// when the user hadn't dragged it into a group yet — auto-enqueues it
+    /// as a loose layer so nothing the user imported ever silently
+    /// disappears.</summary>
+    private async Task ParkActiveModelAsLayerAsync(string incomingPath)
+    {
+        if (Viewport?.CoreWebView2 == null) return;
+        if (string.IsNullOrEmpty(_vm.SourcePath) || !_vm.HasModel) return;
+        // Re-loading the same file (layer preview / refresh) replaces itself.
+        if (string.Equals(_vm.SourcePath, incomingPath, StringComparison.OrdinalIgnoreCase)) return;
+
+        var item = _vm.PackSession.ConvertQueue.FirstOrDefault(q => q.IsPending &&
+            string.Equals(q.SourcePath, _vm.SourcePath, StringComparison.OrdinalIgnoreCase));
+        if (item is null)
+        {
+            var stem = string.IsNullOrWhiteSpace(_vm.PropName)
+                ? Path.GetFileNameWithoutExtension(_vm.SourcePath)
+                : _vm.PropName.Trim();
+            var excludeMeshes = _vm.ModelParts.Where(p => !p.IsVisible).Select(p => p.OriginalName)
+                .Concat(_vm.DeletedPartNames)
+                .Distinct(StringComparer.Ordinal)
+                .ToList();
+            var snapshot = BuildConvertRequest(stem, excludeMeshes, routeToPack: true);
+            item = _vm.PackSession.EnqueueConvertSnapshot(_vm.SourcePath!, stem, null, snapshot);
+            _vm.StatusText = $"'{stem}' kept as a layer.";
+        }
+
+        var id = System.Text.Json.JsonSerializer.Serialize(item.AssetName);
+        try
+        {
+            await Viewport.CoreWebView2.ExecuteScriptAsync(
+                $"window.parkCurrentModel && window.parkCurrentModel({id})");
+        }
+        catch (Exception ex)
+        {
+            Services.FosLogger.Warn("viewer", "parkCurrentModel: " + ex.Message);
+        }
+    }
+
+    private async Task RemoveParkedInstanceAsync(string assetName)
+    {
+        if (Viewport?.CoreWebView2 == null) return;
+        var id = System.Text.Json.JsonSerializer.Serialize(assetName);
+        try
+        {
+            await Viewport.CoreWebView2.ExecuteScriptAsync(
+                $"window.removeParkedModel && window.removeParkedModel({id})");
+        }
+        catch (Exception ex)
+        {
+            Services.FosLogger.Warn("viewer", "removeParkedModel: " + ex.Message);
+        }
+    }
+
+    private async Task NudgeViewerResizeAsync()
+    {
+        if (!_viewerReady || Viewport?.CoreWebView2 == null) return;
+        try
+        {
+            // Let WPF finish the layout pass that opened/closed the pack dock.
+            await Dispatcher.InvokeAsync(() => { }, DispatcherPriority.Loaded);
+            await Viewport.CoreWebView2.ExecuteScriptAsync(
+                "window.resizeViewer && window.resizeViewer(true)");
+        }
+        catch { /* viewer may be mid-navigate */ }
     }
 
     private async Task LoadInViewerAsync(string url)
@@ -2226,17 +4293,9 @@ public partial class MainWindow : FluentWindow
                     : "(unnamed)";
                 bool visible = !el.TryGetProperty("visible", out var v) || v.ValueKind != System.Text.Json.JsonValueKind.False;
                 var part = new MainViewModel.ModelPart(name, visible);
-                // Auto-tag glass parts. The viewer flags a part `glass:true`
-                // when any mesh under it uses a glass material (its own
-                // looksLikeGlass heuristic — one source of truth). Defaulting
-                // the preset to Glass here makes the export write glass.sps +
-                // GLASS_SHOOT_THROUGH collision without the user hand-tagging
-                // each window. Set BEFORE subscribing so it doesn't fire a
-                // redundant live-preview round-trip (the viewer already renders
-                // it reflective on load); the user can still override to
-                // Standard in the layers panel.
-                if (el.TryGetProperty("glass", out var gl) && gl.ValueKind == System.Text.Json.JsonValueKind.True)
-                    part.MaterialPreset = MaterialPreset.Glass;
+                // Leave MaterialPreset on Standard — do not auto-pick Glass
+                // from the viewer's looksLikeGlass hint. Preview can still
+                // look glassy; export glass is an explicit Layers choice.
                 part.PropertyChanged += OnModelPartChanged;
                 _vm.ModelParts.Add(part);
             }
@@ -2287,11 +4346,7 @@ public partial class MainWindow : FluentWindow
 
                 bool visible = !el.TryGetProperty("visible", out var v) || v.ValueKind != System.Text.Json.JsonValueKind.False;
                 var part = new MainViewModel.ModelPart(name, visible);
-                // Auto-tag glass the same way the load path does — the viewer
-                // already rendered it reflective, so set the preset BEFORE
-                // subscribing to avoid a redundant live-preview round-trip.
-                if (el.TryGetProperty("glass", out var gl) && gl.ValueKind == System.Text.Json.JsonValueKind.True)
-                    part.MaterialPreset = MaterialPreset.Glass;
+                // Same as load — Standard by default; user tags Glass in Layers.
                 part.PropertyChanged += OnModelPartChanged;
                 _vm.ModelParts.Add(part);
             }
@@ -2411,11 +4466,820 @@ public partial class MainWindow : FluentWindow
         }
     }
 
-    /// <summary>ASSETS → Add Missing Textures: multi-image picker that
-    /// fuzzy-matches each picked file to a part by filename stem, live-
-    /// swaps the preview, and stages the image for convert
-    /// (<c>--part-diffuse</c>). Useful when the source file ships without
-    /// bundled textures (.obj is the common case).</summary>
+    private async void OnAddTextureExtras(object sender, RoutedEventArgs e)
+    {
+        if (!_vm.HasModel) return;
+        if (_vm.ModelParts.Count == 0)
+        {
+            _vm.StatusText = "Load a model first.";
+            return;
+        }
+
+        var partNames = _vm.ModelParts.Select(p => p.OriginalName).ToList();
+        _vm.EnsureTextureVariants(partNames, _vm.PropName);
+
+        // Layers selection decides scope: with part(s) selected the image
+        // sticks to just those parts (so two textures can live on two parts
+        // and BOTH bake into the export). Nothing selected = whole model.
+        var targetParts = _vm.SelectedOutlinerNodes
+            .Where(n => n.Part is not null)
+            .Select(n => n.Part!.OriginalName)
+            .Distinct(StringComparer.Ordinal)
+            .ToList();
+        if (targetParts.Count == 0 && _vm.SelectedModelPart is { } soloPart)
+            targetParts.Add(soloPart.OriginalName);
+        bool partScoped = targetParts.Count > 0 && targetParts.Count < partNames.Count;
+
+        var dlg = new OpenFileDialog
+        {
+            Title = partScoped
+                ? $"Add texture for {DescribeParts(targetParts)}"
+                : "Add textures to preview",
+            Filter = "Images (*.png;*.jpg;*.jpeg;*.bmp;*.tga;*.dds;*.webp)|*.png;*.jpg;*.jpeg;*.bmp;*.tga;*.dds;*.webp|All files|*.*",
+            Multiselect = true,
+            CheckFileExists = true,
+        };
+        if (dlg.ShowDialog(this) != true || dlg.FileNames.Length == 0) return;
+
+        ModelTextureItem? last = null;
+        int added = 0;
+        foreach (var path in dlg.FileNames)
+        {
+            if (!TextureVariantImport.IsImageFile(path)) continue;
+
+            if (partScoped)
+            {
+                // Pin to the selected parts: live-swap now + record the
+                // per-part override that convert bakes (--part-diffuse).
+                var stagedScoped = StageLibraryTextureCopy(path);
+                foreach (var p in targetParts)
+                    await ApplyOnePartDiffuseAsync(p, stagedScoped);
+
+                var scopedItem = new ModelTextureItem
+                {
+                    Name = Path.GetFileNameWithoutExtension(path),
+                    Path = stagedScoped,
+                    Detail = $"On {DescribeParts(targetParts)}",
+                    CanRemove = true,
+                    TargetParts = new List<string>(targetParts),
+                };
+                _vm.ModelTextures.Add(scopedItem);
+                last = scopedItem;
+                added++;
+                continue;
+            }
+
+            var variant = _vm.TextureVariants.AddFullModelImage(path);
+            var staged = variant?.PreviewPath ?? StageLibraryTextureCopy(path);
+            if (string.IsNullOrEmpty(staged) || !File.Exists(staged))
+                staged = StageLibraryTextureCopy(path);
+
+            // Point every part at the same staged file (pack + bake).
+            if (variant != null)
+            {
+                variant.PartTextures.Clear();
+                foreach (var p in partNames)
+                    variant.PartTextures[p] = staged;
+                variant.NotifyTexturesChanged();
+            }
+
+            var item = new ModelTextureItem
+            {
+                Name = Path.GetFileNameWithoutExtension(path),
+                Path = staged,
+                Detail = "Click to preview",
+                CanRemove = true,
+                LinkedVariant = variant,
+            };
+            _vm.ModelTextures.Add(item);
+            last = item;
+            added++;
+        }
+
+        _vm.NotifyTextureListUi();
+        if (last == null)
+        {
+            _vm.StatusText = "No usable images selected.";
+        }
+        else if (partScoped)
+        {
+            // Already applied to its parts — no whole-model preview swap.
+            _vm.StatusText = added == 1
+                ? $"'{last.Name}' applied to {DescribeParts(targetParts)} — bakes on Convert."
+                : $"Applied {added} textures to {DescribeParts(targetParts)} (last one wins per part) — bakes on Convert.";
+        }
+        else
+        {
+            _suppressTextureSelection = true;
+            _vm.SelectedTexture = last;
+            _suppressTextureSelection = false;
+            await PreviewTextureOnModelAsync(last);
+            _vm.StatusText = added == 1
+                ? $"Previewing '{last.Name}' on the model."
+                : $"Added {added} textures — previewing '{last.Name}'.";
+        }
+    }
+
+    /// <summary>Friendly "seat, frame" / "seat +2 more" for status text.</summary>
+    private string DescribeParts(IReadOnlyList<string> originalNames)
+    {
+        var display = originalNames
+            .Select(n => _vm.ModelParts.FirstOrDefault(p =>
+                string.Equals(p.OriginalName, n, StringComparison.Ordinal))?.Name ?? n)
+            .ToList();
+        return display.Count switch
+        {
+            0 => "the model",
+            1 => $"'{display[0]}'",
+            2 => $"'{display[0]}' and '{display[1]}'",
+            _ => $"'{display[0]}' +{display.Count - 1} more",
+        };
+    }
+
+    private string StageLibraryTextureCopy(string imagePath)
+    {
+        if (string.IsNullOrEmpty(_partTexOverrideDir) || !Directory.Exists(_partTexOverrideDir))
+        {
+            _partTexOverrideDir = Path.Combine(
+                Path.GetTempPath(), "FiveOS", "part-tex", Guid.NewGuid().ToString("N")[..8]);
+            Directory.CreateDirectory(_partTexOverrideDir);
+        }
+        var dest = Path.Combine(_partTexOverrideDir,
+            Guid.NewGuid().ToString("N")[..8] + "_" + Path.GetFileName(imagePath));
+        File.Copy(imagePath, dest, overwrite: true);
+        return dest;
+    }
+
+    private async void OnRemoveLibraryTexture(object sender, RoutedEventArgs e)
+    {
+        if (sender is not FrameworkElement fe || fe.DataContext is not ModelTextureItem item)
+            return;
+        e.Handled = true;
+        if (item.LinkedVariant != null)
+            _vm.TextureVariants.Remove(item.LinkedVariant);
+        if (ReferenceEquals(_vm.SelectedTexture, item))
+            _vm.SelectedTexture = null;
+        _vm.ModelTextures.Remove(item);
+        _vm.NotifyTextureListUi();
+
+        // Removing a pinned texture releases its parts: drop the bake
+        // overrides and put the original maps back in the viewer.
+        if (item.TargetParts is { Count: > 0 } released)
+        {
+            var stillPinned = PinnedPartNames();
+            var baseRow = _vm.ModelTextures.FirstOrDefault(t => t.IsBaseGroup);
+            foreach (var name in released.Where(n => !stillPinned.Contains(n)))
+            {
+                _vm.PartDiffuseOverrides.Remove(name);
+                var basePath = baseRow != null ? ResolveBasePathForPart(baseRow, name) : null;
+                if (basePath == null) continue;
+                try { await ApplyOnePartDiffuseAsync(name, basePath, recordForConvert: false); }
+                catch (Exception ex)
+                {
+                    Services.FosLogger.Warn("textures", $"release '{name}': {ex.Message}");
+                }
+            }
+        }
+    }
+
+    private async void OnTextureLibrarySelectionChanged(object sender, System.Windows.Controls.SelectionChangedEventArgs e)
+    {
+        if (_suppressTextureSelection) return;
+        if (_vm.SelectedTexture is not ModelTextureItem item) return;
+        if (item.IsBaseGroup)
+        {
+            await PreviewTextureOnModelAsync(item);
+            return;
+        }
+        if (string.IsNullOrEmpty(item.Path) || !File.Exists(item.Path)) return;
+        await PreviewTextureOnModelAsync(item);
+    }
+
+    /// <summary>Live-swap the selected image onto every visible part — same
+    /// feel as picking a material in a DCC viewport.</summary>
+    private async Task PreviewTextureOnModelAsync(ModelTextureItem item)
+    {
+        if (item.IsBaseGroup)
+        {
+            await RestoreBaseTextureAsync(item);
+            return;
+        }
+
+        if (string.IsNullOrEmpty(item.Path) || !File.Exists(item.Path)) return;
+        if (_vm.ModelParts.Count == 0) return;
+
+        // Part-scoped textures only ever touch their own parts — clicking
+        // them re-asserts the assignment instead of flooding the model.
+        // Whole-model previews respect those pins and skip pinned parts.
+        var targets = _vm.ModelParts.Where(p => p.IsVisible);
+        if (item.TargetParts is { Count: > 0 } scoped)
+        {
+            targets = targets.Where(p => scoped.Contains(p.OriginalName, StringComparer.Ordinal));
+        }
+        else
+        {
+            var pinned = PinnedPartNames();
+            if (pinned.Count > 0)
+                targets = targets.Where(p => !pinned.Contains(p.OriginalName));
+        }
+
+        int noUv = 0;
+        foreach (var part in targets)
+        {
+            try
+            {
+                if (await ApplyOnePartDiffuseAsync(part.OriginalName, item.Path))
+                    noUv++;
+            }
+            catch (Exception ex)
+            {
+                Services.FosLogger.Warn("textures", $"preview '{part.OriginalName}': {ex.Message}");
+            }
+        }
+
+        var activeDetail = item.IsPartScoped
+            ? $"On {DescribeParts(item.TargetParts!)}"
+            : (noUv > 0 ? "Preview · missing UVs on some parts" : "Previewing on model");
+        MarkTextureSelectionDetails(item, activeDetail);
+        _vm.StatusText = noUv > 0
+            ? $"Previewing '{item.Name}' — {noUv} part(s) have no UVs."
+            : item.IsPartScoped
+                ? $"'{item.Name}' on {DescribeParts(item.TargetParts!)} — bakes on Convert."
+                : $"Previewing '{item.Name}' on the model.";
+    }
+
+    /// <summary>Parts currently pinned by a part-scoped library texture.</summary>
+    private HashSet<string> PinnedPartNames() => _vm.ModelTextures
+        .Where(t => t.IsPartScoped)
+        .SelectMany(t => t.TargetParts!)
+        .ToHashSet(StringComparer.Ordinal);
+
+    /// <summary>Clear bake overrides and restore source maps in the viewer.
+    /// Parts pinned by a part-scoped texture keep their assignment — remove
+    /// the pinned row (its X) to release them.</summary>
+    private async Task RestoreBaseTextureAsync(ModelTextureItem baseItem)
+    {
+        var pinned = PinnedPartNames();
+        if (pinned.Count == 0)
+        {
+            ClearPartDiffuseOverrides();
+        }
+        else
+        {
+            foreach (var key in _vm.PartDiffuseOverrides.Keys
+                         .Where(k => !pinned.Contains(k)).ToList())
+                _vm.PartDiffuseOverrides.Remove(key);
+        }
+
+        bool restored = false;
+        if (pinned.Count == 0 && Viewport?.CoreWebView2 != null)
+        {
+            try
+            {
+                var res = await Viewport.CoreWebView2.ExecuteScriptAsync(
+                    "window.resetAllPartTextures && window.resetAllPartTextures()");
+                // ExecuteScriptAsync wraps JSON — true / false / null
+                restored = res != null
+                    && !res.Equals("false", StringComparison.OrdinalIgnoreCase)
+                    && !res.Equals("null", StringComparison.OrdinalIgnoreCase);
+            }
+            catch (Exception ex)
+            {
+                Services.FosLogger.Warn("textures", "resetAllPartTextures: " + ex.Message);
+            }
+        }
+
+        // Fallback when the viewer never saw a live swap (no cached orig maps)
+        // or part names from Assimp don't match — push staged base maps by
+        // matching to current Layers names. Pinned parts are left alone.
+        if (!restored && baseItem.BasePartPaths is { Count: > 0 })
+        {
+            foreach (var part in _vm.ModelParts.Where(p =>
+                         p.IsVisible && !pinned.Contains(p.OriginalName)))
+            {
+                var path = ResolveBasePathForPart(baseItem, part.OriginalName);
+                if (path == null) continue;
+                try
+                {
+                    await ApplyOnePartDiffuseAsync(part.OriginalName, path, recordForConvert: false);
+                    restored = true;
+                }
+                catch (Exception ex)
+                {
+                    Services.FosLogger.Warn("textures", $"restore base '{part.OriginalName}': {ex.Message}");
+                }
+            }
+        }
+
+        var mapCount = baseItem.BasePartPaths?.Values
+            .Distinct(StringComparer.OrdinalIgnoreCase).Count() ?? 0;
+        MarkTextureSelectionDetails(baseItem, mapCount > 0
+            ? $"Original · {mapCount} map{(mapCount == 1 ? "" : "s")}"
+            : "Original");
+        _vm.StatusText = restored
+            ? "Base Texture on the model."
+            : "Base Texture selected.";
+    }
+
+    private static string? ResolveBasePathForPart(ModelTextureItem baseItem, string partName)
+    {
+        if (baseItem.BasePartPaths == null || baseItem.BasePartPaths.Count == 0)
+            return null;
+        if (baseItem.BasePartPaths.TryGetValue(partName, out var exact) && File.Exists(exact))
+            return exact;
+
+        // Fuzzy: Assimp node names often differ slightly from viewer display names.
+        foreach (var kv in baseItem.BasePartPaths)
+        {
+            if (!File.Exists(kv.Value)) continue;
+            if (string.Equals(kv.Key, partName, StringComparison.OrdinalIgnoreCase))
+                return kv.Value;
+            if (kv.Key.Contains(partName, StringComparison.OrdinalIgnoreCase)
+                || partName.Contains(kv.Key, StringComparison.OrdinalIgnoreCase))
+                return kv.Value;
+        }
+
+        // Single-map models: one texture for every part.
+        var unique = baseItem.BasePartPaths.Values
+            .Where(File.Exists)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+        return unique.Count == 1 ? unique[0] : null;
+    }
+
+    /// <summary>Only the active library row shows a live-preview status.</summary>
+    private void MarkTextureSelectionDetails(ModelTextureItem active, string activeDetail)
+    {
+        foreach (var t in _vm.ModelTextures)
+        {
+            if (ReferenceEquals(t, active))
+            {
+                t.Detail = activeDetail;
+                continue;
+            }
+            if (t.IsBaseGroup)
+            {
+                var n = t.BasePartPaths?.Values
+                    .Distinct(StringComparer.OrdinalIgnoreCase).Count() ?? 0;
+                t.Detail = n > 0 ? $"Original · {n} map{(n == 1 ? "" : "s")}" : "Original";
+            }
+            else if (t.IsPartScoped)
+            {
+                // Pinned assignments stay live regardless of what previews.
+                t.Detail = $"On {DescribeParts(t.TargetParts!)}";
+            }
+            else if (t.Detail.StartsWith("Preview", StringComparison.OrdinalIgnoreCase)
+                     || t.Detail.StartsWith("Previewing", StringComparison.OrdinalIgnoreCase))
+            {
+                t.Detail = "Click to preview";
+            }
+        }
+    }
+
+    /// <summary>Extract source diffuse maps and show them as one Base Texture row.</summary>
+    private async Task LoadBaseTextureGroupAsync(string sourcePath)
+    {
+        int gen = ++_modelTexRefreshGen;
+        _vm.ModelTexturesLoading = true;
+        try
+        {
+            var stageDir = Path.Combine(Path.GetTempPath(), "FiveOS", "model-tex",
+                Guid.NewGuid().ToString("N")[..8]);
+            Directory.CreateDirectory(stageDir);
+
+            var group = await Task.Run(() =>
+                PartTextureService.ExtractBaseTextureGroup(sourcePath, stageDir));
+            if (gen != _modelTexRefreshGen) return;
+
+            if (!string.IsNullOrEmpty(_modelTexPreviewDir))
+            {
+                try { if (Directory.Exists(_modelTexPreviewDir)) Directory.Delete(_modelTexPreviewDir, true); }
+                catch { /* best-effort */ }
+            }
+            _modelTexPreviewDir = stageDir;
+
+            _suppressTextureSelection = true;
+            var extras = _vm.ModelTextures
+                .Where(t => t.CanRemove || t.LinkedVariant != null)
+                .ToList();
+            var selectedWasBase = _vm.SelectedTexture?.IsBaseGroup == true;
+            _vm.ModelTextures.Clear();
+
+            var mapCount = group.UniqueMapCount;
+            var detail = mapCount > 0
+                ? $"Original · {mapCount} map{(mapCount == 1 ? "" : "s")}"
+                : "Original · no diffuse maps";
+            _vm.ModelTextures.Add(new ModelTextureItem
+            {
+                Name = "Base Texture",
+                Path = group.ThumbPath ?? "",
+                Detail = detail,
+                CanRemove = false,
+                IsBaseGroup = true,
+                BasePartPaths = group.PartDiffusePaths.Count > 0
+                    ? new Dictionary<string, string>(group.PartDiffusePaths, StringComparer.OrdinalIgnoreCase)
+                    : null,
+            });
+            foreach (var e in extras)
+                _vm.ModelTextures.Add(e);
+
+            if (selectedWasBase || _vm.SelectedTexture == null)
+                _vm.SelectedTexture = _vm.ModelTextures.FirstOrDefault(t => t.IsBaseGroup);
+
+            Services.FosLogger.Info("textures",
+                $"base group: {mapCount} map(s) from {Path.GetFileName(sourcePath)}");
+        }
+        catch (Exception ex)
+        {
+            Services.FosLogger.Warn("textures", "base group failed: " + ex.Message);
+            if (gen == _modelTexRefreshGen && !_vm.ModelTextures.Any(t => t.IsBaseGroup))
+            {
+                _vm.ModelTextures.Insert(0, new ModelTextureItem
+                {
+                    Name = "Base Texture",
+                    Detail = "Original",
+                    CanRemove = false,
+                    IsBaseGroup = true,
+                });
+            }
+        }
+        finally
+        {
+            _suppressTextureSelection = false;
+            if (gen == _modelTexRefreshGen)
+            {
+                _vm.ModelTexturesLoading = false;
+                _vm.NotifyTextureListUi();
+            }
+        }
+    }
+
+    private async void OnBuildTexturePack(object sender, RoutedEventArgs e)
+    {
+        if (string.IsNullOrEmpty(_vm.SourcePath) || !File.Exists(_vm.SourcePath))
+        {
+            _vm.StatusText = "Load a model first.";
+            return;
+        }
+        if (_vm.ModelParts.Count == 0)
+        {
+            _vm.StatusText = "No model parts — load a model first.";
+            return;
+        }
+        if (!EngineRunner.IsEngineAvailable())
+        {
+            AppDialog.Show(
+                "Conversion engine is missing from the install.\n\nRe-install FiveOS — the conversion engine ships in the same bundle.",
+                "Engine not available",
+                System.Windows.MessageBoxButton.OK,
+                System.Windows.MessageBoxImage.Warning,
+                this);
+            return;
+        }
+
+        // Library rows only — compiled thumbs are not full source images.
+        // Prefer the row path; if the stage dir was wiped, recover from the
+        // LinkedVariant or from the part-diffuse copies written during preview.
+        var library = new List<(ModelTextureItem Item, string Path)>();
+        foreach (var t in _vm.ModelTextures.Where(x => x.CanRemove))
+        {
+            var path = ResolveLibraryTexturePath(t);
+            if (string.IsNullOrEmpty(path)) continue;
+            if (!string.Equals(t.Path, path, StringComparison.OrdinalIgnoreCase))
+                t.Path = path;
+            library.Add((t, path));
+        }
+        if (library.Count == 0)
+        {
+            _vm.StatusText = _vm.ModelTextures.Any(t => t.CanRemove)
+                ? "Texture files were cleaned up — add them again."
+                : "Add textures to the list first.";
+            return;
+        }
+
+        var partNames = _vm.ModelParts.Select(p => p.OriginalName).ToList();
+        _vm.EnsureTextureVariants(partNames, _vm.PropName);
+
+        // Rebuild variants from the library so every part gets the image
+        // (same as live preview) and staged files still exist.
+        _vm.TextureVariants.Clear();
+        var variants = new List<TextureVariant>();
+        foreach (var (item, path) in library)
+        {
+            var v = _vm.TextureVariants.AddFullModelImage(path, item.Name);
+            if (v == null) continue;
+            item.LinkedVariant = v;
+            variants.Add(v);
+        }
+        if (variants.Count == 0)
+        {
+            _vm.StatusText = "Could not stage textures for the pack.";
+            return;
+        }
+
+        if (!_vm.IsPackMode) _vm.IsPackMode = true;
+        if (string.IsNullOrWhiteSpace(_vm.PackSession.PackName))
+            _vm.PackSession.PackName = (string.IsNullOrWhiteSpace(_vm.PropName) ? "prop" : _vm.PropName) + "_pack";
+
+        var excludeMeshes = _vm.ModelParts.Where(p => !p.IsVisible).Select(p => p.OriginalName)
+            .Concat(_vm.DeletedPartNames)
+            .Distinct(System.StringComparer.Ordinal)
+            .ToList();
+        var baseReq = BuildConvertRequest(_vm.PropName, excludeMeshes, routeToPack: false);
+
+        _vm.IsConverting = true;
+        _vm.TextureVariants.IsRunning = true;
+        _vm.StatusText = $"Textures: converting base mesh, then {variants.Count} extra(s)…";
+        Services.FosLogger.Info("tex-variants",
+            $"start: {variants.Count} variants src={Path.GetFileName(_vm.SourcePath)}");
+
+        _convertCts = new System.Threading.CancellationTokenSource();
+        TextureVariantPipeline.Result result;
+        string? packLog = null;
+        try
+        {
+            var logBuf = new System.Text.StringBuilder();
+            result = await TextureVariantPipeline.RunAsync(
+                baseReq,
+                variants,
+                onLog: line =>
+                {
+                    logBuf.AppendLine(line);
+                    OnEngineLog(line);
+                },
+                onProgress: (cur, total) =>
+                {
+                    Dispatcher.Invoke(() =>
+                        _vm.StatusText = $"Textures pack: {cur}/{total}…");
+                },
+                cancel: _convertCts.Token);
+            packLog = logBuf.ToString();
+        }
+        catch (Exception ex)
+        {
+            Services.FosLogger.Err("tex-variants", "failed: " + ex.Message);
+            _vm.IsConverting = false;
+            _vm.TextureVariants.IsRunning = false;
+            _convertCts?.Dispose();
+            _convertCts = null;
+            _vm.StatusText = "Texture pack failed: " + ex.Message;
+            AppDialog.Error("Texture pack failed:\n\n" + ex.Message, "Textures", this);
+            return;
+        }
+
+        bool wasCancelled = _convertCts?.IsCancellationRequested == true
+            || string.Equals(result.Error, "Cancelled.", StringComparison.Ordinal);
+        _convertCts?.Dispose();
+        _convertCts = null;
+        _vm.IsConverting = false;
+        _vm.TextureVariants.IsRunning = false;
+
+        if (result.Ok > 0)
+        {
+            _vm.TextureVariants.Clear();
+            _vm.NotifyTextureListUi();
+            _vm.StatusText =
+                $"✓ Staged {result.Ok} texture prop(s) into pack ({_vm.PackSession.Count} prop{(_vm.PackSession.Count == 1 ? "" : "s")})" +
+                (result.Failed > 0 ? $" · {result.Failed} failed" : "") +
+                " — Finalize from the Pack panel.";
+        }
+        else if (wasCancelled)
+        {
+            _vm.StatusText = "Texture pack cancelled.";
+        }
+        else
+        {
+            var detail = result.Error ?? "No textures were staged.";
+            if (!string.IsNullOrWhiteSpace(packLog))
+            {
+                var tail = packLog.Length > 1200 ? packLog[^1200..] : packLog;
+                detail += "\n\n" + tail.Trim();
+            }
+            _vm.StatusText = "✗ Texture pack failed: " + (result.Error ?? "unknown error");
+            AppDialog.Error("Texture pack failed:\n\n" + detail, "Textures", this);
+        }
+    }
+
+    /// <summary>Find a readable image for a library row. Preview stages copies
+    /// into PartDiffuseOverrides, so those can rescue a wiped tex-variants dir.</summary>
+    private string? ResolveLibraryTexturePath(ModelTextureItem item)
+    {
+        if (!string.IsNullOrWhiteSpace(item.Path) && File.Exists(item.Path))
+            return item.Path;
+
+        var linked = item.LinkedVariant?.PreviewPath;
+        if (!string.IsNullOrWhiteSpace(linked) && File.Exists(linked))
+            return linked;
+
+        if (item.LinkedVariant != null)
+        {
+            foreach (var p in item.LinkedVariant.PartTextures.Values)
+            {
+                if (!string.IsNullOrWhiteSpace(p) && File.Exists(p))
+                    return p;
+            }
+        }
+
+        var stem = Path.GetFileNameWithoutExtension(item.Name ?? "");
+        foreach (var p in _vm.PartDiffuseOverrides.Values.Distinct(StringComparer.OrdinalIgnoreCase))
+        {
+            if (string.IsNullOrWhiteSpace(p) || !File.Exists(p)) continue;
+            if (string.IsNullOrEmpty(stem)) return p;
+            var fileStem = Path.GetFileNameWithoutExtension(p);
+            // Staged names look like "a1b2c3d4_Screenshot_….png"
+            if (fileStem.Contains(stem, StringComparison.OrdinalIgnoreCase)
+                || stem.Contains(Path.GetFileNameWithoutExtension(item.Path ?? ""), StringComparison.OrdinalIgnoreCase))
+                return p;
+        }
+
+        // Single previewed image: any override is that library texture.
+        if (_vm.ModelTextures.Count(t => t.CanRemove) == 1)
+        {
+            foreach (var p in _vm.PartDiffuseOverrides.Values)
+            {
+                if (!string.IsNullOrWhiteSpace(p) && File.Exists(p))
+                    return p;
+            }
+        }
+
+        return null;
+    }
+
+    /// <summary>
+    /// Applied layer textures stay in PartDiffuseOverrides for convert —
+    /// they are not listed as separate library rows (Base Texture + user
+    /// extras only).
+    /// </summary>
+    private async Task RefreshModelTextureListAsync()
+    {
+        await Task.Yield();
+        _vm.NotifyTextureListUi();
+    }
+
+    private async Task LoadCompiledTexturesFromOutcomeAsync(
+        EngineRunner.ConvertOutcome outcome, string assetName)
+    {
+        if (outcome.ResultPath == null || string.IsNullOrWhiteSpace(assetName))
+            return;
+
+        int gen = ++_modelTexRefreshGen;
+        _vm.ModelTexturesLoading = true;
+
+        string? extractDir = null;
+        try
+        {
+            var ydrPath = await Task.Run(() =>
+                ResolveCompiledYdrPath(outcome, assetName, out extractDir));
+            if (gen != _modelTexRefreshGen) return;
+
+            if (string.IsNullOrEmpty(ydrPath) || !File.Exists(ydrPath))
+            {
+                Services.FosLogger.Warn("textures", "no compiled .ydr found after convert");
+                return;
+            }
+
+            var infos = await Task.Run(() => TextureGalleryExtractor.Extract(ydrPath));
+            if (gen != _modelTexRefreshGen) return;
+
+            var previewDir = Path.Combine(Path.GetTempPath(), "FiveOS", "model-tex",
+                Guid.NewGuid().ToString("N")[..8]);
+            Directory.CreateDirectory(previewDir);
+
+            if (!string.IsNullOrEmpty(_modelTexPreviewDir))
+            {
+                try { if (Directory.Exists(_modelTexPreviewDir)) Directory.Delete(_modelTexPreviewDir, true); }
+                catch { /* best-effort */ }
+            }
+            _modelTexPreviewDir = previewDir;
+
+            // Keep user library rows; refresh the single Base Texture row
+            // instead of listing every compiled map separately.
+            _suppressTextureSelection = true;
+            var keep = _vm.ModelTextures
+                .Where(t => t.CanRemove || t.LinkedVariant != null)
+                .ToList();
+            var baseRow = _vm.ModelTextures.FirstOrDefault(t => t.IsBaseGroup);
+            _vm.SelectedTexture = null;
+            _vm.ModelTextures.Clear();
+
+            string thumbPath = baseRow?.Path ?? "";
+            var first = infos.FirstOrDefault(t => t.ThumbPng is { Length: > 0 });
+            if (first?.ThumbPng is { Length: > 0 } png)
+            {
+                thumbPath = Path.Combine(previewDir, $"base_{SanitizeFileStem(first.Name)}.png");
+                await File.WriteAllBytesAsync(thumbPath, png);
+            }
+
+            var mapCount = infos.Count;
+            _vm.ModelTextures.Add(new ModelTextureItem
+            {
+                Name = "Base Texture",
+                Path = thumbPath,
+                Detail = mapCount > 0
+                    ? $"Original · {mapCount} map{(mapCount == 1 ? "" : "s")}"
+                    : (baseRow?.Detail ?? "Original"),
+                CanRemove = false,
+                IsBaseGroup = true,
+                BasePartPaths = baseRow?.BasePartPaths,
+            });
+            foreach (var k in keep)
+                _vm.ModelTextures.Add(k);
+
+            Services.FosLogger.Info("textures", $"compiled base group: {infos.Count} from {Path.GetFileName(ydrPath)}");
+        }
+        catch (Exception ex)
+        {
+            Services.FosLogger.Warn("textures", "compiled list failed: " + ex.Message);
+        }
+        finally
+        {
+            _suppressTextureSelection = false;
+            if (!string.IsNullOrEmpty(extractDir))
+            {
+                try { if (Directory.Exists(extractDir)) Directory.Delete(extractDir, true); }
+                catch { /* best-effort — thumbs already copied out */ }
+            }
+            if (gen == _modelTexRefreshGen)
+            {
+                _vm.ModelTexturesLoading = false;
+                _vm.NotifyTextureListUi();
+            }
+        }
+    }
+
+    /// <summary>Locate the output <c>.ydr</c> for a convert outcome. For zip
+    /// delivery, extracts just the drawable into a temp folder (caller deletes
+    /// <paramref name="extractDir"/>).</summary>
+    private static string? ResolveCompiledYdrPath(
+        EngineRunner.ConvertOutcome outcome, string assetName, out string? extractDir)
+    {
+        extractDir = null;
+        var root = outcome.ResultPath;
+        if (string.IsNullOrEmpty(root)) return null;
+        var ydrName = assetName + ".ydr";
+
+        switch (outcome.Mode)
+        {
+            case EngineRunner.OutputMode.ServerShared:
+                // ResultPath = <server>/stream
+                var shared = Path.Combine(root, ydrName);
+                return File.Exists(shared) ? shared : null;
+
+            case EngineRunner.OutputMode.ServerPerAsset:
+            case EngineRunner.OutputMode.Pack:
+                // ResultPath = …/{asset}_resource (or pack slot)
+                var per = Path.Combine(root, "stream", ydrName);
+                if (File.Exists(per)) return per;
+                var loose = Path.Combine(root, ydrName);
+                return File.Exists(loose) ? loose : null;
+
+            case EngineRunner.OutputMode.SingleZip:
+                if (!File.Exists(root)) return null;
+                extractDir = Path.Combine(Path.GetTempPath(), "FiveOS", "ydr-peek",
+                    Guid.NewGuid().ToString("N")[..8]);
+                Directory.CreateDirectory(extractDir);
+                using (var zip = System.IO.Compression.ZipFile.OpenRead(root))
+                {
+                    var entry = zip.Entries.FirstOrDefault(e =>
+                        e.FullName.EndsWith("/" + ydrName, StringComparison.OrdinalIgnoreCase) ||
+                        e.FullName.Equals(ydrName, StringComparison.OrdinalIgnoreCase) ||
+                        e.Name.Equals(ydrName, StringComparison.OrdinalIgnoreCase));
+                    if (entry == null) return null;
+                    var dest = Path.Combine(extractDir, ydrName);
+                    entry.ExtractToFile(dest, overwrite: true);
+                    return dest;
+                }
+
+            default:
+                return null;
+        }
+    }
+
+    private static string SanitizeFileStem(string name)
+    {
+        if (string.IsNullOrWhiteSpace(name)) return "tex";
+        var bad = Path.GetInvalidFileNameChars();
+        var chars = name.ToCharArray();
+        for (int i = 0; i < chars.Length; i++)
+            if (Array.IndexOf(bad, chars[i]) >= 0) chars[i] = '_';
+        return new string(chars);
+    }
+
+    private void ClearModelTexturePreview()
+    {
+        _modelTexRefreshGen++;
+        _vm.ClearModelTextures();
+        _vm.ResetTextureVariants(Array.Empty<string>(), "");
+        if (string.IsNullOrEmpty(_modelTexPreviewDir)) return;
+        try
+        {
+            if (Directory.Exists(_modelTexPreviewDir))
+                Directory.Delete(_modelTexPreviewDir, recursive: true);
+        }
+        catch { /* best-effort */ }
+        _modelTexPreviewDir = null;
+    }
+
     private async void OnAddMissingTextures(object sender, RoutedEventArgs e)
     {
         if (Viewport?.CoreWebView2 == null)
@@ -2489,15 +5353,24 @@ public partial class MainWindow : FluentWindow
             _vm.StatusText = skipped > 0
                 ? $"Textures: {applied} applied, {skipped} skipped (decode error). Convert will bake applied ones."
                 : $"Textures: {applied} applied — will bake on Convert.";
+
+        if (applied > 0)
+            _ = RefreshModelTextureListAsync();
     }
 
     /// <summary>Stage <paramref name="imagePath"/> for convert and live-swap
     /// the preview diffuse on the named part. Returns true when the part has
-    /// NO UV map (texture can't display — the OBJ was exported without UVs).</summary>
-    private async Task<bool> ApplyOnePartDiffuseAsync(string partOriginalName, string imagePath)
+    /// NO UV map (texture can't display — the OBJ was exported without UVs).
+    /// Pass <paramref name="recordForConvert"/> false when restoring Base
+    /// Texture so Convert still bakes the original source maps.</summary>
+    private async Task<bool> ApplyOnePartDiffuseAsync(
+        string partOriginalName, string imagePath, bool recordForConvert = true)
     {
-        var staged = StagePartDiffuseOverride(partOriginalName, imagePath);
-        _vm.PartDiffuseOverrides[partOriginalName] = staged;
+        if (recordForConvert)
+        {
+            var staged = StagePartDiffuseOverride(partOriginalName, imagePath);
+            _vm.PartDiffuseOverrides[partOriginalName] = staged;
+        }
 
         if (Viewport?.CoreWebView2 == null) return false;
 
@@ -2613,6 +5486,10 @@ public partial class MainWindow : FluentWindow
         => SetMaterialPresetFromMenu(sender, MaterialPreset.EmissiveStrong);
     private void OnLayerMaterialEmissiveNight(object sender, RoutedEventArgs e)
         => SetMaterialPresetFromMenu(sender, MaterialPreset.EmissiveNight);
+    private void OnLayerMaterialMetal(object sender, RoutedEventArgs e)
+        => SetMaterialPresetFromMenu(sender, MaterialPreset.Metal);
+    private void OnLayerMaterialCutout(object sender, RoutedEventArgs e)
+        => SetMaterialPresetFromMenu(sender, MaterialPreset.Cutout);
 
     private void SetMaterialPresetFromMenu(object sender, MaterialPreset preset)
     {
@@ -2637,6 +5514,13 @@ public partial class MainWindow : FluentWindow
         var trimmed = newName.Trim();
         if (string.Equals(trimmed, part.Name, StringComparison.Ordinal)) return;
         part.Name = trimmed;
+
+        // Single-mesh model: the outliner row is labeled with the PROP
+        // name, not the part name, so a part-only rename looked like a
+        // no-op. One layer IS the prop — rename it end to end (row label
+        // + export asset name follow via OnPropNameChanged).
+        if (_vm.ModelParts.Count == 1)
+            _vm.PropName = trimmed;
     }
 
     /// <summary>Per-part Optimize Mesh: opens the inline slider on this
@@ -2831,42 +5715,12 @@ public partial class MainWindow : FluentWindow
     /// <summary>Bare-bones modal input dialog — title, label, prefilled
     /// TextBox, OK/Cancel. Built programmatically so we don't have to
     /// add yet another XAML window file for a 12-line interaction.</summary>
+    /// <summary>Compact themed prompt — same RenameDialog the Vehicles
+    /// tab uses, so every rename in the app looks identical.</summary>
     private string? ShowInputDialog(string title, string label, string initial)
     {
-        var win = new Window
-        {
-            Title = title,
-            Owner = this,
-            Width = 380,
-            SizeToContent = SizeToContent.Height,
-            WindowStartupLocation = WindowStartupLocation.CenterOwner,
-            ResizeMode = ResizeMode.NoResize,
-            Background = (System.Windows.Media.Brush)FindResource("ApplicationBackgroundBrush"),
-        };
-
-        var stack = new System.Windows.Controls.StackPanel { Margin = new Thickness(16) };
-        stack.Children.Add(new System.Windows.Controls.TextBlock { Text = label, FontSize = 12, Margin = new Thickness(0, 0, 0, 6) });
-        var box = new System.Windows.Controls.TextBox { Text = initial, FontSize = 13 };
-        box.Loaded += (_, _) => { box.Focus(); box.SelectAll(); };
-        stack.Children.Add(box);
-
-        var buttons = new System.Windows.Controls.StackPanel
-        {
-            Orientation = System.Windows.Controls.Orientation.Horizontal,
-            HorizontalAlignment = System.Windows.HorizontalAlignment.Right,
-            Margin = new Thickness(0, 12, 0, 0),
-        };
-        var ok = new System.Windows.Controls.Button { Content = "OK", Width = 72, IsDefault = true, Margin = new Thickness(0, 0, 8, 0) };
-        var cancel = new System.Windows.Controls.Button { Content = "Cancel", Width = 72, IsCancel = true };
-        buttons.Children.Add(ok);
-        buttons.Children.Add(cancel);
-        stack.Children.Add(buttons);
-        win.Content = stack;
-
-        string? result = null;
-        ok.Click += (_, _) => { result = box.Text; win.DialogResult = true; };
-
-        return win.ShowDialog() == true ? result : null;
+        var dlg = new RenameDialog(title, label, initial, isFile: false) { Owner = this };
+        return dlg.ShowDialog() == true ? dlg.ResultName : null;
     }
 
     private static string FormatBytesShort(long b)
@@ -3517,8 +6371,6 @@ public partial class MainWindow : FluentWindow
         _vm.OpenViewCommand.Execute(view);
     }
 
-    // ─────────────── Activity rail ───────────────
-
     private void OnRailMouseEnter(object sender, System.Windows.Input.MouseEventArgs e)
         => _vm.IsRailHovered = true;
 
@@ -3533,21 +6385,26 @@ public partial class MainWindow : FluentWindow
         if (sender is not System.Windows.FrameworkElement fe) return;
         if (fe.Tag is not string view) return;
         Services.FosLogger.Info("nav", $"rail click -> {view}");
-        _vm.IsSettingsOpen = false;   // navigating from the rail closes the Settings modal
+
+        if (string.Equals(view, "Settings", StringComparison.OrdinalIgnoreCase))
+        {
+            OpenSettingsModal();
+            return;
+        }
+
+        _vm.IsSettingsOpen = false;   // navigating from the rail closes Settings
         _vm.OpenViewCommand.Execute(view);
     }
 
     private void OnTogglePinClick(object sender, MouseButtonEventArgs e)
         => _vm.ToggleRailPinCommand.Execute(null);
 
-    /// <summary>Click handler for the 3D Model / Weapons / Optimize segmented
-    /// toggle. Routes through OpenViewCommand like the dashboard tiles do, but
-    /// gates the 3D Model → Weapons / Optimize transition behind a confirmation
-    /// when work is in flight: Weapons clears the loaded model outright (via
-    /// the ExportMode-change subscriber), and switching to Optimize abandons
-    /// the active 3D session, so prompt before either when there's something
-    /// to lose. Going TO 3D Model, or any switch with no loaded model, is a
-    /// no-op for the prompt and falls straight through.</summary>
+    /// <summary>Click handler for the Assets segmented toggle (3D Model /
+    /// Vehicles) and the Optimize rail entry. Routes through OpenViewCommand,
+    /// but gates leaving an in-flight 3D Model session for Optimize behind a
+    /// confirmation — Optimize abandons the active 3D session. Switching
+    /// between 3D Model and Vehicles (or any switch with no loaded model) is
+    /// a no-op for the prompt and falls straight through.</summary>
     private void OnInnerToggleClick(object sender, RoutedEventArgs e)
     {
         if (sender is not System.Windows.FrameworkElement fe) return;
@@ -3569,5 +6426,282 @@ public partial class MainWindow : FluentWindow
         }
 
         _vm.OpenViewCommand.Execute(view);
+    }
+
+    // ── Animated props keys timeline ────────────────────────────────
+
+    private readonly TimelineController _propAnimCtl = new();
+    private DispatcherTimer? _propAnimPlayTimer;
+    private bool _propAnimScrubbing;
+    private bool _propAnimDraggingKey;
+    private PropAnimKey? _propAnimDragKey;
+    private bool _propAnimTimelineHooked;
+
+    private void EnsurePropAnimTimelineHooks()
+    {
+        if (_propAnimTimelineHooked) return;
+        _propAnimTimelineHooked = true;
+        if (PropAnimTimelineLayer != null)
+            PropAnimTimelineLayer.RenderCallback = DrawPropAnimTimeline;
+        _propAnimCtl.Changed += () => PropAnimTimelineLayer?.InvalidateVisual();
+        _vm.PropAnimKeys.CollectionChanged += (_, _) =>
+        {
+            _vm.NotifyPropAnimKeysChanged();
+            PropAnimTimelineLayer?.InvalidateVisual();
+        };
+        _vm.PropertyChanged += (_, e) =>
+        {
+            if (e.PropertyName is nameof(MainViewModel.PropAnimPlayhead)
+                or nameof(MainViewModel.PropAnimDuration)
+                or nameof(MainViewModel.IsAnimatedPropsView)
+                or nameof(MainViewModel.PropAnimPlayheadLabel))
+                PropAnimTimelineLayer?.InvalidateVisual();
+            if (e.PropertyName == nameof(MainViewModel.IsPropAnimPlaying))
+                UpdatePropAnimPlayIcon();
+        };
+    }
+
+    /// <summary>Write timeline keys to a temp JSON sidecar for the engine,
+    /// or null when not in Animated mode / fewer than 2 keys.</summary>
+    private string? WritePropAnimKeysSidecar()
+    {
+        if (!_vm.IsAnimatedPropsView) return null;
+        _vm.EnsureDefaultPropAnimKeys();
+        if (_vm.PropAnimKeys.Count < 2) return null;
+        try
+        {
+            var dir = Path.Combine(Path.GetTempPath(), "FiveOS");
+            Directory.CreateDirectory(dir);
+            var path = Path.Combine(dir, $"anim-keys-{Guid.NewGuid():N}.json");
+            var payload = new
+            {
+                fps = _vm.PropAnimFps,
+                duration = _vm.PropAnimDuration,
+                keys = _vm.PropAnimKeys
+                    .OrderBy(k => k.Time)
+                    .Select(k => new { t = k.Time, rx = k.RotX, ry = k.RotY, rz = k.RotZ })
+                    .ToList(),
+            };
+            File.WriteAllText(path, System.Text.Json.JsonSerializer.Serialize(payload));
+            return path;
+        }
+        catch (Exception ex)
+        {
+            Services.FosLogger.Warn("anim", "anim-keys sidecar failed: " + ex.Message);
+            return null;
+        }
+    }
+
+    private void DrawPropAnimTimeline(System.Windows.Media.DrawingContext dc)
+    {
+        EnsurePropAnimTimelineHooks();
+        var canvas = PropAnimTimelineCanvas;
+        if (canvas == null) return;
+        double w = canvas.ActualWidth;
+        double h = canvas.ActualHeight;
+        if (w < 8 || h < 8) return;
+
+        double dur = Math.Max(0.1, _vm.PropAnimDuration);
+        _propAnimCtl.ClampScroll(dur);
+
+        var bg = new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(0x1A, 0x1A, 0x1A));
+        bg.Freeze();
+        dc.DrawRectangle(bg, null, new Rect(0, 0, w, h));
+
+        var tickPen = new System.Windows.Media.Pen(
+            new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(0x55, 0x55, 0x55)), 1);
+        tickPen.Freeze();
+        var labelBrush = new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(0x9A, 0x9A, 0x9A));
+        labelBrush.Freeze();
+
+        double rulerH = 22;
+        double laneTop = rulerH + 4;
+        double laneH = Math.Max(16, h - laneTop - 8);
+
+        // Major ticks every 0.5s (or 1s when zoomed out).
+        double step = _propAnimCtl.Zoom < 2 ? 1.0 : 0.5;
+        double t0 = Math.Floor(_propAnimCtl.ScrollOffset / step) * step;
+        for (double t = t0; t <= _propAnimCtl.ScrollOffset + _propAnimCtl.VisibleDuration(dur) + step; t += step)
+        {
+            if (t < -1e-6 || t > dur + 1e-6) continue;
+            double x = _propAnimCtl.TimeToX(t, dur, w);
+            dc.DrawLine(tickPen, new System.Windows.Point(x, 0), new System.Windows.Point(x, rulerH));
+            var ft = new System.Windows.Media.FormattedText(
+                t.ToString("0.#", System.Globalization.CultureInfo.InvariantCulture) + "s",
+                System.Globalization.CultureInfo.InvariantCulture,
+                FlowDirection.LeftToRight,
+                new System.Windows.Media.Typeface("Segoe UI"),
+                10, labelBrush, 1.25);
+            dc.DrawText(ft, new System.Windows.Point(x + 3, 3));
+        }
+
+        // Key lane background
+        var laneBrush = new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(0x25, 0x25, 0x25));
+        laneBrush.Freeze();
+        dc.DrawRoundedRectangle(laneBrush, null, new Rect(8, laneTop, w - 16, laneH), 3, 3);
+
+        var keyFill = new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(0x5B, 0xBF, 0xB5));
+        keyFill.Freeze();
+        var keyStroke = new System.Windows.Media.Pen(
+            new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(0xE0, 0xE0, 0xE0)), 1);
+        keyStroke.Freeze();
+
+        double midY = laneTop + laneH * 0.5;
+        foreach (var key in _vm.PropAnimKeys)
+        {
+            double x = _propAnimCtl.TimeToX(key.Time, dur, w);
+            var geo = new System.Windows.Media.StreamGeometry();
+            using (var ctx = geo.Open())
+            {
+                ctx.BeginFigure(new System.Windows.Point(x, midY - 7), true, true);
+                ctx.LineTo(new System.Windows.Point(x + 6, midY), true, false);
+                ctx.LineTo(new System.Windows.Point(x, midY + 7), true, false);
+                ctx.LineTo(new System.Windows.Point(x - 6, midY), true, false);
+            }
+            geo.Freeze();
+            dc.DrawGeometry(keyFill, keyStroke, geo);
+        }
+
+        // Playhead
+        double px = _propAnimCtl.TimeToX(_vm.PropAnimPlayhead, dur, w);
+        var playPen = new System.Windows.Media.Pen(
+            new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(0xFF, 0xC8, 0x57)), 1.5);
+        playPen.Freeze();
+        dc.DrawLine(playPen, new System.Windows.Point(px, 0), new System.Windows.Point(px, h));
+        var head = new System.Windows.Media.StreamGeometry();
+        using (var ctx = head.Open())
+        {
+            ctx.BeginFigure(new System.Windows.Point(px - 5, 0), true, true);
+            ctx.LineTo(new System.Windows.Point(px + 5, 0), true, false);
+            ctx.LineTo(new System.Windows.Point(px, 8), true, false);
+        }
+        head.Freeze();
+        dc.DrawGeometry(playPen.Brush, null, head);
+    }
+
+    private void OnPropAnimTimelineSizeChanged(object sender, SizeChangedEventArgs e)
+    {
+        EnsurePropAnimTimelineHooks();
+        PropAnimTimelineLayer?.InvalidateVisual();
+    }
+
+    private void OnPropAnimTimelineDown(object sender, MouseButtonEventArgs e)
+    {
+        EnsurePropAnimTimelineHooks();
+        var canvas = PropAnimTimelineCanvas;
+        if (canvas == null) return;
+        canvas.CaptureMouse();
+        var pos = e.GetPosition(canvas);
+        double dur = Math.Max(0.1, _vm.PropAnimDuration);
+        double t = _propAnimCtl.SnapTime(_propAnimCtl.XToTime(pos.X, dur, canvas.ActualWidth), _vm.PropAnimFps);
+
+        // Hit-test nearest key within ~8px
+        PropAnimKey? hit = null;
+        double best = 10;
+        foreach (var key in _vm.PropAnimKeys)
+        {
+            double kx = _propAnimCtl.TimeToX(key.Time, dur, canvas.ActualWidth);
+            double d = Math.Abs(kx - pos.X);
+            if (d < best) { best = d; hit = key; }
+        }
+
+        if (hit != null && e.ClickCount == 1)
+        {
+            _propAnimDraggingKey = true;
+            _propAnimDragKey = hit;
+            _vm.PropAnimPlayhead = hit.Time;
+        }
+        else
+        {
+            _propAnimScrubbing = true;
+            _vm.PropAnimPlayhead = Math.Clamp(t, 0, dur);
+            _vm.ApplyPropAnimPlayheadToTransform();
+        }
+        PropAnimTimelineLayer?.InvalidateVisual();
+        e.Handled = true;
+    }
+
+    private void OnPropAnimTimelineMove(object sender, MouseEventArgs e)
+    {
+        if (!_propAnimScrubbing && !_propAnimDraggingKey) return;
+        var canvas = PropAnimTimelineCanvas;
+        if (canvas == null) return;
+        var pos = e.GetPosition(canvas);
+        double dur = Math.Max(0.1, _vm.PropAnimDuration);
+        double t = _propAnimCtl.SnapTime(_propAnimCtl.XToTime(pos.X, dur, canvas.ActualWidth), _vm.PropAnimFps);
+        t = Math.Clamp(t, 0, dur);
+        if (_propAnimDraggingKey && _propAnimDragKey != null)
+        {
+            _propAnimDragKey.Time = t;
+            _vm.PropAnimPlayhead = t;
+        }
+        else
+        {
+            _vm.PropAnimPlayhead = t;
+            _vm.ApplyPropAnimPlayheadToTransform();
+        }
+        PropAnimTimelineLayer?.InvalidateVisual();
+    }
+
+    private void OnPropAnimTimelineUp(object sender, MouseEventArgs e)
+    {
+        if (_propAnimDraggingKey)
+            _vm.SortPropAnimKeys();
+        _propAnimScrubbing = false;
+        _propAnimDraggingKey = false;
+        _propAnimDragKey = null;
+        PropAnimTimelineCanvas?.ReleaseMouseCapture();
+        PropAnimTimelineLayer?.InvalidateVisual();
+    }
+
+    private void OnPropAnimPlayToggle(object sender, RoutedEventArgs e)
+    {
+        EnsurePropAnimTimelineHooks();
+        if (_vm.IsPropAnimPlaying)
+        {
+            StopPropAnimPlayback();
+            return;
+        }
+        _vm.EnsureDefaultPropAnimKeys();
+        _vm.IsPropAnimPlaying = true;
+        _propAnimPlayTimer ??= new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(33) };
+        _propAnimPlayTimer.Tick -= OnPropAnimPlayTick;
+        _propAnimPlayTimer.Tick += OnPropAnimPlayTick;
+        _propAnimPlayTimer.Start();
+        UpdatePropAnimPlayIcon();
+    }
+
+    private void OnPropAnimPlayTick(object? sender, EventArgs e)
+    {
+        double dur = Math.Max(0.1, _vm.PropAnimDuration);
+        _vm.PropAnimPlayhead += 0.033;
+        if (_vm.PropAnimPlayhead >= dur)
+            _vm.PropAnimPlayhead = 0;
+        _vm.ApplyPropAnimPlayheadToTransform();
+        _propAnimCtl.EnsurePlayheadVisible(_vm.PropAnimPlayhead, dur, PropAnimTimelineCanvas?.ActualWidth ?? 400);
+        PropAnimTimelineLayer?.InvalidateVisual();
+    }
+
+    private void OnPropAnimStop(object sender, RoutedEventArgs e)
+    {
+        StopPropAnimPlayback();
+        _vm.PropAnimPlayhead = 0;
+        _vm.ApplyPropAnimPlayheadToTransform();
+        PropAnimTimelineLayer?.InvalidateVisual();
+    }
+
+    private void StopPropAnimPlayback()
+    {
+        _propAnimPlayTimer?.Stop();
+        _vm.IsPropAnimPlaying = false;
+        UpdatePropAnimPlayIcon();
+    }
+
+    private void UpdatePropAnimPlayIcon()
+    {
+        if (PropAnimPlayIcon == null) return;
+        PropAnimPlayIcon.Symbol = _vm.IsPropAnimPlaying
+            ? Wpf.Ui.Controls.SymbolRegular.Pause24
+            : Wpf.Ui.Controls.SymbolRegular.Play24;
     }
 }

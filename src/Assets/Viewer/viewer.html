@@ -13,11 +13,11 @@
     --vscode-border: #454545;
     --vscode-fg: #cccccc;
     --vscode-fg-dim: #858585;
-    --vscode-accent: #007acc;
-    --vscode-accent-hover: #1177bb;
+    --pose-accent: #0078d4;
+    --vscode-accent: var(--pose-accent);
+    --vscode-accent-hover: #00a2ff;
     --vscode-hover: #2a2d2e;
     --vscode-link: #3794ff;
-    --pose-accent: var(--vscode-accent);
   }
   html, body {
     margin: 0; padding: 0; width: 100%; height: 100%;
@@ -61,7 +61,7 @@
   }
   .gizmo-btn:hover { background: var(--vscode-hover); border-color: #5a5a5a; }
   .gizmo-btn.active {
-    background: var(--vscode-accent); border-color: var(--vscode-accent); color: #fff;
+    background: var(--pose-accent); border-color: transparent; color: #fff;
   }
   .gizmo-btn svg { width: 12px; height: 12px; flex-shrink: 0; }
   .gizmo-btn .key {
@@ -132,7 +132,7 @@
     display: inline-flex; align-items: center; gap: 5px; white-space: nowrap;
   }
   .sb-btn:hover { background: var(--vscode-hover); border-color: #5a5a5a; }
-  .sb-btn.primary { background: var(--vscode-accent); border-color: var(--vscode-accent); color: #fff; }
+  .sb-btn.primary { background: var(--pose-accent); border-color: transparent; color: #fff; }
   .sb-btn.primary:hover { filter: brightness(1.1); }
   .sb-btn svg { width: 12px; height: 12px; }
   #submesh-bar .sb-close {
@@ -165,7 +165,7 @@
   @keyframes animPulse { 0%,100% { opacity: 1; } 50% { opacity: .4; } }
   #anim-bar .anim-label { font-size: 11px; color: var(--vscode-fg-dim); letter-spacing: .02em; }
   .anim-btn {
-    background: var(--vscode-accent); border: 1px solid var(--vscode-accent);
+    background: var(--pose-accent); border: 1px solid transparent;
     color: #fff; font-family: inherit; font-size: 11px; font-weight: 600;
     padding: 4px 12px; border-radius: 14px; cursor: pointer;
     display: inline-flex; align-items: center; gap: 6px; white-space: nowrap;
@@ -192,7 +192,7 @@
     font-family: -apple-system, "Segoe UI", Roboto, sans-serif;
   }
   .gizmo-match input[type="number"]:focus {
-    outline: 1px solid var(--vscode-accent);
+    outline: 1px solid var(--pose-accent);
     outline-offset: -1px;
   }
   /* Hide spin buttons (they're chunky and waste horizontal space). */
@@ -229,7 +229,7 @@
   #dot-loader-grid .dot {
     width: 8px; height: 8px;
     border-radius: 50%;
-    background: var(--vscode-accent);
+    background: var(--pose-accent);
     opacity: 0.12;
   }
   #dot-loader-grid .dot.lit { opacity: 1; }
@@ -279,7 +279,6 @@
      Accent colour is set at viewer-ready from the WPF
      SystemAccentColorBrush; --pose-accent is the single source of
      truth so the HUD always tracks the host app's theme. */
-  :root { --pose-accent: #60CDFF; }
   #pose-hud {
     position: absolute; top: 10px; right: 10px;
     background: linear-gradient(180deg, #1d2030 0%, #161924 100%);
@@ -409,9 +408,10 @@
       width:30px; height:30px; display:flex; align-items:center; justify-content:center;
       background:transparent; border:1px solid transparent; border-radius:5px;
       color:var(--vscode-fg); cursor:pointer; padding:0;
+      overflow:hidden;
     }
     .cam-btn:hover{ background:var(--vscode-hover); border-color:#5a5a5a; }
-    .cam-btn.active{ background:var(--vscode-accent); border-color:var(--vscode-accent); color:#fff; }
+    .cam-btn.active{ background:var(--pose-accent); border-color:transparent; color:#fff; }
     .cam-btn svg{ width:16px; height:16px; pointer-events:none; }
     .cam-sep{ height:1px; background:var(--vscode-border); margin:2px 2px; }
   </style>
@@ -478,33 +478,108 @@
   </div>
 
   <style>
-    #hdri-bar { position: absolute; top: 12px; right: 12px; z-index: 20;
-      display: flex; flex-direction: column; gap: 8px; width: 170px; padding: 10px;
-      border-radius: 10px; background: rgba(20,20,22,0.78); backdrop-filter: blur(8px);
-      border: 1px solid rgba(255,255,255,0.08); font: 500 11px/1.2 system-ui, sans-serif;
-      color: #cfcfd3; user-select: none; }
+    /* Minimal charcoal lighting strip — C4D / FiveOS panel feel */
+    #hdri-bar {
+      position: absolute; top: 12px; right: 12px; z-index: 20;
+      display: flex; flex-direction: column; gap: 7px;
+      width: 168px; padding: 9px 10px 10px;
+      border-radius: 4px;
+      background: rgba(38, 38, 38, 0.92);
+      border: 1px solid #363636;
+      box-shadow: 0 8px 24px rgba(0,0,0,.35);
+      font: 400 11px/1.2 "Segoe UI", system-ui, sans-serif;
+      color: #a6a6a6;
+      user-select: none;
+    }
     #hdri-bar.hidden { display: none; }
-    #hdri-bar .hdri-title { font-size: 10px; letter-spacing: .08em; color: #7a7a80; }
-    #hdri-bar .hdri-preset { display: flex; gap: 6px; }
-    #hdri-bar .hdri-btn { flex: 1; padding: 5px 0; border-radius: 6px; cursor: pointer;
-      background: rgba(255,255,255,.06); color: #cfcfd3; border: 1px solid transparent; font: inherit; }
-    #hdri-bar .hdri-btn:hover { background: rgba(255,255,255,.12); }
-    #hdri-bar .hdri-btn.active { background: #2f6fed; color: #fff; border-color: #2f6fed; }
-    #hdri-bar .hdri-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
-    #hdri-bar .hdri-row span { color: #9a9aa0; }
-    #hdri-bar input[type=range] { flex: 1; max-width: 98px; accent-color: #2f6fed; }
+    #hdri-bar .hdri-title {
+      font-size: 9px; font-weight: 600;
+      letter-spacing: 0.12em; text-transform: uppercase;
+      color: #666;
+      margin-bottom: 1px;
+    }
+    #hdri-bar .hdri-preset {
+      display: grid; grid-template-columns: 1fr 1fr;
+      gap: 0;
+      border: 1px solid #363636;
+      border-radius: 3px;
+      overflow: hidden;
+      background: #1c1c1c;
+    }
+    #hdri-bar .hdri-btn {
+      margin: 0; padding: 5px 0;
+      border: none; border-radius: 0;
+      cursor: pointer;
+      background: transparent;
+      color: #666;
+      font: 500 11px/1 "Segoe UI", system-ui, sans-serif;
+      letter-spacing: 0.02em;
+    }
+    #hdri-bar .hdri-btn + .hdri-btn {
+      border-left: 1px solid #363636;
+    }
+    #hdri-bar .hdri-btn:hover { color: #ccc; background: #333; }
+    #hdri-bar .hdri-btn.active {
+      color: #ccc;
+      background: #2b2b2b;
+      box-shadow: inset 0 -1px 0 var(--pose-accent);
+    }
+    #hdri-bar .hdri-row {
+      display: grid;
+      grid-template-columns: 54px 1fr 28px;
+      align-items: center;
+      gap: 6px;
+      margin: 0;
+    }
+    #hdri-bar .hdri-row > span:first-child {
+      color: #666; font-size: 10px;
+    }
+    #hdri-bar .hdri-val {
+      color: #888; font-size: 10px;
+      font-variant-numeric: tabular-nums;
+      text-align: right;
+    }
+    #hdri-bar input[type=range] {
+      -webkit-appearance: none; appearance: none;
+      width: 100%; height: 14px; margin: 0;
+      background: transparent; cursor: pointer;
+    }
+    #hdri-bar input[type=range]:focus { outline: none; }
+    #hdri-bar input[type=range]::-webkit-slider-runnable-track {
+      height: 2px; border-radius: 1px; background: #4d4d4d;
+    }
+    #hdri-bar input[type=range]::-webkit-slider-thumb {
+      -webkit-appearance: none; appearance: none;
+      width: 10px; height: 10px; margin-top: -4px;
+      border-radius: 50%;
+      background: #ccc;
+      border: 1px solid #1c1c1c;
+      box-shadow: 0 0 0 1px #363636;
+    }
+    #hdri-bar input[type=range]:hover::-webkit-slider-thumb {
+      background: #fff;
+    }
+    #hdri-bar input[type=range]::-moz-range-track {
+      height: 2px; border-radius: 1px; background: #4d4d4d; border: none;
+    }
+    #hdri-bar input[type=range]::-moz-range-thumb {
+      width: 10px; height: 10px; border-radius: 50%;
+      background: #ccc; border: 1px solid #1c1c1c;
+    }
   </style>
   <div id="hdri-bar" class="hidden">
-    <div class="hdri-title">LIGHTING</div>
+    <div class="hdri-title">Lighting</div>
     <div class="hdri-preset">
-      <button class="hdri-btn active" data-preset="day" title="Daytime HDRI">Day</button>
-      <button class="hdri-btn" data-preset="night" title="Night HDRI">Night</button>
+      <button type="button" class="hdri-btn active" data-preset="day" title="Daytime HDRI">Day</button>
+      <button type="button" class="hdri-btn" data-preset="night" title="Night HDRI">Night</button>
     </div>
     <label class="hdri-row"><span>Rotate</span>
       <input id="hdri-rotate" type="range" min="0" max="360" step="1" value="0" />
+      <span class="hdri-val" id="hdri-rotate-val">0°</span>
     </label>
     <label class="hdri-row"><span>Intensity</span>
       <input id="hdri-intensity" type="range" min="0.3" max="2" step="0.05" value="1" />
+      <span class="hdri-val" id="hdri-intensity-val">1.00</span>
     </label>
   </div>
 
@@ -592,7 +667,10 @@
 // poseTimelineTick (which reads these) doesn't hit a TDZ at module init.
 // See the TIMELINE / KEYFRAMES section further down for the function
 // definitions that consume these.
-let poseKeyframes = [];
+// Hand-recorded layer — completely separate from the clip's poseKeyframes.
+// Recording NEVER mutates the clip; this layer overrides per-bone on top.
+let poseUserKeyframes = [];
+let poseKeyframes = []; poseUserKeyframes = [];
 let poseKeyframeSource = null;   // import origin: ycd-import, anim-import, video-import, editor, …
 let poseBoneSpace = 'glb';       // timeline rotation space: glb (preview skeleton) or legacy native
 let poseTime = 0;
@@ -600,6 +678,10 @@ let poseDuration = 2;
 let poseFps = 30;
 let posePlaying = false;
 let poseLoop = true;
+// Soft playback window (Blender In–Out). When end > start, play/loop
+// stays inside this range; the full poseDuration is still the clip length.
+let posePreviewStart = 0;
+let posePreviewEnd = 0;
 let poseLastTickMs = 0;
 // Throttle for host tick messages during playback (see poseTimelineTick).
 let poseLastHostTickMs = 0;
@@ -618,13 +700,23 @@ let poseRootBaseQuat = null;  // its base orientation — mover heading (yaw) co
 // the extracted mover is still kept in the keyframes for export. The Movement
 // dropdown (In Place ↔ Root Motion) flips it via poseSetRootMotionPreview.
 let poseRootMotionPreview = true;
+let poseRootMotionScale = 1;      // horizontal travel sensitivity (Travel slider)
 let poseRootYawApplied = false; // true while an animated heading is live (restore base quat when it ends)
 let poseUpAxis = null;        // lazy THREE.Vector3(0,1,0) — viewer up
 let poseSuppressRootApply = false; // true while user drags whole-model translate gizmo
 let poseModelDragStartPos = null;
 let posePreviewFootIk = true;      // runtime foot contact polish in viewer (WYSIWYG preview)
+let poseFootPlantIntensity = 0.5;  // 0..1 — Plant slider; scales XZ correction strength
 let poseFloorOffsetY = 0;        // snap-to-ground vertical bias baked into export roots
 const _poseFootTmp = new THREE.Vector3();
+// Keyframe-path world foot plant (anim-import with root travel). Soft-pins
+// planted feet in world XZ so a step-back doesn't skate in the preview even
+// if bake residual remains. Null when the clip has no travelling root.
+let poseKfFootPlant = null;
+const _poseKfFootInv = new THREE.Matrix4();
+const _poseKfFootWorld = new THREE.Vector3();
+const _poseKfFootLocal = new THREE.Vector3();
+const _poseKfFootMaxCorr = 0.08; // metres at intensity=1 — soft clamp; keeps ankles from ballooning
 
 // CLIP_LIBRARY -- shared between authored pose-keyframes (kind:'pose')
 // and animation clips that arrived with imported models (kind:'imported').
@@ -1491,13 +1583,18 @@ function disableHdriLighting() {
     btn.addEventListener('click', () => setHdriPreset(btn.dataset.preset));
   });
   const rot = document.getElementById('hdri-rotate');
+  const rotVal = document.getElementById('hdri-rotate-val');
   if (rot) rot.addEventListener('input', () => {
-    hdriState.rotation = (Number(rot.value) || 0) * Math.PI / 180;
+    const deg = Number(rot.value) || 0;
+    if (rotVal) rotVal.textContent = Math.round(deg) + '°';
+    hdriState.rotation = deg * Math.PI / 180;
     _applyHdriRotation(); requestRender(); _scheduleRebake();
   });
   const inten = document.getElementById('hdri-intensity');
+  const intenVal = document.getElementById('hdri-intensity-val');
   if (inten) inten.addEventListener('input', () => {
     hdriState.intensity = Number(inten.value) || 1;
+    if (intenVal) intenVal.textContent = hdriState.intensity.toFixed(2);
     _applyHdriIntensity(); requestRender();
   });
 })();
@@ -1611,6 +1708,20 @@ transformControls.addEventListener('mouseDown', () => {
   snapshotFootLockBonesInto(dragQuatCapture);
 });
 
+// ── Auto-key ──────────────────────────────────────────────────────
+let poseAutoKey = false;
+window.poseSetAutoKey = function (on) { poseAutoKey = !!on; return poseAutoKey; };
+function poseAutoKeyCommit(items) {
+  if (!poseAutoKey || !items || !items.length) return;
+  // A bare pose with no animation stays a pose — only record once any
+  // timeline content exists.
+  const hasTimeline = poseKeyframes.length > 0 || poseUserKeyframes.length > 0
+    || poseStrips.length > 0
+    || (typeof _rt !== 'undefined' && _rt && _rt.timelineSync && _rt.tracks.length > 0);
+  if (!hasTimeline) return;
+  try { window.poseAddKeyframe(items.map(x => x.idx)); } catch (e) {}
+}
+
 transformControls.addEventListener('mouseUp', () => {
   if (!poseMode) return;
   if (poseIkDragCapture && poseIkDragCapture.size > 0) {
@@ -1645,7 +1756,10 @@ transformControls.addEventListener('mouseUp', () => {
     }
     poseIkDragCapture = null;
     poseIkBodyCapture = null;
-    if (items.length > 0) pushHistory({ kind: 'rotate', payload: { items } });
+    if (items.length > 0) {
+      pushHistory({ kind: 'rotate', payload: { items } });
+      poseAutoKeyCommit(items);
+    }
     return;
   }
   if (dragPosCapture && dragPosCapture.size > 0) {
@@ -1661,7 +1775,10 @@ transformControls.addEventListener('mouseUp', () => {
       if (changed) items.push({ idx, beforeP, afterP });
     }
     dragPosCapture = null;
-    if (items.length > 0) pushHistory({ kind: 'rotate', payload: { items } });
+    if (items.length > 0) {
+      pushHistory({ kind: 'rotate', payload: { items } });
+      poseAutoKeyCommit(items);
+    }
     return;
   }
   if (transformControls.mode !== 'rotate') return;
@@ -1680,6 +1797,7 @@ transformControls.addEventListener('mouseUp', () => {
   dragQuatCapture = null;
   if (items.length > 0) {
     pushHistory({ kind: 'rotate', payload: { items } });
+    poseAutoKeyCommit(items);
   }
 });
 
@@ -1987,8 +2105,8 @@ window.addEventListener('keydown', e => {
           e.preventDefault();
           return;
         }
-        case 'Home': window.poseSetTime(0); e.preventDefault(); return;
-        case 'End':  window.poseSetTime(poseDuration); e.preventDefault(); return;
+        case 'Home': window.poseSetTime(typeof posePreviewStartTime === 'function' ? posePreviewStartTime() : 0); e.preventDefault(); return;
+        case 'End':  window.poseSetTime(typeof posePreviewEndTime === 'function' ? posePreviewEndTime() : poseDuration); e.preventDefault(); return;
         case '/': {
           // DaVinci-Resolve-standard loop toggle. Flip the global flag
           // and ping the host so the loop button repaints its state.
@@ -2028,10 +2146,9 @@ window.addEventListener('keydown', e => {
         return;
       }
       if (lower === 'k') {
-        // Capture the current pose as a keyframe at the scrub time.
+        // Host owns record so Outliner selection can sparse-key bones.
         // Mnemonic: K = Keyframe.
-        const n = window.poseAddKeyframe();
-        if (n != null) fosTelemetry.info('timeline', `KF added at ${poseTime.toFixed(3)}s`, { count: n });
+        postToHost({ kind: 'request-add-keyframe' });
         e.preventDefault();
         return;
       }
@@ -2422,8 +2539,11 @@ if (window.chrome && window.chrome.webview) {
         op: result && result.op,
         reason: result && result.reason,
         result: result && result.result,
+        // Session tab switch: captureState returns the compact restore blob
+        // here so the host can await it without a second round-trip.
+        capture: result && result.capture,
       });
-      if (result && result.document) {
+      if (result && result.document && result.op !== 'captureState' && result.op !== 'captureSession') {
         postToHost({ kind: 'timeline-document-snapshot', snapshot: result.document });
       }
       if (result && result.dopeSheet) {
@@ -3278,6 +3398,102 @@ window.clearModel = function () {
   postToHost({ kind: 'parts', parts: [] });
 };
 
+// ─────── parked layers (multi-model viewport) ───────
+//
+// A model dragged into a pack group stays visible while the user imports
+// the next one: the host "parks" the CURRENT object right before loading
+// a new model. Parking keeps the exact world transform (no re-load, no
+// re-normalization) — the object just stops being the editable model.
+// Previewing a parked layer un-parks its ghost and re-loads it as the
+// active model; deleting/converting the layer removes the ghost.
+const parkedModels = new Map();   // id -> Object3D
+
+window.parkCurrentModel = function (id) {
+  if (!currentModel) return false;
+  const key = String(id);
+  window.removeParkedModel(key);   // re-park same layer: drop the old ghost
+  transformControls.detach();
+  resetSubMeshSelection();
+  if (currentMixer) {
+    currentMixer.stopAllAction();
+    currentMixer.uncacheRoot(currentModel);
+    currentMixer = null;
+  }
+  const m = currentModel;
+  m.name = 'fiveos_parked_' + key;
+  parkedModels.set(key, m);
+  currentModel = null;             // next load's clearModel() must not touch it
+  gizmoBar.style.display = 'none';
+  requestRender();
+  return true;
+};
+
+window.removeParkedModel = function (id) {
+  const m = parkedModels.get(String(id));
+  if (!m) return false;
+  scene.remove(m);
+  m.traverse(obj => {
+    if (obj.geometry) obj.geometry.dispose();
+    if (obj.material) {
+      const arr = Array.isArray(obj.material) ? obj.material : [obj.material];
+      arr.forEach(mat => {
+        for (const k in mat) if (mat[k] && mat[k].isTexture) mat[k].dispose();
+        mat.dispose();
+      });
+    }
+  });
+  parkedModels.delete(String(id));
+  requestRender();
+  return true;
+};
+
+window.clearParkedModels = function () {
+  for (const key of Array.from(parkedModels.keys())) window.removeParkedModel(key);
+};
+
+// Selecting the active model's layer row re-asserts the transform gizmo —
+// park/preview cycles can leave transformControls detached even though a
+// model is loaded and editable.
+window.attachGizmoToCurrent = function () {
+  if (!currentModel) return false;
+  transformControls.attach(currentModel);
+  gizmoBar.style.display = 'flex';
+  requestRender();
+  return true;
+};
+
+// 3D-software selection: clicking a parked layer makes ITS object the
+// active model IN PLACE — no reload, no transform reset. The object is
+// simply promoted out of the parked set and the gizmo attaches to it.
+// Host swaps its own bookkeeping (source path, parts, textures) around
+// the same moment; parts + transform are re-posted from here.
+window.activateParkedModel = function (id) {
+  const m = parkedModels.get(String(id));
+  if (!m) return false;
+  parkedModels.delete(String(id));
+  currentModel = m;
+  transformControls.attach(currentModel);
+  gizmoBar.style.display = 'flex';
+  postToHost({ kind: 'parts', parts: getModelPartsList() });
+  postTransformToHost();
+  requestRender();
+  return true;
+};
+
+/// Emotes "new Untitled tab" path — clear the ped / timeline chrome but
+/// do NOT flip into the Assets drop-zone (that message is for the prop
+/// viewer). Leaves a clean grid; the host's Open Rig / GTA toolbar owns
+/// the empty-state CTA.
+window.clearEmoteTab = function () {
+  try { if (poseMode) window.exitPoseMode(); } catch (e) {}
+  clearModel();
+  if (empty) empty.classList.add('hidden');
+  if (gizmoBar) gizmoBar.style.display = 'none';
+  status.textContent = '';
+  postToHost({ kind: 'parts', parts: [] });
+  requestRender();
+};
+
 // ─────── model parts (layers panel) ───────
 //
 // The host's slide-out layers panel binds to a list of named subgroups in
@@ -3405,6 +3621,7 @@ function applyPresetToMaterial(mat, preset) {
       emissiveIntensity: 'emissiveIntensity' in mat ? mat.emissiveIntensity : 1.0,
       emissiveMap: mat.emissiveMap || null,
       depthWrite: mat.depthWrite,
+      alphaTest: 'alphaTest' in mat ? mat.alphaTest : 0,
     };
   }
   const orig = mat.userData.fiveos_origMat;
@@ -3440,11 +3657,35 @@ function applyPresetToMaterial(mat, preset) {
       }
       if (mat.map && 'emissiveMap' in mat) mat.emissiveMap = mat.map;
       break;
+    case 'METAL':
+      // Shiny metal — non-transparent, low roughness, full metalness so the
+      // scene HDRI reflects off it. Mirrors the exported spec shader look.
+      mat.transparent = orig.transparent;
+      mat.opacity = orig.opacity;
+      mat.depthWrite = orig.depthWrite;
+      if ('roughness' in mat) mat.roughness = 0.25;
+      if ('metalness' in mat) mat.metalness = 0.9;
+      if ('envMapIntensity' in mat) mat.envMapIntensity = 1.3;
+      if (mat.emissive) mat.emissive.setHex(0x000000);
+      if ('emissiveIntensity' in mat) mat.emissiveIntensity = 0;
+      break;
+    case 'CUTOUT':
+      // Alpha-tested cutout — respect the diffuse alpha, no soft blend, still
+      // writes depth (matches normal_decal's hard-edged transparency).
+      mat.transparent = true;
+      mat.alphaTest = 0.5;
+      mat.depthWrite = true;
+      if ('roughness' in mat) mat.roughness = orig.roughness;
+      if ('metalness' in mat) mat.metalness = orig.metalness;
+      if (mat.emissive) mat.emissive.setHex(orig.emissive);
+      if ('emissiveIntensity' in mat) mat.emissiveIntensity = orig.emissiveIntensity;
+      break;
     case 'STANDARD':
     default:
       mat.transparent = orig.transparent;
       mat.opacity = orig.opacity;
       mat.depthWrite = orig.depthWrite;
+      if ('alphaTest' in mat) mat.alphaTest = orig.alphaTest;
       if ('roughness' in mat) mat.roughness = orig.roughness;
       if ('metalness' in mat) mat.metalness = orig.metalness;
       if ('envMapIntensity' in mat) mat.envMapIntensity = orig.envMapIntensity;
@@ -3498,7 +3739,11 @@ window.setPartTexture = function (name, dataUrl) {
           if (Array.isArray(obj.material)) obj.material[mi] = repl; else obj.material = repl;
           mat = repl;
         }
-        if (mat.map && mat.map !== tex) mat.map.dispose();
+        // Remember the first (source) map so Base Texture can restore it.
+        if (mat.userData._fiveosOrigMap === undefined)
+          mat.userData._fiveosOrigMap = mat.map || null;
+        if (mat.map && mat.map !== tex && mat.map !== mat.userData._fiveosOrigMap)
+          mat.map.dispose();
         mat.map = tex;
         mat.color && mat.color.setHex(0xffffff); // don't tint the texture
         mat.needsUpdate = true;
@@ -3507,6 +3752,30 @@ window.setPartTexture = function (name, dataUrl) {
     requestRender();
   });
   return { ok: true, hasUv, meshCount };
+};
+
+/// Restore every part's diffuse to the map it had when the model loaded
+/// (or before the first live preview). Used by the Textures "Base Texture" row.
+window.resetAllPartTextures = function () {
+  const root = getPartsRoot();
+  if (!root) return false;
+  let n = 0;
+  root.traverse(obj => {
+    if (!obj.isMesh || !obj.material) return;
+    const mats = Array.isArray(obj.material) ? obj.material : [obj.material];
+    for (const mat of mats) {
+      if (!mat || !mat.userData || mat.userData._fiveosOrigMap === undefined) continue;
+      const orig = mat.userData._fiveosOrigMap;
+      if (mat.map && mat.map !== orig) {
+        try { mat.map.dispose(); } catch (_) {}
+      }
+      mat.map = orig;
+      mat.needsUpdate = true;
+      n++;
+    }
+  });
+  requestRender();
+  return n > 0;
 };
 
 // ─────── sub-mesh selection (pick / hover-highlight / separate) ───────
@@ -4090,6 +4359,38 @@ window.addEventListener('resize', () => {
   requestRender();
 });
 
+// WebView2 layout changes (pack dock open/close, splitter drag) often do
+// NOT fire window.resize — observe the viewport element directly.
+if (typeof ResizeObserver !== 'undefined') {
+  const _ro = new ResizeObserver(() => {
+    const w = viewport.clientWidth, h = viewport.clientHeight;
+    if (w < 2 || h < 2) return;
+    renderer.setSize(w, h);
+    camera.aspect = w / h;
+    camera.updateProjectionMatrix();
+    try { refreshFatLineResolution(); } catch (e) {}
+    requestRender();
+  });
+  _ro.observe(viewport);
+}
+
+// Host can poke this after WPF layout settles (pack panel toggle, etc.).
+// Also re-frame the model — after a dock open the aspect changes and the
+// old camera often only shows feet/waist until the user resets the view.
+window.resizeViewer = function (reframe) {
+  const w = viewport.clientWidth, h = viewport.clientHeight;
+  if (w < 2 || h < 2) return false;
+  renderer.setSize(w, h);
+  camera.aspect = w / h;
+  camera.updateProjectionMatrix();
+  try { refreshFatLineResolution(); } catch (e) {}
+  if (reframe !== false) {
+    try { if (typeof frameAll === 'function') frameAll(); } catch (e) {}
+  }
+  requestRender();
+  return true;
+};
+
 // Repaint whenever the gizmo state mutates (mode change, attach/detach,
 // drag, dragging-changed). The TransformControls 'change' event covers all
 // of these — its 'objectChange' event covers in-drag value mutations.
@@ -4479,20 +4780,31 @@ function _rtApply(frame) {
   if (_rt.root && _rt.root.length) {
     const rm = _rt.root[Math.min(f, _rt.root.length - 1)];
     if (Array.isArray(rm) && rm.length >= 3) {
+      const s = (typeof poseRootMotionScale === 'number' && isFinite(poseRootMotionScale))
+        ? Math.max(0.1, Math.min(2, poseRootMotionScale)) : 1;
       if (_rt.modelRoot && _rt.modelRootBase) {
         _rt.modelRoot.position.set(
-          _rt.modelRootBase.x + rm[0],
+          _rt.modelRootBase.x + rm[0] * s,
           _rt.modelRootBase.y + rm[1],
-          _rt.modelRootBase.z + rm[2]);
+          _rt.modelRootBase.z + rm[2] * s);
       } else if (_rt.rootBone && _rt.rootRest) {
         _rt.rootBone.position.set(
-          _rt.rootRest.x + rm[0], _rt.rootRest.y + rm[1], _rt.rootRest.z + rm[2]);
+          _rt.rootRest.x + rm[0] * s, _rt.rootRest.y + rm[1], _rt.rootRest.z + rm[2] * s);
       }
     }
   }
+  // Hand-recorded layer overrides on top of the raw clip — without this,
+  // rt-driven imports ignored recorded keys entirely on playback/seek.
+  if (typeof poseApplyUserLayer === 'function' && poseUserKeyframes.length) {
+    const tLayer = (_rt.timelineSync && _rt.frames > 1 && poseDuration > 0)
+      ? (f / (_rt.frames - 1)) * poseDuration
+      : (typeof poseTime === 'number' ? poseTime : 0);
+    poseApplyUserLayer(tLayer);
+  }
   // Foot plant: keep contact feet glued in world XZ. Without this, any
   // leftover mover/bone mismatch reads as skating (classic moonwalk slide).
-  if (_rt.footPlant && _rt.modelRoot) {
+  // Gated by Plant toggle + intensity (same as the keyframe path).
+  if (_rt.footPlant && _rt.modelRoot && posePreviewFootIk && poseFootPlantIntensity > 1e-4) {
     _rtApplyFootPlant(f);
   }
   _rt.frame = f;
@@ -5031,8 +5343,12 @@ const _rtFootMaxCorr = 0.12; // metres — soft clamp per frame
 function _rtApplyFootPlant(f) {
   const fp = _rt.footPlant;
   if (!fp) return;
+  const intensity = (typeof poseFootPlantIntensity === 'number' && isFinite(poseFootPlantIntensity))
+    ? Math.max(0, Math.min(1, poseFootPlantIntensity)) : 1;
+  if (intensity < 1e-4) return;
   if (_rt.modelRoot) _rt.modelRoot.updateMatrixWorld(true);
 
+  const maxCorr = _rtFootMaxCorr * intensity;
   const sides = [
     [fp.lFoot, fp.plantedL, 'lockL'],
     [fp.rFoot, fp.plantedR, 'lockR'],
@@ -5049,13 +5365,13 @@ function _rtApplyFootPlant(f) {
       fp[lockKey] = { x: _rtFootTmp.x, z: _rtFootTmp.z };
       continue;
     }
-    let errX = _rtFootTmp.x - fp[lockKey].x;
-    let errZ = _rtFootTmp.z - fp[lockKey].z;
+    let errX = (_rtFootTmp.x - fp[lockKey].x) * intensity;
+    let errZ = (_rtFootTmp.z - fp[lockKey].z) * intensity;
     const errLen = Math.hypot(errX, errZ);
     if (errLen < 1e-5) continue;
     // Soft clamp so bad plant masks don't yank the leg across the scene.
-    if (errLen > _rtFootMaxCorr) {
-      const s = _rtFootMaxCorr / errLen;
+    if (errLen > maxCorr) {
+      const s = maxCorr / errLen;
       errX *= s;
       errZ *= s;
     }
@@ -5071,6 +5387,130 @@ function _rtApplyFootPlant(f) {
     bone.position.z = _rtFootTargetLocal.z;
   }
   if (_rt.modelRoot) _rt.modelRoot.updateMatrixWorld(true);
+}
+
+// ── Keyframe-path foot plant (anim-import setKeyframes) ───────────────
+// Same world-XZ plant idea as _rtApplyFootPlant, but for the editable
+// keyframe player. Keyframes only drive rotations; we restore foot rest
+// positions before correcting so plant deltas never accumulate.
+function poseClearKfFootPlant() {
+  poseKfFootPlant = null;
+}
+
+function poseBuildKfFootPlant() {
+  poseClearKfFootPlant();
+  if (!poseMode || !poseRootTarget || !poseRootBase || !poseBones?.length) return null;
+  if (poseKeyframes.length < 4) return null;
+  const nameMap = poseBuildBoneNameMap();
+  const lIdx = nameMap.get('SKEL_L_Foot') ?? nameMap.get('SKEL_L_Toe0');
+  const rIdx = nameMap.get('SKEL_R_Foot') ?? nameMap.get('SKEL_R_Toe0');
+  if (lIdx == null || rIdx == null) return null;
+  const lFoot = poseBones[lIdx], rFoot = poseBones[rIdx];
+  if (!lFoot || !rFoot) return null;
+
+  const savedQ = poseBones.map(b => b.quaternion.clone());
+  const savedP = poseBones.map(b => b.position.clone());
+  const savedModel = poseRootTarget.position.clone();
+  const pathL = [], pathR = [];
+  try {
+    for (let i = 0; i < poseKeyframes.length; i++) {
+      const kf = poseKeyframes[i];
+      poseApplySnapshot(kf.bones);
+      // Sample plant intent WITHOUT horizontal travel (body-relative gait),
+      // same as _rtBuildFootPlant holding modelRoot at base.
+      poseRootTarget.position.copy(poseRootBase);
+      if (Array.isArray(kf.root) && kf.root.length >= 3)
+        poseRootTarget.position.y = poseRootBase.y + (kf.root[1] || 0);
+      poseRootTarget.updateMatrixWorld(true);
+      _poseKfFootInv.copy(poseRootTarget.matrixWorld).invert();
+      lFoot.getWorldPosition(_poseFootTmp); _poseFootTmp.applyMatrix4(_poseKfFootInv);
+      pathL.push([_poseFootTmp.x, _poseFootTmp.y, _poseFootTmp.z]);
+      rFoot.getWorldPosition(_poseFootTmp); _poseFootTmp.applyMatrix4(_poseKfFootInv);
+      pathR.push([_poseFootTmp.x, _poseFootTmp.y, _poseFootTmp.z]);
+    }
+  } catch (e) {
+    console.warn('kf foot-plant sample failed', e);
+    return null;
+  } finally {
+    for (let i = 0; i < poseBones.length; i++) {
+      poseBones[i].quaternion.copy(savedQ[i]);
+      poseBones[i].position.copy(savedP[i]);
+    }
+    poseRootTarget.position.copy(savedModel);
+  }
+
+  const plantedL = _rtDetectPlanted(pathL);
+  const plantedR = _rtDetectPlanted(pathR);
+  if (!plantedL && !plantedR) return null;
+  poseKfFootPlant = {
+    lFoot, rFoot, lIdx, rIdx,
+    plantedL, plantedR,
+    lockL: null, lockR: null,
+    keyCount: poseKeyframes.length,
+  };
+  return poseKfFootPlant;
+}
+
+function poseKfFootIndexAtTime(t) {
+  if (!poseKeyframes.length) return 0;
+  if (t <= poseKeyframes[0].time) return 0;
+  if (t >= poseKeyframes[poseKeyframes.length - 1].time) return poseKeyframes.length - 1;
+  let i = 0;
+  while (i < poseKeyframes.length - 1 && poseKeyframes[i + 1].time <= t) i++;
+  // Prefer the nearer key for the plant mask (stance is discrete).
+  const a = poseKeyframes[i], b = poseKeyframes[i + 1];
+  if (!b) return i;
+  return (t - a.time) <= (b.time - t) ? i : i + 1;
+}
+
+function poseApplyKfFootPlant() {
+  const fp = poseKfFootPlant;
+  if (!fp || !posePreviewFootIk || !poseRootMotionPreview) return;
+  if (!poseRootTarget || poseSuppressRootApply) return;
+  const intensity = (typeof poseFootPlantIntensity === 'number' && isFinite(poseFootPlantIntensity))
+    ? Math.max(0, Math.min(1, poseFootPlantIntensity)) : 1;
+  if (intensity < 1e-4) return;
+  // Only meaningful while the ped is travelling — In Place has no skate to fix.
+  const ki = poseKfFootIndexAtTime(poseTime);
+  if (poseRootTarget) poseRootTarget.updateMatrixWorld(true);
+
+  const maxCorr = _poseKfFootMaxCorr * intensity;
+  const sides = [
+    [fp.lFoot, fp.lIdx, fp.plantedL, 'lockL'],
+    [fp.rFoot, fp.rIdx, fp.plantedR, 'lockR'],
+  ];
+  for (const [bone, idx, planted, lockKey] of sides) {
+    if (!bone || !planted || !bone.parent) continue;
+    // Always restore rest translation first — keyframes never write position,
+    // so a prior plant delta would otherwise stick / accumulate.
+    if (idx != null && poseInitialPositions[idx])
+      bone.position.copy(poseInitialPositions[idx]);
+    if (!planted[ki]) {
+      fp[lockKey] = null;
+      continue;
+    }
+    bone.updateWorldMatrix(true, false);
+    bone.getWorldPosition(_poseFootTmp);
+    if (!fp[lockKey]) {
+      fp[lockKey] = { x: _poseFootTmp.x, z: _poseFootTmp.z };
+      continue;
+    }
+    let errX = (_poseFootTmp.x - fp[lockKey].x) * intensity;
+    let errZ = (_poseFootTmp.z - fp[lockKey].z) * intensity;
+    const errLen = Math.hypot(errX, errZ);
+    if (errLen < 1e-5) continue;
+    if (errLen > maxCorr) {
+      const s = maxCorr / errLen;
+      errX *= s;
+      errZ *= s;
+    }
+    _poseKfFootWorld.set(_poseFootTmp.x - errX, _poseFootTmp.y, _poseFootTmp.z - errZ);
+    bone.parent.updateWorldMatrix(true, false);
+    _poseKfFootInv.copy(bone.parent.matrixWorld).invert();
+    _poseKfFootLocal.copy(_poseKfFootWorld).applyMatrix4(_poseKfFootInv);
+    bone.position.set(_poseKfFootLocal.x, _poseKfFootLocal.y, _poseKfFootLocal.z);
+  }
+  if (poseRootTarget) poseRootTarget.updateMatrixWorld(true);
 }
 
 // ══════════════════════════════════════════════════════════════════════
@@ -5841,6 +6281,7 @@ function aimBoneAt(bone, worldTarget, preferChild) {
   bone.quaternion.multiply(_ikTwistNew.invert()).multiply(_ikTwistOld).normalize();
 }
 
+
 const _ikA = new THREE.Vector3();
 const _ikB = new THREE.Vector3();
 const _ikC = new THREE.Vector3();
@@ -6340,18 +6781,19 @@ function refreshPoseJointDots() {
       const cm = h.userData.colorMat;
       if (cm) {
         // Fat cased wire (Group). Selected = white + thicker; when something
-        // else is selected, dim this one so the selection pops (spotlight).
+        // else is selected, dim this one HARD so the selection is the only
+        // thing that reads as highlighted (spotlight).
         const isOn = selectedBones.has(bone);
         const bw = h.userData.baseWidth || 2.5;
         cm.visible = true;
         if (h.userData.casingMat) h.userData.casingMat.visible = true;
         cm.color.setHex(isOn ? 0xFFFFFF : (h.userData.regionColor ?? POSE_JOINT_COLOR));
         cm.linewidth = isOn ? bw + 2.0 : bw;
-        cm.opacity = isOn ? 1.0 : (anySelected ? 0.6 : 0.98);
+        cm.opacity = isOn ? 1.0 : (anySelected ? 0.25 : 0.98);
       } else if (h.material) {
         h.material.visible = true;
-        h.material.opacity = 0.92;
         const isOn = selectedBones.has(bone);
+        h.material.opacity = isOn ? 0.95 : (anySelected ? 0.3 : 0.92);
         h.material.color.setHex(isOn ? POSE_JOINT_COLOR_ACTIVE : (h.userData.regionColor ?? POSE_JOINT_COLOR));
         h.material.needsUpdate = true;
       }
@@ -6484,13 +6926,17 @@ function attachIkHandle(handle) {
   }
   attachIkGizmoForMode('translate');
   postToHost({ kind: 'rig-selected-for-transform', rigId: null });
-  postToHost({
-    kind: 'pose-bone-selected',
-    name: handle.effector ? handle.effector.name : handle.id,
-    index: handle.effector ? poseBones.indexOf(handle.effector) : -1,
-    selection: 1,
-    ik: handle.id,
-  });
+  {
+    const effIdx = handle.effector ? poseBones.indexOf(handle.effector) : -1;
+    postToHost({
+      kind: 'pose-bone-selected',
+      name: handle.effector ? handle.effector.name : handle.id,
+      index: effIdx,
+      selection: effIdx >= 0 ? 1 : 0,
+      indices: effIdx >= 0 ? [effIdx] : [],
+      ik: handle.id,
+    });
+  }
   refreshPoseJointDots();
   refreshIkHandleVisuals();
   updatePoseHud();
@@ -6926,9 +7372,10 @@ window.exitPoseMode = function () {
   updatePoseHud();
   // Wipe timeline state too -- keyframes captured against a previous rig
   // hold bone-index references that no longer point at anything valid.
-  poseKeyframes = [];
+  poseKeyframes = []; poseUserKeyframes = [];
   poseKeyframeSource = null;
   poseBoneSpace = 'glb';
+  poseClearKfFootPlant();
   // History entries hold bone indices from the old rig — popping them
   // against the new one would corrupt the pose. Drop + tell the host.
   poseClearHistory('rig-changed');
@@ -6981,28 +7428,126 @@ window.resetPose = function () {
 
 window.getPose = function () {
   if (!poseMode) return null;
-  return JSON.stringify({
-    fiveos_pose_version: 1,
-    bone_count: poseBones.length,
-    bones: poseBones.map((b, i) => ({
+  // Capture REST world transforms (include male freemode rotateY(π)).
+  // Image→Pose aims in this frame — local-only FK uses authored −Z and
+  // puts arms behind the back. Snap to rest briefly, read matrixWorld,
+  // then restore the live pose so the viewport doesn't flicker.
+  const savedQ = poseBones.map(b => b.quaternion.clone());
+  const savedP = poseBones.map(b => b.position.clone());
+  try {
+    for (let i = 0; i < poseBones.length; i++) {
+      if (poseInitialQuats[i]) poseBones[i].quaternion.copy(poseInitialQuats[i]);
+      if (poseInitialPositions[i]) poseBones[i].position.copy(poseInitialPositions[i]);
+    }
+    if (currentModel) currentModel.updateMatrixWorld(true);
+    else if (poseBones[0]) {
+      let r = poseBones[0];
+      while (r.parent) r = r.parent;
+      r.updateMatrixWorld(true);
+    }
+  } catch (e) { /* best-effort */ }
+
+  const _q = new THREE.Quaternion();
+  const _p = new THREE.Vector3();
+  const _s = new THREE.Vector3();
+  const bonesOut = poseBones.map((b, i) => {
+    b.matrixWorld.decompose(_p, _q, _s);
+    return {
       index: i,
       name: b.name || ('bone_' + i),
       parent: b.parent && b.parent.isBone ? (b.parent.name || '') : '',
       // Local rotation (relative to parent bone). xyzw quaternion order —
       // standard glTF / FBX convention; CodeWalker reads the same order.
-      rot_xyzw: [b.quaternion.x, b.quaternion.y, b.quaternion.z, b.quaternion.w],
+      rot_xyzw: [savedQ[i].x, savedQ[i].y, savedQ[i].z, savedQ[i].w],
       // Initial (rest) rotation, captured at pose-mode entry. Diffing
       // current vs initial lets a future .ycd writer drop unchanged
       // bones from the clip — keeps the file small.
       rest_xyzw: [poseInitialQuats[i].x, poseInitialQuats[i].y, poseInitialQuats[i].z, poseInitialQuats[i].w],
       // Local position + its rest — lets hosts/diagnostics see translation
       // tracks (pelvis height, root motion) the same way as rotations.
-      pos_xyz: [b.position.x, b.position.y, b.position.z],
+      pos_xyz: [savedP[i].x, savedP[i].y, savedP[i].z],
       rest_pos_xyz: poseInitialPositions[i]
         ? [poseInitialPositions[i].x, poseInitialPositions[i].y, poseInitialPositions[i].z]
         : [0, 0, 0],
-    })),
+      // Scene-world REST — Image→Pose aim frame (includes root yaw).
+      world_pos_xyz: [_p.x, _p.y, _p.z],
+      world_rot_xyzw: [_q.x, _q.y, _q.z, _q.w],
+    };
   });
+
+  try {
+    for (let i = 0; i < poseBones.length; i++) {
+      poseBones[i].quaternion.copy(savedQ[i]);
+      poseBones[i].position.copy(savedP[i]);
+    }
+    if (currentModel) currentModel.updateMatrixWorld(true);
+  } catch (e) { /* best-effort */ }
+
+  return JSON.stringify({
+    fiveos_pose_version: 2,
+    bone_count: bonesOut.length,
+    bones: bonesOut,
+  });
+};
+
+// Host multi-select: replace selection with these bone indices.
+// Empty array clears selection (Deselect All).
+window.selectPoseBones = function (indicesJson) {
+  if (!poseMode) return 0;
+  if (transformControls.dragging) return poseSelection.length;
+  let indices;
+  try { indices = JSON.parse(indicesJson || '[]'); }
+  catch { return 0; }
+  if (!Array.isArray(indices)) return 0;
+
+  const next = [];
+  const seen = new Set();
+  for (const raw of indices) {
+    const idx = Number(raw);
+    if (!Number.isInteger(idx) || idx < 0 || idx >= poseBones.length) continue;
+    if (seen.has(idx)) continue;
+    seen.add(idx);
+    const bone = poseBones[idx];
+    if (!bone) continue;
+    const handle = poseJointHandles.find(h =>
+      !h.userData.isPicker && h.userData.poseBone === bone);
+    if (handle && handle.userData.regionHidden) continue;
+    next.push(bone);
+  }
+
+  poseIkActiveHandle = null;
+  if (poseFabrik) poseFabrik.setChainEnablerAll(false);
+  refreshIkHandleVisuals();
+  poseSelection = next;
+  const primary = poseSelection.length ? poseSelection[poseSelection.length - 1] : null;
+  posePickedBone = primary;
+  if (currentModel) currentModel.updateMatrixWorld(true);
+  if (primary) {
+    transformControls.attach(primary);
+    transformControls.setMode('rotate');
+    applyAxisLockToGizmo();
+    gizmoBar.style.display = 'none';
+    updateGizmoSizeFromModel();
+    postToHost({ kind: 'rig-selected-for-transform', rigId: null });
+  } else {
+    transformControls.detach();
+  }
+  refreshPoseJointDots();
+  const idxs = poseSelection.map(b => poseBones.indexOf(b)).filter(i => i >= 0);
+  postToHost({
+    kind: 'pose-bone-selected',
+    name: primary ? (primary.name || '') : '',
+    index: primary ? poseBones.indexOf(primary) : -1,
+    selection: poseSelection.length,
+    indices: idxs,
+  });
+  updatePoseHud();
+  requestRender();
+  return poseSelection.length;
+};
+
+window.clearPoseSelection = function () {
+  return window.selectPoseBones('[]');
 };
 
 window.selectPoseBone = function (index) {
@@ -7257,9 +7802,8 @@ function poseSyncRootBaseFromCurrentPosition() {
 
 function poseApplyPreviewFootIk() {
   if (!posePreviewFootIk || !poseMode || !currentModel) return;
-  // Baked imports (Cascadeur/Mixamo/FBX) already went through C# retarget +
-  // foot-lock. Nudging root Y every frame from foot height fights the clip
-  // and reads as shake/jitter — especially on walk cycles.
+  // Baked imports already ground via C# GroundToFeet — don't nudge root Y.
+  // World-XZ plant for travelling anim-imports is handled by poseApplyKfFootPlant.
   if (poseKeyframeSource === 'anim-import') return;
   if (poseStrips.some(s => {
     const c = poseClips.find(x => x.id === s.clipId);
@@ -7305,11 +7849,14 @@ function poseApplyRoot(rootArr, yaw) {
   // In-place preview keeps the VERTICAL root (crouch / hop — the performance)
   // but drops the HORIZONTAL travel + heading, so the ped dances in place
   // instead of sliding. The full mover stays in the keyframes for export.
+  // poseRootMotionScale dials horizontal travel only (Travel sensitivity).
+  const s = (typeof poseRootMotionScale === 'number' && isFinite(poseRootMotionScale))
+    ? Math.max(0.1, Math.min(2, poseRootMotionScale)) : 1;
   if (Array.isArray(rootArr)) {
     poseRootTarget.position.set(
-      poseRootBase.x + (poseRootMotionPreview ? rootArr[0] : 0),
+      poseRootBase.x + (poseRootMotionPreview ? rootArr[0] * s : 0),
       poseRootBase.y + rootArr[1],
-      poseRootBase.z + (poseRootMotionPreview ? rootArr[2] : 0));
+      poseRootBase.z + (poseRootMotionPreview ? rootArr[2] * s : 0));
   } else {
     poseRootTarget.position.copy(poseRootBase);
   }
@@ -7323,13 +7870,79 @@ function poseApplyRoot(rootArr, yaw) {
 window.poseSetRootMotionPreview = function (enabled) {
   poseRootMotionPreview = enabled !== false;
   try {
+    if (poseKfFootPlant) {
+      poseKfFootPlant.lockL = null;
+      poseKfFootPlant.lockR = null;
+    }
     if (!poseRootMotionPreview && poseRootTarget && poseRootBase) {
       poseRootTarget.position.x = poseRootBase.x;   // drop horizontal travel now,
       poseRootTarget.position.z = poseRootBase.z;   // keep .y (crouch / hop)
       poseApplyRootYaw(undefined);
+      // Restore foot rest positions — plant deltas must not linger in-place.
+      if (poseKfFootPlant) {
+        const sides = [
+          [poseKfFootPlant.lFoot, poseKfFootPlant.lIdx],
+          [poseKfFootPlant.rFoot, poseKfFootPlant.rIdx],
+        ];
+        for (const [bone, idx] of sides) {
+          if (bone && idx != null && poseInitialPositions[idx])
+            bone.position.copy(poseInitialPositions[idx]);
+        }
+      }
+    } else {
+      poseEvaluate(poseTime);
     }
   } catch (e) { /* best effort */ }
   return poseRootMotionPreview;
+};
+
+// Travel sensitivity (0.1–2): scales forward/back/strafe only. Hop/crouch Y
+// stays full strength. Live export samples read the scaled model position so
+// preview and .ycd stay WYSIWYG.
+window.poseSetRootMotionScale = function (scale) {
+  const s = Number(scale);
+  poseRootMotionScale = (isFinite(s) ? Math.max(0.1, Math.min(2, s)) : 1);
+  if (poseKfFootPlant) {
+    poseKfFootPlant.lockL = null;
+    poseKfFootPlant.lockR = null;
+  }
+  try {
+    if (poseMode && poseKeyframes.length) poseEvaluate(poseTime);
+    else if (_rt && _rt.tracks && _rt.tracks.length)
+      _rtApply(typeof _rt.frame === 'number' ? _rt.frame : 0);
+  } catch (e) { /* best effort */ }
+  requestRender();
+  return poseRootMotionScale;
+};
+
+/// Plant toggle + intensity (0..1). Off / 0 restores foot rest translations
+/// so dialing down clears ankle collapse immediately.
+window.poseSetFootPlant = function (enabled, intensity) {
+  posePreviewFootIk = !!enabled;
+  const n = Number(intensity);
+  poseFootPlantIntensity = (isFinite(n) ? Math.max(0, Math.min(1, n)) : 0.5);
+  if (poseKfFootPlant) {
+    poseKfFootPlant.lockL = null;
+    poseKfFootPlant.lockR = null;
+    // Restore rest translations when plant is off so prior XZ pulls don't stick.
+    if (!posePreviewFootIk || poseFootPlantIntensity < 1e-4) {
+      for (const idx of [poseKfFootPlant.lIdx, poseKfFootPlant.rIdx]) {
+        if (idx != null && poseBones[idx] && poseInitialPositions[idx])
+          poseBones[idx].position.copy(poseInitialPositions[idx]);
+      }
+    }
+  }
+  if (_rt && _rt.footPlant) {
+    _rt.footPlant.lockL = null;
+    _rt.footPlant.lockR = null;
+  }
+  try {
+    if (poseMode && poseKeyframes.length) poseEvaluate(poseTime);
+    else if (_rt && _rt.tracks && _rt.tracks.length)
+      _rtApply(typeof _rt.frame === 'number' ? _rt.frame : 0);
+  } catch (e) { /* best effort */ }
+  requestRender();
+  return { enabled: posePreviewFootIk, intensity: poseFootPlantIntensity };
 };
 
 // Pose save / apply use window.getPose + window.applyPose (defined
@@ -7504,7 +8117,7 @@ window.poseBakeToClip = function (name, metadata) {
     sourceData: metadata && metadata.sourceData,
   });
   window.poseAddStrip(clipId, firstTime);
-  poseKeyframes = [];
+  poseKeyframes = []; poseUserKeyframes = [];
   postToHost({
     kind: 'pose-timeline-update',
     keyframes: [],
@@ -7863,27 +8476,127 @@ function posePublicEditableKey(k) {
     trackId: 'track-pose-keys',
     time: k.time,
     ease: k.ease || 'auto',
+    src: k.src || 'clip',
     root: poseCloneTimelineData(k.root || null),
     bones: poseCloneTimelineData(k.bones || []),
   };
 }
 
+function poseUserKeyMarkersForBone(boneName, trackId) {
+  if (!boneName || !poseUserKeyframes.length) return [];
+  const out = [];
+  for (const k of poseUserKeyframes) {
+    if (!Array.isArray(k.bones)) continue;
+    let hit = false;
+    for (const bone of k.bones) {
+      let name = null;
+      if (bone && bone.i != null && poseBones[bone.i] && poseBones[bone.i].name)
+        name = poseBones[bone.i].name;
+      else if (bone && typeof bone.name === 'string' && bone.name)
+        name = bone.name;
+      if (name === boneName) { hit = true; break; }
+    }
+    if (!hit) continue;
+    const kid = poseEnsureKeyId(k);
+    out.push({
+      id: `pose-bone:${boneName}:${kid}`,
+      trackId: trackId || ('bone-keys-user:' + boneName),
+      time: k.time,
+      ease: k.ease || 'auto',
+      src: 'user',
+    });
+  }
+  return out;
+}
+
 function poseClipTrackSnapshot(c, trackMeta) {
   const track = c.clip?.tracks?.[trackMeta.index];
   const times = Array.from(track?.times || []);
+  const boneName = (trackMeta.name || track?.name || '')
+    .replace(/\.(quaternion|position|scale)$/, '');
+  const keys = times.map((time, index) => ({
+    id: trackMeta.keyIds[index],
+    trackId: trackMeta.id,
+    time,
+    ease: trackMeta.eases?.[index] || 'auto',
+    src: 'clip',
+  }));
+  for (const uk of poseUserKeyMarkersForBone(boneName, trackMeta.id)) keys.push(uk);
   return {
     id: trackMeta.id,
     clipId: c.id,
     name: trackMeta.name,
     valueSize: trackMeta.valueSize,
-    keyCount: times.length,
-    keys: times.map((time, index) => ({
-      id: trackMeta.keyIds[index],
-      trackId: trackMeta.id,
-      time,
-      ease: trackMeta.eases?.[index] || 'auto',
-    })),
+    keyCount: keys.length,
+    keys,
   };
+}
+
+// Editable imports land in poseKeyframes and clear poseClips — without this
+// expansion the Keys dope sheet only ever saw a Summary lane (or nothing).
+function poseExpandEditableBoneTracks() {
+  if (!poseKeyframes.length && !poseUserKeyframes.length) return [];
+  // Clip-track mode publishes the clip's per-bone lanes itself — suppress
+  // only the CLIP expansion there. USER lanes must ALWAYS be emitted, in
+  // every mode, or recorded keys are invisible on the sheet.
+  const clipTracksExist = poseClips.some(c => (c.tracks || []).length > 0);
+  // Hand-recorded keys live in their OWN store and get their OWN lane per
+  // bone (bone-keys-user:NAME) under the clip lane — user animation never
+  // shares a line (or a store) with the imported clip.
+  const byLane = new Map(); // 'clip|name' / 'user|name' -> {name, user, keys[]}
+  const collect = (store, srcTag) => {
+    for (const k of store) {
+      const kid = poseEnsureKeyId(k);
+      const ease = k.ease || 'auto';
+      for (const bone of k.bones || []) {
+        let name = null;
+        if (bone && bone.i != null && poseBones[bone.i] && poseBones[bone.i].name)
+          name = poseBones[bone.i].name;
+        else if (bone && typeof bone.name === 'string' && bone.name)
+          name = bone.name;
+        if (!name) continue;
+        const laneKey = srcTag + '|' + name;
+        let lane = byLane.get(laneKey);
+        if (!lane) { lane = { name, user: srcTag === 'user', keys: [] }; byLane.set(laneKey, lane); }
+        lane.keys.push({
+          id: `pose-bone:${name}:${kid}`,
+          trackId: (lane.user ? 'bone-keys-user:' : 'bone-keys-pose:') + name,
+          time: k.time, ease, src: srcTag,
+        });
+      }
+    }
+  };
+  if (!clipTracksExist) collect(poseKeyframes, 'clip');
+  collect(poseUserKeyframes, 'user');
+  const clipBoneNames = new Set();
+  if (clipTracksExist) {
+    for (const c of poseClips) {
+      for (const meta of c.tracks || []) {
+        const n = (meta.name || '').replace(/\.(quaternion|position|scale)$/, '');
+        if (n) clipBoneNames.add(n);
+      }
+    }
+  }
+  const out = [];
+  const seen = new Set();
+  for (const [laneKey, lane] of byLane) {
+    if (seen.has(laneKey)) continue;
+    for (const key of ['clip|' + lane.name, 'user|' + lane.name]) {
+      const l = byLane.get(key);
+      if (!l || seen.has(key)) continue;
+      if (l.user && clipBoneNames.has(l.name)) continue;
+      seen.add(key);
+      out.push({
+        id: (l.user ? 'bone-keys-user:' : 'bone-keys-pose:') + l.name,
+        type: 'bone-keys',
+        name: l.name,
+        depth: 1,
+        parentId: 'track-pose-keys',
+        keys: l.keys,
+      });
+    }
+  }
+  return out;
 }
 
 function poseRefreshClipTrackMetadata(c, previousTracks) {
@@ -8004,12 +8717,22 @@ window.poseGetTimelineDocument = function () {
         type: 'root-motion',
         name: 'Root Motion',
         depth: 0,
-        keys: poseClips.flatMap(c => (c.roots || []).map((root, index) => ({
-          id: `root-${c.id}-key-${index + 1}`,
-          clipId: c.id,
-          time: root.t,
-          ease: 'linear',
-        }))),
+        keys: [
+          ...poseClips.flatMap(c => (c.roots || []).map((root, index) => ({
+            id: `root-${c.id}-key-${index + 1}`,
+            clipId: c.id,
+            time: root.t,
+            ease: 'linear',
+          }))),
+          // Editable poseKeyframes carry root travel directly (clips cleared).
+          ...(!poseClips.some(c => (c.roots || []).length)
+            ? poseKeyframes.filter(k => Array.isArray(k.root) && k.root.length >= 3).map(k => ({
+                id: `root-pose-${poseEnsureKeyId(k)}`,
+                time: k.time,
+                ease: 'linear',
+              }))
+            : []),
+        ],
       },
       ...poseClips.flatMap(c => (c.tracks || []).map(track => ({
         ...poseClipTrackSnapshot(c, track),
@@ -8021,6 +8744,7 @@ window.poseGetTimelineDocument = function () {
         locked: !!track.locked,
         muted: !!track.muted,
       }))),
+      ...poseExpandEditableBoneTracks(),
     ],
     clips,
     strips: poseStrips.map(posePublicStrip),
@@ -8036,6 +8760,7 @@ function poseCaptureTimelineState() {
   poseEnsureAllKeyIds();
   return {
     keyframes: poseCloneTimelineData(poseKeyframes),
+    userKeyframes: poseCloneTimelineData(poseUserKeyframes),
     clipKeys: poseClips
       .filter(c => Array.isArray(c.editableKeys))
       .map(c => ({ clipId: c.id, keys: poseCloneTimelineData(c.editableKeys) })),
@@ -8058,6 +8783,7 @@ function poseRestoreTimelineState(state) {
     if (s.action) s.action.stop();
   }
   poseKeyframes = poseCloneTimelineData(state.keyframes || []);
+  poseUserKeyframes = poseCloneTimelineData(state.userKeyframes || []);
   poseEnsureAllKeyIds();
   for (const clipState of state.clipKeys || []) {
     const c = poseClips.find(x => String(x.id) === String(clipState.clipId));
@@ -8207,6 +8933,7 @@ window.poseGetClipSourceData = function (clipId) {
 
 function poseEditableKeyRefs() {
   const refs = poseKeyframes.map(key => ({ key, clip: null }));
+  for (const key of poseUserKeyframes) refs.push({ key, clip: null });
   for (const clip of poseClips) {
     for (const key of clip.editableKeys || []) refs.push({ key, clip });
   }
@@ -8239,6 +8966,44 @@ function poseWriteClipTrackEntries(clip, meta, entries) {
   if (!track) return false;
   const valueSize = typeof track.getValueSize === 'function' ? track.getValueSize() : meta.valueSize;
   const sorted = entries.slice().sort((a, b) => a.time - b.time);
+  if (sorted.length === 0) {
+    // Cutting the LAST key frees the bone entirely: remove the track from
+    // the clip (an empty THREE.KeyframeTrack NaNs the clip duration and
+    // mangles the skeleton on play). The bone is then owned by the pose
+    // layer / newly recorded keys.
+    //
+    // rt-driven imports (YCD / retargeted FBX) play from the _rt raw
+    // sample player, NOT this clip — drop the bone there too, or playback
+    // keeps stomping it and the cut looks like it did nothing.
+    const cutBoneName = (/^(.*)\.(quaternion|position|scale)$/.exec(track.name || '') || [])[1];
+    if (cutBoneName && typeof _rt !== 'undefined' && _rt && Array.isArray(_rt.tracks)) {
+      for (let i = _rt.tracks.length - 1; i >= 0; i--) {
+        const tb = _rt.tracks[i] && _rt.tracks[i].bone;
+        if (tb && tb.name === cutBoneName) _rt.tracks.splice(i, 1);
+      }
+    }
+    const removedIndex = meta.index;
+    clip.clip.tracks.splice(removedIndex, 1);
+    const metas = clip.tracks || [];
+    const mi = metas.indexOf(meta);
+    if (mi >= 0) metas.splice(mi, 1);
+    for (const m of metas) if (m.index > removedIndex) m.index--;
+    clip.rawTracks = null;
+    if (clip.clip.userData) clip.clip.userData.rawTracks = null;
+    // Keep the previous duration when the clip just lost its final track —
+    // resetDuration over zero tracks would collapse it (and every strip).
+    if (clip.clip.tracks.length > 0 && typeof clip.clip.resetDuration === 'function') {
+      clip.clip.resetDuration();
+      clip.duration = clip.clip.duration;
+    }
+    for (const strip of poseStrips) {
+      if (String(strip.clipId) !== String(clip.id)) continue;
+      strip.sourceEnd = Math.min(strip.sourceEnd, clip.duration);
+      strip.duration = Math.min(strip.duration, Math.max(0.05, strip.sourceEnd - strip.sourceStart));
+      if (strip.action) { strip.action.stop(); strip.action = null; }
+    }
+    return true;
+  }
   const Times = track.times.constructor;
   const Values = track.values.constructor;
   track.times = new Times(sorted.map(entry => entry.time));
@@ -8302,6 +9067,34 @@ window.hostTimelineCommand = function (commandOrJson) {
 
   if (op === 'snapshot' || op === 'requestSnapshot' || op === 'getDocument')
     return { ok: true, op, document: window.poseGetTimelineDocument() };
+  if (op === 'captureState' || op === 'captureSession')
+    return { ok: true, op, capture: poseCaptureTimelineState() };
+  if (op === 'restoreState' || op === 'restoreSession') {
+    const state = command.state || command.capture || command.payload?.state || command.payload;
+    const ok = poseRestoreTimelineState(state);
+    return { ok: !!ok, op, document: window.poseGetTimelineDocument() };
+  }
+  if (op === 'clearTimeline' || op === 'newDocument') {
+    for (const s of poseStrips) {
+      try { if (s.action) s.action.stop(); } catch (e) {}
+    }
+    poseStrips = [];
+    poseKeyframes = []; poseUserKeyframes = [];
+    poseDuration = 4;
+    poseTime = 0;
+    posePlaying = false;
+    postStripsUpdate();
+    postToHost({
+      kind: 'pose-timeline-update',
+      keyframes: [],
+      keyIds: [],
+      time: 0, duration: poseDuration, fps: poseFps,
+      playing: false, loop: poseLoop,
+    });
+    try { if (typeof poseEvaluate === 'function') poseEvaluate(0); } catch (e) {}
+    requestRender();
+    return { ok: true, op, document: window.poseGetTimelineDocument() };
+  }
   if (op === 'openClip' || op === 'openStripClip') {
     const dopeSheet = window.poseOpenStripClip(
       poseNormalTimelineId(command.stripId ?? command.id ?? command.ids?.[0]));
@@ -8403,56 +9196,231 @@ window.hostTimelineCommand = function (commandOrJson) {
       const at = +(command.time != null ? command.time : poseTime).toFixed(3);
       const trackIds = poseIdSet(command.ids || command.trackIds);
       if (command.fullPose || trackIds.size === 0 || trackIds.has('track-pose-keys')) {
-        const snapshot = poseSnapshot();
-        const existing = poseKeyframes.find(k => Math.abs(k.time - at) < 1e-3);
-        if (existing) {
-          existing.bones = snapshot;
-          existing.ease = existing.ease || 'auto';
-        } else {
-          const key = { time: at, bones: snapshot, root: null, ease: 'auto' };
-          poseEnsureKeyId(key);
-          poseKeyframes.push(key);
-          poseKeyframes.sort((a, b) => a.time - b.time);
-        }
+        window.poseAddKeyframe(null, at);
         return 1;
       }
-      let added = 0;
+      const boneIdx = [];
       const boneMap = poseBuildBoneNameMap();
+      const pushBone = (nameOrIdx) => {
+        if (typeof nameOrIdx === 'number' && poseBones[nameOrIdx]) {
+          if (!boneIdx.includes(nameOrIdx)) boneIdx.push(nameOrIdx);
+          return;
+        }
+        if (typeof nameOrIdx !== 'string' || !nameOrIdx) return;
+        const i = boneMap.has(nameOrIdx) ? boneMap.get(nameOrIdx) : -1;
+        if (i >= 0 && !boneIdx.includes(i)) boneIdx.push(i);
+      };
+      for (const id of trackIds) {
+        const s = String(id);
+        if (s.startsWith('bone-keys-user:')) pushBone(s.slice('bone-keys-user:'.length));
+        else if (s.startsWith('bone-keys-pose:')) pushBone(s.slice('bone-keys-pose:'.length));
+        else if (s.startsWith('bone:')) {
+          const n = parseInt(s.slice(5), 10);
+          if (Number.isFinite(n)) pushBone(n);
+        }
+      }
       for (const clip of poseClips) {
         for (const meta of clip.tracks || []) {
           if (!trackIds.has(String(meta.id)) || meta.locked) continue;
           const track = clip.clip?.tracks?.[meta.index];
-          if (!track) continue;
-          const match = /^(.*)\.(quaternion|position|scale)$/.exec(track.name || '');
-          const bone = poseBones[boneMap.get(match ? match[1] : track.name)];
-          let value;
-          if (bone && match?.[2] === 'quaternion')
-            value = [bone.quaternion.x, bone.quaternion.y, bone.quaternion.z, bone.quaternion.w];
-          else if (bone && match?.[2] === 'position')
-            value = [bone.position.x, bone.position.y, bone.position.z];
-          else if (bone && match?.[2] === 'scale')
-            value = [bone.scale.x, bone.scale.y, bone.scale.z];
-          else
-            value = Array.from(track.createInterpolant().evaluate(at));
-          const entries = poseTrackEntries(clip, meta);
-          entries.push({
-            id: `${meta.id}-key-${poseKeyNextId++}`,
-            time: at, ease: 'auto', value,
-          });
-          poseWriteClipTrackEntries(clip, meta, entries);
-          added++;
+          const match = track && /^(.*)\.(quaternion|position|scale)$/.exec(track.name || '');
+          if (match) pushBone(match[1]);
+          else if (meta.name) pushBone(String(meta.name).replace(/\.(quaternion|position|scale)$/, ''));
         }
       }
-      return added;
+      if (boneIdx.length > 0) {
+        window.poseAddKeyframe(boneIdx, at);
+        return boneIdx.length;
+      }
+      return 0;
+    }
+    if (op === 'splitAt') {
+      // Blender-style SPLIT: carve a ~2.5-frame gap at the playhead so the
+      // lane becomes two independent pieces (the host renders bars per
+      // contiguous run and drags them separately). Nothing else is deleted.
+      const at = +(command.time != null ? command.time : poseTime);
+      if (!(at > 1e-4)) return { ok: false, op, reason: 'playhead-at-zero' };
+      const eps = 1e-4;
+      const halfGap = 1.25 / (poseFps || 30);
+      const inWindow = (t) => t > at - halfGap - eps && t < at + halfGap + eps;
+      let removed = 0;
+      const splitBoneSet = Array.isArray(command.bones) && command.bones.length
+        ? new Set(command.bones.map(String)) : null;
+      const boneNameOf = (b) => {
+        if (b && b.i != null && poseBones[b.i] && poseBones[b.i].name) return poseBones[b.i].name;
+        if (b && typeof b.name === 'string' && b.name) return b.name;
+        return null;
+      };
+      const splitStores = [
+        { get: () => poseKeyframes, set: (v) => { poseKeyframes = v; } },
+        { get: () => poseUserKeyframes, set: (v) => { poseUserKeyframes = v; } },
+      ];
+      if (splitBoneSet) {
+        for (const store of splitStores) {
+          for (const k of store.get()) {
+            if (!inWindow(k.time) || !Array.isArray(k.bones)) continue;
+            const n = k.bones.length;
+            k.bones = k.bones.filter(b => {
+              const name = boneNameOf(b);
+              return !(name && splitBoneSet.has(name));
+            });
+            removed += n - k.bones.length;
+          }
+          store.set(store.get().filter(k =>
+            (Array.isArray(k.bones) && k.bones.length > 0) || k.root));
+        }
+      } else {
+        for (const store of splitStores) {
+          const before = store.get().length;
+          store.set(store.get().filter(k => !inWindow(k.time)));
+          removed += before - store.get().length;
+        }
+      }
+      for (const clip of poseClips) {
+        for (const meta of (clip.tracks || []).slice()) {
+          const trackName = clip.clip?.tracks?.[meta.index]?.name || '';
+          const boneName = (/^(.*)\.(quaternion|position|scale)$/.exec(trackName) || [])[1];
+          if (splitBoneSet && (!boneName || !splitBoneSet.has(boneName))) continue;
+          const entries = poseTrackEntries(clip, meta);
+          const kept = entries.filter(en => !inWindow(en.time));
+          if (kept.length !== entries.length && kept.length > 0) {
+            removed += entries.length - kept.length;
+            poseWriteClipTrackEntries(clip, meta, kept);
+          }
+        }
+      }
+      try { if (typeof poseEvaluate === 'function') poseEvaluate(poseTime); } catch (e) {}
+      requestRender();
+      fosTelemetry.info('timeline', `split at ${at.toFixed(3)}s`, { removed, bones: splitBoneSet ? splitBoneSet.size : 0 });
+      return { ok: true, op, removed, document: window.poseGetTimelineDocument() };
+    }
+    if (op === 'cutAfter') {
+      // Blender/VSE-style cut: chop the animation at the playhead — every
+      // key/strip after it is discarded (duration is kept so new keys can
+      // be recorded in the freed space). Works across all three stores:
+      // pose keyframes, strips, and the _rt raw sample player.
+      const at = +(command.time != null ? command.time : poseTime);
+      if (!(at > 1e-4)) return { ok: false, op, reason: 'playhead-at-zero' };
+      const eps = 1e-4;
+      let removed = 0;
+      // Selected-bone scope: cut ONLY those bones' keys after the playhead —
+      // strip them from later pose keyframes and later clip-track entries.
+      // The rest of the rig keeps its animation.
+      const cutBoneSet = Array.isArray(command.bones) && command.bones.length
+        ? new Set(command.bones.map(String)) : null;
+      if (cutBoneSet) {
+        const boneNameOf = (b) => {
+          if (b && b.i != null && poseBones[b.i] && poseBones[b.i].name) return poseBones[b.i].name;
+          if (b && typeof b.name === 'string' && b.name) return b.name;
+          return null;
+        };
+        for (const k of poseKeyframes) {
+          if (k.time <= at + eps || !Array.isArray(k.bones)) continue;
+          const n = k.bones.length;
+          k.bones = k.bones.filter(b => {
+            const name = boneNameOf(b);
+            return !(name && cutBoneSet.has(name));
+          });
+          removed += n - k.bones.length;
+        }
+        poseKeyframes = poseKeyframes.filter(k =>
+          (Array.isArray(k.bones) && k.bones.length > 0) || k.root);
+        for (const clip of poseClips) {
+          for (const meta of (clip.tracks || []).slice()) {
+            const trackName = clip.clip?.tracks?.[meta.index]?.name || '';
+            const boneName = (/^(.*)\.(quaternion|position|scale)$/.exec(trackName) || [])[1];
+            if (!boneName || !cutBoneSet.has(boneName)) continue;
+            const entries = poseTrackEntries(clip, meta);
+            const kept = entries.filter(en => en.time <= at + eps);
+            if (kept.length !== entries.length) {
+              removed += entries.length - kept.length;
+              poseWriteClipTrackEntries(clip, meta, kept);
+            }
+          }
+        }
+        try { if (typeof poseEvaluate === 'function') poseEvaluate(Math.min(poseTime, at)); } catch (e) {}
+        requestRender();
+        fosTelemetry.info('timeline', `cut ${cutBoneSet.size} bone(s) at ${at.toFixed(3)}s`, { removed });
+        return { ok: true, op, removed, document: window.poseGetTimelineDocument() };
+      }
+      const beforeKf = poseKeyframes.length + poseUserKeyframes.length;
+      poseKeyframes = poseKeyframes.filter(k => k.time <= at + eps);
+      poseUserKeyframes = poseUserKeyframes.filter(k => k.time <= at + eps);
+      removed += beforeKf - poseKeyframes.length - poseUserKeyframes.length;
+      for (let i = poseStrips.length - 1; i >= 0; i--) {
+        const s = poseStrips[i];
+        if (s.start >= at - eps) {
+          try { if (s.action) s.action.stop(); } catch (e) {}
+          poseStrips.splice(i, 1);
+          removed++;
+        } else if (s.start + s.duration > at + eps) {
+          s.duration = Math.max(0.05, at - s.start);
+          s.sourceEnd = Math.min(s.sourceEnd, s.sourceStart + s.duration * (s.timeScale || 1));
+          try { if (s.action) { s.action.stop(); s.action = null; } } catch (e) {}
+          removed++;
+        }
+      }
+      if (_rt && _rt.frames > 1) {
+        const fps = _rt.fps || poseFps || 30;
+        const f = Math.max(1, Math.round(at * fps) + 1);
+        if (f < _rt.frames) { _rt.frames = f; removed++; }
+      }
+      try { postStripsUpdate(); } catch (e) {}
+      try { if (typeof poseEvaluate === 'function') poseEvaluate(Math.min(poseTime, at)); } catch (e) {}
+      requestRender();
+      fosTelemetry.info('timeline', `cut at ${at.toFixed(3)}s`, { removed });
+      return { ok: true, op, removed, document: window.poseGetTimelineDocument() };
     }
     if (op === 'deleteKeys') {
       const ids = poseIdSet(command.keyIds || command.ids);
       const times = new Set((command.times || []).map(t => (+t).toFixed(4)));
       let removed = 0;
-      const before = poseKeyframes.length;
-      poseKeyframes = poseKeyframes.filter(k =>
-        !ids.has(String(poseEnsureKeyId(k))) && !times.has((+k.time).toFixed(4)));
-      removed += before - poseKeyframes.length;
+      // Synthetic per-bone dope ids ("pose-bone:NAME:KEYID") come from the
+      // expanded editable-keys lanes (poseExpandEditableBoneTracks) — they
+      // are views into full-pose keyframes, so cut THAT BONE out of the
+      // matching keyframes instead of deleting the keyframe (which would
+      // cut every bone). Greedy name group: bone names may contain ':'
+      // (mixamorig:), key ids never do.
+      const perBoneCuts = new Map(); // keyId -> Set(boneName)
+      for (const rawId of ids) {
+        const m = /^pose-bone:(.*):([^:]+)$/.exec(String(rawId));
+        if (!m) continue;
+        let set = perBoneCuts.get(m[2]);
+        if (!set) { set = new Set(); perBoneCuts.set(m[2], set); }
+        set.add(m[1]);
+      }
+      const kfStores = [
+        { get: () => poseKeyframes, set: (v) => { poseKeyframes = v; } },
+        { get: () => poseUserKeyframes, set: (v) => { poseUserKeyframes = v; } },
+      ];
+      if (perBoneCuts.size) {
+        for (const store of kfStores) {
+          for (const k of store.get()) {
+            const cutBones = perBoneCuts.get(String(poseEnsureKeyId(k)));
+            if (!cutBones || !Array.isArray(k.bones)) continue;
+            const countBefore = k.bones.length;
+            k.bones = k.bones.filter(b => {
+              let name = null;
+              if (b && b.i != null && poseBones[b.i] && poseBones[b.i].name)
+                name = poseBones[b.i].name;
+              else if (b && typeof b.name === 'string' && b.name)
+                name = b.name;
+              return !(name && cutBones.has(name));
+            });
+            removed += countBefore - k.bones.length;
+          }
+          // Keyframes stripped of every bone (and with no root data) carry
+          // nothing — drop them so empty diamonds don't linger.
+          store.set(store.get().filter(k =>
+            (Array.isArray(k.bones) && k.bones.length > 0) || k.root));
+        }
+      }
+      for (const store of kfStores) {
+        const before = store.get().length;
+        store.set(store.get().filter(k =>
+          !ids.has(String(poseEnsureKeyId(k))) && !times.has((+k.time).toFixed(4))));
+        removed += before - store.get().length;
+      }
       const changedClips = new Set();
       for (const c of poseClips) {
         if (!Array.isArray(c.editableKeys)) continue;
@@ -8504,6 +9472,9 @@ window.hostTimelineCommand = function (commandOrJson) {
         trackById.set(String(ref.id), ref);
       const trackEntryCache = new Map(); // `${clipId}:${meta.id}` → entries
       for (const move of moves) {
+        // Per-bone lane ids normalize to their parent pose keyframe.
+        const laneMatch = /^pose-bone:(?:.*):([^:]+)$/.exec(String(move.id));
+        if (laneMatch) move.id = laneMatch[1];
         const ref = editableById.get(String(move.id));
         if (ref) {
           const k = ref.key;
@@ -8680,7 +9651,15 @@ window.hostTimelineCommand = function (commandOrJson) {
     }
     if (op === 'setEase') {
       let count = 0;
-      const keyIds = poseIdSet(command.keyIds || command.ids);
+      // Per-bone lane ids ("pose-bone:NAME:KEYID") are views into the pose
+      // keyframe stores — normalize to the parent keyframe id, or easing
+      // those lanes is a silent no-op.
+      const rawKeyIds = poseIdSet(command.keyIds || command.ids);
+      const keyIds = new Set();
+      for (const raw of rawKeyIds) {
+        const m = /^pose-bone:(?:.*):([^:]+)$/.exec(String(raw));
+        keyIds.add(m ? m[1] : String(raw));
+      }
       const validEase = ['auto', 'linear', 'in', 'out', 'hold'];
       const ease = command.ease || command.mode || 'auto';
       if (!validEase.includes(ease)) return 0;
@@ -8976,35 +9955,61 @@ function poseEvaluateStrips(t) {
   return wroteAny;
 }
 
-window.poseAddKeyframe = function () {
+window.poseAddKeyframe = function (boneFilter, atTime) {
   if (!poseMode) return null;
   return commitKeyframesMutation('add-keyframe', () => {
     poseKeyframeSource = 'editor';
     poseBoneSpace = 'glb';
-    const snap = poseSnapshot();
-    // Replace if a keyframe already exists at this time (snapped to frame).
-    const t = +poseTime.toFixed(3);
-    const existing = poseKeyframes.findIndex(k => Math.abs(k.time - t) < 1e-3);
+    let snap = poseSnapshot();
+    const filter = Array.isArray(boneFilter) ? boneFilter : null;
+    const sparse = !!(filter && filter.length > 0);
+    if (sparse) {
+      const wantIdx = new Set();
+      const wantName = new Set();
+      for (const f of filter) {
+        if (typeof f === 'number' && Number.isFinite(f)) wantIdx.add(f | 0);
+        else if (typeof f === 'string' && f) wantName.add(f);
+      }
+      snap = snap.filter((e) => {
+        if (wantIdx.has(e.i)) return true;
+        const n = poseBones[e.i] && poseBones[e.i].name;
+        return !!(n && wantName.has(n));
+      });
+      if (!snap.length) return poseUserKeyframes.length;
+    }
+    const t = (atTime != null && Number.isFinite(+atTime))
+      ? +(+atTime).toFixed(3)
+      : +poseTime.toFixed(3);
+    const existing = poseUserKeyframes.findIndex(k => Math.abs(k.time - t) < 1e-3);
     if (existing >= 0) {
-      const old = poseKeyframes[existing];
-      poseKeyframes[existing] = {
+      const old = poseUserKeyframes[existing];
+      let bones = snap;
+      if (sparse && Array.isArray(old.bones) && old.bones.length) {
+        const byI = new Map();
+        for (const b of old.bones) {
+          if (b && b.i != null) byI.set(b.i, b);
+        }
+        for (const e of snap) byI.set(e.i, e);
+        bones = Array.from(byI.values());
+      }
+      poseUserKeyframes[existing] = {
         id: poseEnsureKeyId(old),
         time: t,
-        bones: snap,
+        bones,
         root: old.root || null,
         ease: old.ease || 'auto',
+        src: 'user',
       };
     } else {
-      const key = { time: t, bones: snap, ease: 'auto' };
+      const key = { time: t, bones: snap, ease: 'auto', src: 'user' };
       poseEnsureKeyId(key);
-      poseKeyframes.push(key);
-      poseKeyframes.sort((a, b) => a.time - b.time);
+      poseUserKeyframes.push(key);
+      poseUserKeyframes.sort((a, b) => a.time - b.time);
     }
+    poseTime = Math.max(0, Math.min(poseDuration, t));
     postToHost({ kind: 'pose-timeline-update', keyframes: poseKeyframes.map(k => ({ time: k.time, id: k.id, ease: k.ease || 'auto' })), time: poseTime, duration: poseDuration, fps: poseFps, playing: posePlaying });
-    // A new key may have just become this frame's prev/next neighbour,
-    // so the onion ghosts need to re-pick targets.
     poseUpdateOnionSkin();
-    return poseKeyframes.length;
+    return poseUserKeyframes.length;
   });
 };
 
@@ -9024,9 +10029,10 @@ window.poseDeleteCurrentKeyframe = function () {
 
 window.poseClearKeyframes = function () {
   return commitKeyframesMutation('clear-keyframes', () => {
-    poseKeyframes = [];
+    poseKeyframes = []; poseUserKeyframes = [];
     poseKeyframeSource = null;
     poseBoneSpace = 'glb';
+    poseClearKfFootPlant();
     fosTelemetry.info('timeline', 'all keyframes cleared');
     postToHost({ kind: 'pose-timeline-update', keyframes: [], time: poseTime, duration: poseDuration, fps: poseFps, playing: posePlaying });
   });
@@ -9047,9 +10053,10 @@ window.poseClearAll = function () {
   poseStripsResetMixer();
   poseStrips = [];
   poseClips = [];
-  poseKeyframes = [];
+  poseKeyframes = []; poseUserKeyframes = [];
   poseKeyframeSource = null;
   poseBoneSpace = 'glb';
+  poseClearKfFootPlant();
   poseTime = 0;
   // resetPose() no-ops unless poseMode is on, and pushes its own undo
   // entry — clearing an already-bind pose stays off the history stack.
@@ -9105,45 +10112,6 @@ window.poseMoveKeyframe = function (fromTime, toTime) {
   });
 };
 
-// Apply a pose blob to the current rig. Used by the custom-pose
-// library (host loads a saved JSON, calls this to restore it). Matches
-// the same `bones: [{name, rot_xyzw}]` shape that getPose() emits.
-window.applyPose = function (payloadOrJson) {
-  if (!poseMode) return 0;
-  let payload = payloadOrJson;
-  if (typeof payload === 'string') {
-    try { payload = JSON.parse(payload); }
-    catch (e) {
-      fosTelemetry.err('error', 'applyPose: bad JSON', { msg: String(e) });
-      return 0;
-    }
-  }
-  if (!payload || !Array.isArray(payload.bones)) {
-    fosTelemetry.warn('pose', 'applyPose: no bones array');
-    return 0;
-  }
-  const before = snapshotAllPoseQuats();
-  const nameToBone = new Map();
-  for (const b of poseBones) nameToBone.set(b.name, b);
-
-  let applied = 0, missing = 0;
-  for (const entry of payload.bones) {
-    const bone = nameToBone.get(entry.name);
-    if (!bone) { missing++; continue; }
-    const q = entry.rot_xyzw;
-    if (!Array.isArray(q) || q.length < 4) continue;
-    bone.quaternion.set(q[0], q[1], q[2], q[3]);
-    applied++;
-  }
-  if (applied > 0) {
-    const after = snapshotAllPoseQuats();
-    pushHistory({ kind: 'reset', payload: { before, after } });
-  }
-  fosTelemetry.info('pose', `applyPose: ${applied} applied, ${missing} missing`);
-  postToHost({ kind: 'pose-applied', applied, missing });
-  requestRender();
-  return applied;
-};
 
 // ════════════════════════════════════════════════════════════════════
 // MULTI-CHARACTER (Ped A / B) — minimal scope
@@ -9443,12 +10411,14 @@ window.setKeyframes = function (payloadOrJson, options) {
         if (kfAssimpBind && poseInitialQuats[idx] && _invBindKf && _qAssimpKf && _qThreeKf) {
           // PARITY with importBoneTracksAsClip's rebase (the clip path):
           //  • feet/toes are never driven from an Assimp retarget;
+          //  • fingers neither — raw Assimp finger quats explode the freemode
+          //    hands (no reliable bind / axis match); palm stays at rest-local;
           //  • NO bind entry → leave the bone at rest — applying the raw
           //    Assimp-space quat is what exploded the FINGERS (they have no
           //    glb bind, so raw foreign-space rotations hit the hands);
           //  • degenerate quats (NaN / near-zero) spike the mesh — drop them.
           const baseName = String(b.name).replace(/_\d+$/, '');
-          if (/Foot|Toe/i.test(baseName)) continue;
+          if (/Foot|Toe|Finger/i.test(baseName)) continue;
           const bind = kfAssimpBind[b.name] || kfAssimpBind[baseName];
           if (!Array.isArray(bind) || bind.length < 4) { droppedBones++; continue; }
           const len = Math.hypot(q[0], q[1], q[2], q[3]);
@@ -9477,18 +10447,28 @@ window.setKeyframes = function (payloadOrJson, options) {
       bones: snap,
       root,
       ease: kf.ease || 'auto',
+      src: 'clip',
     };
     poseEnsureKeyId(rebuiltKey);
     rebuilt.push(rebuiltKey);
   }
   rebuilt.sort((a, b) => a.time - b.time);
   poseKeyframes = rebuilt;
+  poseUserKeyframes = [];   // fresh import — previous hand-layer is stale
   // No root track (image / .ycd / .glb import, or a stationary clip): make sure
   // the rig is back at its base so a prior video's travel doesn't linger.
   if (!hasRoot && poseRootTarget && poseRootBase) poseRootTarget.position.copy(poseRootBase);
   poseTime = 0;
   // Evaluate at t=0 so the rig immediately matches the first frame.
   poseEvaluate(0);
+  // Travelling anim-imports: build a world-XZ plant mask so planted feet
+  // stay glued during preview (step-back / walk stance no longer skate).
+  poseClearKfFootPlant();
+  if (hasRoot && payload.source === 'anim-import' && poseRootMotionPreview) {
+    try { poseBuildKfFootPlant(); } catch (e) { console.warn('kf foot-plant build failed', e); }
+    poseEvaluate(0);
+    poseApplyKfFootPlant();
+  }
   // Diagnostic: how far does the root actually travel? If this is ~0 the
   // motion is being lost upstream (reconstruction), not in playback.
   let rootMax = 0;
@@ -9498,6 +10478,7 @@ window.setKeyframes = function (payloadOrJson, options) {
   fosTelemetry.info('timeline', `imported ${rebuilt.length} keyframe(s)`, {
     droppedBones, duration: poseDuration, fps: poseFps,
     hasRoot, rootTravel: +rootMax.toFixed(3), rootTarget: poseRootTarget ? (poseRootTarget.name || 'model') : 'none',
+    footPlant: !!(poseKfFootPlant),
   });
   if (!silent) {
     postToHost({
@@ -9600,9 +10581,9 @@ window.importBoneTracksAsClip = function (payloadOrJson, clipName) {
         if (!tr?.name || !Array.isArray(tr.q) || tr.q.length < 1) continue;
         const idx = nameMap.get(tr.name);
         if (idx == null || !poseInitialQuats[idx]) continue;
-        // Never drive feet/toes from Assimp retarget — freemode skin spikes.
+        // Never drive feet/toes/fingers from Assimp retarget — freemode skin spikes.
         const baseName = tr.name.replace(/_\d+$/, '');
-        if (/Foot|Toe/i.test(baseName)) continue;
+        if (/Foot|Toe|Finger/i.test(baseName)) continue;
         const bind = payload.assimpBind[tr.name] || payload.assimpBind[baseName];
         // No Assimp bind → leave bone at THREE rest (do NOT apply Assimp raw).
         if (!Array.isArray(bind) || bind.length < 4) continue;
@@ -9722,7 +10703,7 @@ window.importBoneTracksAsClip = function (payloadOrJson, clipName) {
   // Default the preview to in-place unless the payload asks to travel. Payloads
   // without the field (older/editor clips) keep the legacy travelling behaviour.
   poseRootMotionPreview = payload.rootPreview !== false;
-  poseKeyframes = [];
+  poseKeyframes = []; poseUserKeyframes = [];
   poseClearHistory('clip-import');
 
   poseRootTarget = currentModel || null;
@@ -9763,11 +10744,10 @@ window.importBoneTracksAsClip = function (payloadOrJson, clipName) {
   }
 
   // rtLoad stops + resets only after bones match — keep prior pose on failure.
-  // Anim-import / ycd library previews already author feet for freemode;
-  // viewer foot-plant IK yanks foot.position in parent space, balloons
-  // ankles/heels, and a throw mid-_rtApply used to kill the play RAF.
-  const allowFootPlant = payload.source !== 'anim-import'
-    && payload.source !== 'ycd-import'
+  // Soft world-XZ foot plant is safe for travelling clips (soft-clamped);
+  // ycd-import / sealed library clips still opt out — their feet are already
+  // authored and plant IK used to balloon ankles on those.
+  const allowFootPlant = payload.source !== 'ycd-import'
     && payload.footPlant !== false;
   let rtResult;
   try {
@@ -9895,7 +10875,15 @@ window.importBoneTracksAsEditableKeys = function (payload, clipName) {
     poseDuration = Math.max(0.1, Math.min(60, (frames - 1) / fps));
     poseFps = fps;
     poseTime = 0;
+    poseClearKfFootPlant();
+    const hasRoot = built.some(k => Array.isArray(k.root) && k.root.length >= 3
+      && (Math.abs(k.root[0]) + Math.abs(k.root[2]) > 1e-4));
     poseEvaluate(0);
+    if (hasRoot && poseRootMotionPreview) {
+      try { poseBuildKfFootPlant(); } catch (e) { console.warn('kf foot-plant build failed', e); }
+      poseEvaluate(0);
+      poseApplyKfFootPlant();
+    }
     // Final state is committed — this ONE echo is the import's announcement.
     poseSquelchTimelineEcho = false;
     postToHost({
@@ -10284,18 +11272,98 @@ function poseApplyEase(alpha, mode) {
 // of three poses arcs smoothly instead of changing direction abruptly
 // at the middle one. With only two keys the path collapses to a slerp
 // (there are no neighbours to average against).
+// Layered evaluation: the clip keyframes are the BASE; the hand-recorded
+// user layer overrides per bone on top, with a short blend at its edges so
+// entering/leaving user-owned time never pops.
 function poseEvaluate(t) {
+  poseEvaluateBase(t);
+  poseApplyUserLayer(t);
+}
+
+function poseApplyUserLayer(t) {
+  if (!poseUserKeyframes.length) return;
+  // Per bone: the user's keys MASK the clip's keys inside their span, and
+  // merge with the clip's keys OUTSIDE it into one combined track. So the
+  // clip only pulls the bone where its actual keys sit — clip keys dragged
+  // away in time have zero influence, and the user pose holds until real
+  // clip keys reappear ("my keys override it until I drag the clip back").
+  const userByBone = new Map();
+  for (const k of poseUserKeyframes) {
+    if (!Array.isArray(k.bones)) continue;
+    for (const e of k.bones) {
+      if (e.i == null || !Array.isArray(e.q)) continue;
+      let arr = userByBone.get(e.i);
+      if (!arr) { arr = []; userByBone.set(e.i, arr); }
+      arr.push({ t: k.time, q: e.q, ease: k.ease || 'auto' });
+    }
+  }
+  for (const [idx, userKeys] of userByBone) {
+    const bone = poseBones[idx];
+    if (!bone) continue;
+    userKeys.sort((a, b) => a.t - b.t);
+    const first = userKeys[0].t;
+    const last = userKeys[userKeys.length - 1].t;
+    // SIMPLE OWNERSHIP RULE: from the first user key onward the bone
+    // belongs to the user — the clip only supplies the lead-in before it
+    // and NEVER retakes the bone afterwards, no matter how its pieces are
+    // arranged. The clip gets the bone back only when the user deletes
+    // their keys.
+    const combined = userKeys.slice();
+    for (const k of poseKeyframes) {
+      if (k.time >= first || !Array.isArray(k.bones)) continue;
+      for (const e of k.bones) {
+        if (e.i === idx && Array.isArray(e.q)) {
+          combined.push({ t: k.time, q: e.q, ease: k.ease || 'auto', c: true });
+          break;
+        }
+      }
+    }
+    combined.sort((a, b) => a.t - b.t);
+    let q;
+    if (t <= combined[0].t) {
+      const first0 = combined[0];
+      q = first0.q;
+      if (!first0.c) {
+        // No clip lead-in keys (rt / clip-track mode): ease in from the
+        // underlying clip pose over 0.3s instead of freezing the bone at
+        // the recorded pose before its first key.
+        const w = 1 - Math.min(1, (first0.t - t) / 0.3);
+        if (w <= 0) continue;
+        if (w < 1) {
+          const cur = [bone.quaternion.x, bone.quaternion.y, bone.quaternion.z, bone.quaternion.w];
+          q = poseSlerp(cur, q, w);
+        }
+      }
+    }
+    else if (t >= combined[combined.length - 1].t) q = combined[combined.length - 1].q;
+    else {
+      let j = 0;
+      while (j < combined.length - 1 && combined[j + 1].t <= t) j++;
+      const a = combined[j], b = combined[j + 1];
+      const span = b.t - a.t;
+      const alpha = span > 1e-6 ? (t - a.t) / span : 0;
+      q = a.ease === 'hold'
+        ? a.q
+        : poseSlerp(a.q, b.q, poseApplyEase(alpha, a.ease || 'auto'));
+    }
+    bone.quaternion.set(q[0], q[1], q[2], q[3]);
+  }
+}
+
+function poseEvaluateBase(t) {
   if (poseKeyframes.length === 0) return;
   // Out-of-range or single keyframe: clamp to nearest.
   if (poseKeyframes.length === 1 || t <= poseKeyframes[0].time) {
     poseApplySnapshot(poseKeyframes[0].bones);
     poseApplyRoot(poseKeyframes[0].root, poseKeyframes[0].yaw);
+    poseApplyKfFootPlant();
     return;
   }
   if (t >= poseKeyframes[poseKeyframes.length - 1].time) {
     const last = poseKeyframes[poseKeyframes.length - 1];
     poseApplySnapshot(last.bones);
     poseApplyRoot(last.root, last.yaw);
+    poseApplyKfFootPlant();
     return;
   }
   // Find bracketing pair.
@@ -10313,6 +11381,7 @@ function poseEvaluate(t) {
   if (easeMode === 'hold') {
     poseApplySnapshot(a.bones);
     poseApplyRoot(a.root, a.yaw);
+    poseApplyKfFootPlant();
     return;
   }
   alpha = poseApplyEase(alpha, easeMode);
@@ -10357,12 +11426,15 @@ function poseEvaluate(t) {
   if (!poseSuppressRootApply && poseRootTarget && poseRootBase && (a.root || b.root)) {
     // In-place preview keeps the vertical (crouch / hop) but drops horizontal
     // travel; Root Motion mode applies all three. See poseRootMotionPreview.
+    // poseRootMotionScale dials X/Z only (Travel sensitivity).
     const ar = a.root || [0, 0, 0], br = b.root || [0, 0, 0];
     const trav = poseRootMotionPreview ? 1 : 0;
+    const s = (typeof poseRootMotionScale === 'number' && isFinite(poseRootMotionScale))
+      ? Math.max(0.1, Math.min(2, poseRootMotionScale)) : 1;
     poseRootTarget.position.set(
-      poseRootBase.x + (ar[0] + (br[0] - ar[0]) * alpha) * trav,
+      poseRootBase.x + (ar[0] + (br[0] - ar[0]) * alpha) * trav * s,
       poseRootBase.y + ar[1] + (br[1] - ar[1]) * alpha,
-      poseRootBase.z + (ar[2] + (br[2] - ar[2]) * alpha) * trav);
+      poseRootBase.z + (ar[2] + (br[2] - ar[2]) * alpha) * trav * s);
   }
   // Mover heading: plain lerp — yaw deltas arrive unwrapped from import,
   // so no ±π seam can sit between two adjacent keys. Suppressed with travel.
@@ -10373,6 +11445,7 @@ function poseEvaluate(t) {
   } else {
     poseApplyRootYaw(null);
   }
+  poseApplyKfFootPlant();
 }
 
 // Set the easing mode for the keyframe at the given time. Returns true
@@ -10464,6 +11537,7 @@ window.samplePoseClipForExport = function () {
         : 0;
       _rtApply(frame);
     } else if (!poseEvaluateStrips(t)) poseEvaluate(t);
+    else poseApplyUserLayer(t);
     poses.push(JSON.parse(window.getPose()));
     if (poseRootTarget && poseRootBase) {
       roots.push([
@@ -10506,6 +11580,7 @@ window.poseSetTime = function (t, scrubbing) {
   // play first.
   const stripsWrote = poseEvaluateStrips(poseTime);
   if (!stripsWrote) poseEvaluate(poseTime);
+  else poseApplyUserLayer(poseTime);
   poseSyncSkeletonMeshes();
   // Foot IK solve is noticeable on dense clips — skip mid-scrub, run on settle.
   if (!isScrub) poseApplyPreviewFootIk();
@@ -10536,6 +11611,25 @@ window.poseSetFps = function (fps) {
   postToHost({ kind: 'pose-timeline-update', keyframes: poseKeyframes.map(k => ({ time: k.time, id: k.id, ease: k.ease || 'auto' })), time: poseTime, duration: poseDuration, fps: poseFps, playing: posePlaying });
 };
 
+/** Soft In–Out playback window (seconds). end <= start → full clip. */
+window.poseSetPreviewRange = function (start, end) {
+  const s = Math.max(0, +start || 0);
+  const e = Math.max(0, +end || 0);
+  posePreviewStart = s;
+  posePreviewEnd = e > s ? e : 0;
+};
+
+function posePreviewStartTime() {
+  const end = posePreviewEndTime();
+  return Math.max(0, Math.min(posePreviewStart || 0, end));
+}
+
+function posePreviewEndTime() {
+  if (posePreviewEnd > posePreviewStart && posePreviewEnd > 0)
+    return Math.min(poseDuration, posePreviewEnd);
+  return poseDuration;
+}
+
 window.posePlay = function () {
   if (!poseMode) {
     postToHost({ kind: 'pose-timeline-warn', message: 'Load a rig before playing.' });
@@ -10558,7 +11652,7 @@ window.posePlay = function () {
   // least one clip placed as a strip on the timeline. After Bake the
   // diamonds get consumed into a strip, so the keyframe-only check
   // would lock the user out of playing back their own baked clips.
-  if (poseKeyframes.length < 2 && poseStrips.length === 0) {
+  if (poseKeyframes.length + poseUserKeyframes.length < 2 && poseStrips.length === 0) {
     postToHost({ kind: 'pose-timeline-warn', message: 'Add 2+ keyframes or place a clip on the timeline before playing.' });
     return false;
   }
@@ -10615,11 +11709,15 @@ function poseTimelineTick() {
   const dt = (now - poseLastTickMs) / 1000;
   poseLastTickMs = now;
   poseTime += dt;
-  if (poseTime >= poseDuration) {
+  const pStart = posePreviewStartTime();
+  const pEnd = posePreviewEndTime();
+  if (poseTime < pStart) poseTime = pStart;
+  if (poseTime >= pEnd) {
     if (poseLoop) {
-      poseTime = poseTime % poseDuration;
+      const span = Math.max(1e-6, pEnd - pStart);
+      poseTime = pStart + ((poseTime - pStart) % span);
     } else {
-      poseTime = poseDuration;
+      poseTime = pEnd;
       posePlaying = false;
       // Timeline ran to its end — bring the control rig back.
       refreshPoseJointDots();
@@ -10630,6 +11728,7 @@ function poseTimelineTick() {
   // while strips from the library overlay onto specific spans.
   const stripsWrote = poseEvaluateStrips(poseTime);
   if (!stripsWrote) poseEvaluate(poseTime);
+  else poseApplyUserLayer(poseTime);
   poseSyncSkeletonMeshes();
   poseApplyPreviewFootIk();
   syncIkHandleTransforms(false);
@@ -10708,10 +11807,16 @@ function attachPoseBone(bone, additive = false) {
   refreshPoseJointDots();
 
   if (primary) {
-    postToHost({ kind: 'pose-bone-selected', name: primary.name || '', index: poseBones.indexOf(primary), selection: poseSelection.length });
+    postToHost({
+      kind: 'pose-bone-selected',
+      name: primary.name || '',
+      index: poseBones.indexOf(primary),
+      selection: poseSelection.length,
+      indices: poseSelection.map(b => poseBones.indexOf(b)).filter(i => i >= 0),
+    });
     fosTelemetry.info('pose', `selected ${primary.name}`, { total: poseSelection.length });
   } else {
-    postToHost({ kind: 'pose-bone-selected', name: '', index: -1, selection: 0 });
+    postToHost({ kind: 'pose-bone-selected', name: '', index: -1, selection: 0, indices: [] });
   }
   updatePoseHud();
   requestRender();

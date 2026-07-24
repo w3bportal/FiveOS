@@ -101,14 +101,11 @@
                            Margin="0,0,0,10" />
                 <UniformGrid Rows="1">
                     <UniformGrid.Style>
-                        <!-- 6 cards normally; Beginner level hides the txAdmin
-                             card, so drop to 5 columns to avoid an empty cell
-                             (UniformGrid reserves cells for collapsed children). -->
                         <Style TargetType="UniformGrid">
-                            <Setter Property="Columns" Value="6" />
+                            <Setter Property="Columns" Value="5" />
                             <Style.Triggers>
                                 <DataTrigger Binding="{Binding DataContext.LevelStandardPlus, RelativeSource={RelativeSource AncestorType=Window}}" Value="False">
-                                    <Setter Property="Columns" Value="5" />
+                                    <Setter Property="Columns" Value="4" />
                                 </DataTrigger>
                             </Style.Triggers>
                         </Style>
@@ -238,21 +235,55 @@
                             </StackPanel>
                         </StackPanel>
                     </RadioButton>
+
                 </UniformGrid>
             </StackPanel>
         </Border>
 
         <!-- ───────── Workspace ───────── -->
         <Grid Grid.Row="1"
-              Visibility="{Binding IsTxAdminMode, Converter={StaticResource InverseBooleanToVisibility}}">
+              Visibility="{Binding IsHostedToolMode, Converter={StaticResource InverseBooleanToVisibility}}">
             <Grid.ColumnDefinitions>
                 <!-- Width is toggled in code-behind: 320 for the texture modes
                      (which need the compression options), 0 for the geometry
-                     modes (everything is driven from the workbench). -->
+                     modes (everything is driven from the workbench). The user
+                     can also drag the splitter (texture modes) to resize it;
+                     that width is persisted and reused by the code-behind. -->
                 <ColumnDefinition x:Name="OptionsColumn" Width="320" />
-                <ColumnDefinition Width="2*" MinWidth="200" />
+                <!-- Splitter between the options sidebar and the queue. Auto so
+                     it collapses to nothing when the sidebar is hidden. -->
+                <ColumnDefinition Width="Auto" />
+                <ColumnDefinition x:Name="QueueColumn" Width="2*" MinWidth="200" />
+                <!-- Splitter between the queue and the preview/gallery. -->
+                <ColumnDefinition Width="5" />
                 <ColumnDefinition Width="3*" MinWidth="220" />
             </Grid.ColumnDefinitions>
+
+            <!-- Drag to resize the compression-options sidebar. Hidden (and its
+                 Auto column collapses to 0) in geometry modes, where there is
+                 no sidebar to resize. -->
+            <GridSplitter Grid.Column="1"
+                          x:Name="OptionsSplitter"
+                          Width="5"
+                          HorizontalAlignment="Center"
+                          VerticalAlignment="Stretch"
+                          Background="{DynamicResource ControlElevationBorderBrush}"
+                          ShowsPreview="False"
+                          ResizeBehavior="PreviousAndNext"
+                          Cursor="SizeWE"
+                          Visibility="{Binding IsTextureMode, Converter={StaticResource BooleanToVisibility}}"
+                          DragCompleted="OnOptionsSplitterDragCompleted" />
+
+            <!-- Drag to resize the queue/list against the preview/gallery. -->
+            <GridSplitter Grid.Column="3"
+                          x:Name="ContentSplitter"
+                          HorizontalAlignment="Stretch"
+                          VerticalAlignment="Stretch"
+                          Background="{DynamicResource ControlElevationBorderBrush}"
+                          ShowsPreview="False"
+                          ResizeBehavior="PreviousAndNext"
+                          Cursor="SizeWE"
+                          DragCompleted="OnContentSplitterDragCompleted" />
 
             <!-- Options sidebar (texture modes only — compression settings) -->
             <Border Grid.Column="0"
@@ -324,7 +355,7 @@
             </Border>
 
             <!-- Right pane: drop zone or queue -->
-            <Grid Grid.Column="1" Margin="16,12,16,12">
+            <Grid Grid.Column="2" Margin="16,12,16,12">
 
                 <!-- Empty state -->
                 <Border Visibility="{Binding HasFiles, Converter={StaticResource InverseBooleanToVisibility}}"
@@ -543,7 +574,7 @@
             </Grid>
 
             <!-- ───────── Col 2: inline textured LOD preview panel (geometry modes) ───────── -->
-            <Border Grid.Column="2"
+            <Border Grid.Column="4"
                     BorderThickness="1,0,0,0"
                     BorderBrush="{DynamicResource ControlElevationBorderBrush}"
                     Visibility="{Binding IsLodMode, Converter={StaticResource BooleanToVisibility}}">
@@ -685,7 +716,7 @@
                  Shares the cell with the LOD workbench above; only one is ever
                  visible, so collapsing the workbench frees the WebView2 airspace
                  and this pure-WPF panel renders cleanly. -->
-            <Border Grid.Column="2"
+            <Border Grid.Column="4"
                     BorderThickness="1,0,0,0"
                     BorderBrush="{DynamicResource ControlElevationBorderBrush}"
                     Visibility="{Binding IsTextureMode, Converter={StaticResource BooleanToVisibility}}">

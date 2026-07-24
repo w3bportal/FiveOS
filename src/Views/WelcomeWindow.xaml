@@ -105,14 +105,14 @@
                 <StackPanel Grid.Column="0" Margin="0,0,18,0">
                     <TextBlock Text="OPEN A TOOL" Style="{StaticResource ColHeader}" />
 
-                    <Border Style="{StaticResource ToolRow}" Tag="3D" MouseLeftButtonUp="OnTile">
+                    <Border Style="{StaticResource ToolRow}" Tag="Assets" MouseLeftButtonUp="OnTile">
                         <StackPanel Orientation="Horizontal">
                             <ui:SymbolIcon Symbol="Cube24" FontSize="21" VerticalAlignment="Center"
                                            Foreground="{DynamicResource AccentTextFillColorPrimaryBrush}" />
                             <StackPanel Margin="13,0,0,0" VerticalAlignment="Center">
-                                <TextBlock Text="3D Model" FontSize="13.5" FontWeight="SemiBold"
+                                <TextBlock Text="Assets" FontSize="13.5" FontWeight="SemiBold"
                                            Foreground="{DynamicResource TextFillColorPrimaryBrush}" />
-                                <TextBlock Text="Convert .fbx / .glb / .obj into FiveM .ydr props"
+                                <TextBlock Text="Props and Animated — FiveM-ready exports"
                                            FontSize="11" Foreground="{DynamicResource TextFillColorTertiaryBrush}" />
                             </StackPanel>
                         </StackPanel>

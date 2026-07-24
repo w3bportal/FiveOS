@@ -11,7 +11,6 @@
 
     <UserControl.Resources>
 
-        <!-- Section title at the top of each content page (Win11 Settings style). -->
         <Style x:Key="PageTitle" TargetType="TextBlock">
             <Setter Property="FontSize" Value="26" />
             <Setter Property="FontWeight" Value="SemiBold" />
@@ -42,14 +41,12 @@
             <Setter Property="Margin" Value="0,4,0,0" />
         </Style>
 
-        <!-- Pill that shows "● Saved" / "Not saved" next to the provider name. -->
         <Style x:Key="StatusPill" TargetType="Border">
             <Setter Property="CornerRadius" Value="9" />
             <Setter Property="Padding" Value="8,2" />
             <Setter Property="VerticalAlignment" Value="Center" />
         </Style>
 
-        <!-- ListBoxItem template: Win11 nav-style with rounded selection bar. -->
         <Style x:Key="NavItemStyle" TargetType="ListBoxItem">
             <Setter Property="Padding" Value="0" />
             <Setter Property="Margin" Value="6,2" />
@@ -84,7 +81,7 @@
                             </Trigger>
                             <Trigger Property="IsSelected" Value="True">
                                 <Setter TargetName="Root" Property="Background" Value="{DynamicResource SubtleFillColorTertiaryBrush}" />
-                                <Setter TargetName="Indicator" Property="Background" Value="{DynamicResource AccentFillColorDefaultBrush}" />
+                                <Setter TargetName="Indicator" Property="Background" Value="{DynamicResource SystemAccentColorPrimaryBrush}" />
                             </Trigger>
                         </ControlTemplate.Triggers>
                     </ControlTemplate>
@@ -103,7 +100,6 @@
             <ColumnDefinition Width="*" />
         </Grid.ColumnDefinitions>
 
-        <!-- ═══════════ Left navigation pane ═══════════ -->
         <Border Grid.Column="0"
                 Background="{DynamicResource ControlFillColorDefaultBrush}"
                 BorderThickness="0,0,1,0"
@@ -143,7 +139,7 @@
                         </StackPanel>
                     </ListBoxItem>
                     <ListBoxItem Tag="cache"
-                                 ToolTip="See and clear the local cache (Sketchfab downloads, AI-generated GLBs, optimization temp files). Wiping the cache doesn't delete any exports you've already made.">
+                                 ToolTip="See and clear local caches: temp work dirs, WebView2 leftovers, Emotes viewer bundles, and old runtime extracts under LocalAppData. Exports and API keys are never deleted.">
                         <StackPanel Style="{StaticResource NavItemContent}">
                             <ui:SymbolIcon Symbol="Storage24" FontSize="16" VerticalAlignment="Center" />
                             <TextBlock Text="{loc:Loc Settings.Cache}" Margin="10,0,0,0" VerticalAlignment="Center" FontSize="13" />
@@ -167,16 +163,6 @@
             </DockPanel>
         </Border>
 
-        <!-- ═══════════ Right content pane ═══════════
-             HorizontalScrollBarVisibility="Disabled" forces the
-             content StackPanel to be measured against the visible
-             width (not infinity), which is what makes
-             HorizontalAlignment="Left" actually take effect for the
-             child StackPanel below. Without Disabled, the ScrollViewer
-             gives the child infinite horizontal space and the
-             MaxWidth+Stretch+Left combo silently right-aligned the
-             content at the far edge of wide windows (3440px+),
-             leaving the area next to the nav appearing empty. -->
         <ScrollViewer Grid.Column="1"
                       x:Name="ContentScroll"
                       VerticalScrollBarVisibility="Auto"
@@ -184,47 +170,11 @@
                       Padding="36,28,36,32">
             <StackPanel MaxWidth="780" HorizontalAlignment="Left">
 
-                <!-- ─────────────── GENERAL PAGE ─────────────── -->
                 <StackPanel x:Name="GeneralPage">
                     <TextBlock Text="{loc:Loc Settings.General}" Style="{StaticResource PageTitle}" />
                     <TextBlock Style="{StaticResource PageSubtitle}"
                                Text="{loc:Loc Settings.GeneralDesc}" />
 
-                    <!-- ─── Global update ─── -->
-                    <Border CornerRadius="6"
-                            Padding="18,16"
-                            Margin="0,12,0,0"
-                            Background="{DynamicResource ControlFillColorSecondaryBrush}"
-                            BorderThickness="1"
-                            BorderBrush="{DynamicResource ControlElevationBorderBrush}">
-                        <Grid>
-                            <Grid.ColumnDefinitions>
-                                <ColumnDefinition Width="*" />
-                                <ColumnDefinition Width="Auto" />
-                            </Grid.ColumnDefinitions>
-                            <StackPanel Grid.Column="0">
-                                <StackPanel Orientation="Horizontal">
-                                    <ui:SymbolIcon Symbol="ArrowDownload24" FontSize="20"
-                                                   VerticalAlignment="Center" Opacity="0.85" />
-                                    <TextBlock Text="{loc:Loc Settings.GlobalUpdate}"
-                                               Style="{StaticResource ProviderTitle}"
-                                               Margin="10,0,0,0"
-                                               VerticalAlignment="Center" />
-                                </StackPanel>
-                                <TextBlock Style="{StaticResource ProviderHelp}"
-                                           Text="{loc:Loc Settings.GlobalUpdateDesc}" />
-                            </StackPanel>
-                            <ui:ToggleSwitch Grid.Column="1"
-                                             x:Name="GlobalUpdateToggle"
-                                             VerticalAlignment="Center"
-                                             Margin="16,0,0,0"
-                                             Checked="OnGlobalUpdateToggled"
-                                             Unchecked="OnGlobalUpdateToggled"
-                                             ToolTip="On: check for updates when FiveOS starts and prompt if a newer build is available. Off: update only when you use Help → Check for updates." />
-                        </Grid>
-                    </Border>
-
-                    <!-- ─── Discord Rich Presence ─── -->
                     <Border CornerRadius="6"
                             Padding="18,16"
                             Margin="0,12,0,0"
@@ -258,7 +208,6 @@
                         </Grid>
                     </Border>
 
-                    <!-- ─── Language ─── -->
                     <Border CornerRadius="6"
                             Padding="18,16"
                             Margin="0,12,0,0"
@@ -285,20 +234,67 @@
                                       ToolTip="UI language for FiveOS itself (menus, dialogs, sidebar labels). Doesn't change anything in the assets you export." />
                         </StackPanel>
                     </Border>
+
+                    <Border CornerRadius="6"
+                            Padding="18,16"
+                            Margin="0,12,0,0"
+                            Background="{DynamicResource ControlFillColorSecondaryBrush}"
+                            BorderThickness="1"
+                            BorderBrush="{DynamicResource ControlElevationBorderBrush}">
+                        <StackPanel>
+                            <StackPanel Orientation="Horizontal">
+                                <ui:SymbolIcon Symbol="Color24" FontSize="20"
+                                               VerticalAlignment="Center" Opacity="0.85" />
+                                <TextBlock Text="Accent color"
+                                           Style="{StaticResource ProviderTitle}"
+                                           Margin="10,0,0,0"
+                                           VerticalAlignment="Center" />
+                            </StackPanel>
+                            <TextBlock Style="{StaticResource ProviderHelp}"
+                                       Text="Highlight colour for selection, primary buttons, tabs, timeline playhead, and the viewer HUD. Blue is the default." />
+                            <ItemsControl x:Name="AccentSwatches"
+                                          Margin="0,14,0,0">
+                                <ItemsControl.ItemsPanel>
+                                    <ItemsPanelTemplate>
+                                        <WrapPanel Orientation="Horizontal" />
+                                    </ItemsPanelTemplate>
+                                </ItemsControl.ItemsPanel>
+                                <ItemsControl.ItemTemplate>
+                                    <DataTemplate>
+                                        <Button Margin="0,0,10,10"
+                                                Padding="0"
+                                                Width="36" Height="36"
+                                                Cursor="Hand"
+                                                Click="OnAccentSwatchClick"
+                                                ToolTip="{Binding Name}"
+                                                Tag="{Binding Hex}"
+                                                BorderThickness="2"
+                                                BorderBrush="{Binding BorderBrush}"
+                                                Background="{Binding Fill}">
+                                            <Button.Template>
+                                                <ControlTemplate TargetType="Button">
+                                                    <Border x:Name="chrome"
+                                                            Width="36" Height="36"
+                                                            CornerRadius="4"
+                                                            Background="{TemplateBinding Background}"
+                                                            BorderBrush="{TemplateBinding BorderBrush}"
+                                                            BorderThickness="{TemplateBinding BorderThickness}"
+                                                            SnapsToDevicePixels="True" />
+                                                </ControlTemplate>
+                                            </Button.Template>
+                                        </Button>
+                                    </DataTemplate>
+                                </ItemsControl.ItemTemplate>
+                            </ItemsControl>
+                        </StackPanel>
+                    </Border>
                 </StackPanel>
 
-                <!-- ─────────────── ADDONS PAGE ─────────────── -->
                 <StackPanel x:Name="AddonsPage" Visibility="Collapsed">
                     <TextBlock Text="Addons" Style="{StaticResource PageTitle}" />
                     <TextBlock Style="{StaticResource PageSubtitle}"
                                Text="Built-in addons plus any third-party plugins discovered in %AppData%\FiveOS\plugins. Enable a plugin here and it shows up in the activity rail." />
 
-                    <!-- Plugins-folder management row.
-                         • New from template — scaffold a starter folder
-                           (HTML or DLL csproj) under %AppData%\FiveOS\plugins\.
-                         • Open plugins folder — reveal it in Explorer.
-                         • Refresh — re-run PluginManager.Discover so users
-                           see new plugins without restarting. -->
                     <StackPanel Orientation="Horizontal" Margin="0,0,0,12">
                         <ui:Button Content="New from template…"
                                    Appearance="Primary"
@@ -331,9 +327,6 @@
                         </ui:Button>
                     </StackPanel>
 
-                    <!-- Search bar. Each addon row carries its searchable text
-                         in its Tag (lowercased name + keywords) so the filter
-                         scales as the addons list grows. -->
                     <ui:TextBox x:Name="AddonsSearchBox"
                                 PlaceholderText="Search addons…"
                                 Margin="0,0,0,10"
@@ -351,10 +344,7 @@
                                Visibility="Collapsed" />
 
                     <StackPanel x:Name="AddonsList">
-                        <!-- One row per discovered third-party plugin.
-                             Bound to MainViewModel.AllPlugins; toggling a
-                             row's IsEnabled flows through to the rail via
-                             the entry's PropertyChanged hook. -->
+
                         <ItemsControl x:Name="PluginItems"
                                       Margin="0,10,0,0"
                                       ItemsSource="{Binding AllPlugins}">
@@ -373,10 +363,7 @@
                                                 <ColumnDefinition Width="*" />
                                                 <ColumnDefinition Width="Auto" />
                                             </Grid.ColumnDefinitions>
-                                            <!-- Icon column. Plugin-supplied PNG when available;
-                                                 puzzle-piece SymbolIcon as fallback. The two
-                                                 controls live in the same cell with mutually
-                                                 exclusive Visibility binding. -->
+
                                             <Grid Grid.Column="0"
                                                   Width="32" Height="32"
                                                   VerticalAlignment="Top"
@@ -400,9 +387,7 @@
                                                                Opacity="0.55"
                                                                VerticalAlignment="Center"
                                                                Margin="6,0,0,0" />
-                                                    <!-- Compatibility pill, shown only when the
-                                                         manifest declares a higher minHostVersion
-                                                         than this host. -->
+
                                                     <Border CornerRadius="9"
                                                             Padding="8,2"
                                                             Margin="8,0,0,0"
@@ -433,9 +418,6 @@
                             </ItemsControl.ItemTemplate>
                         </ItemsControl>
 
-                        <!-- Empty-state hint, only when there are zero
-                             discovered plugins (built-in row + no plugins
-                             folder content). -->
                         <Border x:Name="NoPluginsHint"
                                 CornerRadius="10"
                                 Padding="18,14"
@@ -459,13 +441,11 @@
                     </StackPanel>
                 </StackPanel>
 
-                <!-- ─────────────── SERVER SETTINGS (OUTPUT) PAGE ─────────────── -->
                 <StackPanel x:Name="OutputPage" Visibility="Collapsed">
                     <TextBlock Text="{loc:Loc Settings.Output}" Style="{StaticResource PageTitle}" />
                     <TextBlock Style="{StaticResource PageSubtitle}"
                                Text="{loc:Loc Settings.OutputDesc}" />
 
-                    <!-- ─── Single output folder ─── -->
                     <Border CornerRadius="6"
                             Padding="18,16"
                             Margin="0,0,0,12"
@@ -517,7 +497,6 @@
                         </StackPanel>
                     </Border>
 
-                    <!-- ─── Server resource folder ─── -->
                     <Border CornerRadius="6"
                             Padding="18,16"
                             Margin="0,0,0,12"
@@ -583,7 +562,6 @@
                                            ToolTip="Disconnect from any server folder — exports go back to the single-folder destination above." />
                             </Grid>
 
-                            <!-- Layout selector -->
                             <TextBlock Text="{loc:Loc Settings.Layout}"
                                        Style="{StaticResource GroupHeader}"
                                        Margin="0,16,0,4" />
@@ -614,13 +592,11 @@
                     </Border>
                 </StackPanel>
 
-                <!-- ─────────────── API KEYS PAGE ─────────────── -->
                 <StackPanel x:Name="ApiKeysPage" Visibility="Collapsed">
                     <TextBlock Text="{loc:Loc Settings.ApiKeys}" Style="{StaticResource PageTitle}" />
                     <TextBlock Style="{StaticResource PageSubtitle}"
                                Text="{loc:Loc Settings.ApiKeysDesc}" />
 
-                    <!-- ─── Sketchfab ─── -->
                     <Border x:Name="SketchfabCard"
                             CornerRadius="6"
                             Padding="18,16"
@@ -653,7 +629,6 @@
                                 </Border>
                             </Grid>
 
-                            <!-- Help text + URL: only when no key saved or in edit mode. -->
                             <TextBlock x:Name="SketchfabHelp"
                                        Style="{StaticResource ProviderHelp}"
                                        Margin="0,8,0,0">
@@ -662,7 +637,6 @@
                                 <Run Text="{loc:Loc Settings.SketchfabHelpRun2}" />
                             </TextBlock>
 
-                            <!-- Edit row: PasswordBox + Save + (Cancel) -->
                             <Grid x:Name="SketchfabEditRow" Margin="0,12,0,0">
                                 <Grid.ColumnDefinitions>
                                     <ColumnDefinition Width="*" />
@@ -694,7 +668,6 @@
                                            ToolTip="Abandon the edit and keep the previously-saved token." />
                             </Grid>
 
-                            <!-- Saved row: shown when a key is saved (collapses URL+input). -->
                             <StackPanel x:Name="SketchfabSavedRow"
                                         Orientation="Horizontal"
                                         Margin="0,12,0,0"
@@ -725,10 +698,6 @@
                     <TextBlock Text="{loc:Loc Settings.AiProviders}"
                                Style="{StaticResource GroupHeader}" />
 
-                    <!-- One ApiKeyCard per registered AI provider. The
-                         control reads SecretStore + binds itself to the
-                         provider via the Provider DP — no per-provider
-                         code-behind on this page. -->
                     <ItemsControl x:Name="AiProviderList">
                         <ItemsControl.ItemTemplate>
                             <DataTemplate>
@@ -739,7 +708,6 @@
                     </ItemsControl>
                 </StackPanel>
 
-                <!-- ─────────────── CACHE PAGE ─────────────── -->
                 <StackPanel x:Name="CachePage" Visibility="Collapsed">
                     <TextBlock Text="{loc:Loc Settings.Cache}" Style="{StaticResource PageTitle}" />
                     <TextBlock Style="{StaticResource PageSubtitle}"
@@ -775,7 +743,7 @@
                                        Padding="14,6"
                                        VerticalAlignment="Center"
                                        Click="OnClearCache"
-                                       ToolTip="Wipe the local cache (Sketchfab downloads, AI-generated models, optimization temp files). Nothing you've already exported is affected. Next downloads/exports will be slower until the cache rebuilds.">
+                                       ToolTip="Wipe temp caches, stale Emotes viewer bundles, and old %LOCALAPPDATA%\FiveOS\runtime extracts. Exports and secrets are never touched. Restart and clear again if some folders were locked while the app was open.">
                                 <ui:Button.Icon>
                                     <ui:SymbolIcon Symbol="Delete24" />
                                 </ui:Button.Icon>
@@ -784,7 +752,6 @@
                     </Border>
                 </StackPanel>
 
-                <!-- ─────────────── ABOUT PAGE ─────────────── -->
                 <StackPanel x:Name="AboutPage" Visibility="Collapsed">
                     <TextBlock Text="{loc:Loc Settings.About}" Style="{StaticResource PageTitle}" />
                     <TextBlock Style="{StaticResource PageSubtitle}"

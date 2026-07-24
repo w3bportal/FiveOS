@@ -234,6 +234,10 @@ public partial class PoseToEmoteViewModel : ObservableObject
         };
     }
 
+    /// <summary>Open emote documents (Blender-style tab strip). Switching
+    /// tabs snapshots/restores timeline state on the shared WebView2.</summary>
+    public EmoteDocumentSet EmoteDocs { get; } = new();
+
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(HasModel))]
     [NotifyPropertyChangedFor(nameof(BoneCountLabel))]
@@ -660,6 +664,37 @@ public partial class PoseToEmoteViewModel : ObservableObject
     public Services.EmoteMovement EffectiveExportMovement =>
         IsAnimatedExport ? Movement : Services.EmoteMovement.InPlace;
 
+    /// <summary>
+    /// Multiplier on horizontal root travel (forward / back / strafe). 1 = full
+    /// imported mover; dial down when FiveOS travel looks exaggerated vs the
+    /// source. Vertical hop/crouch is never scaled. Preview + export both honour
+    /// this so what you see is what bakes into the .ycd.
+    /// </summary>
+    [ObservableProperty] private double _rootMotionScale = 1.0;
+
+    /// <summary>True when the travel-amount slider should be interactive.</summary>
+    public bool RootMotionScaleEnabled => Movement == Services.EmoteMovement.RootMotion;
+
+    /// <summary>
+    /// Soft world-XZ foot plant in the preview (and live export samples). Pins
+    /// planted feet so a step-back doesn't skate with root travel. Can collapse
+    /// ankles when too strong — dial intensity down or turn off.
+    /// </summary>
+    [ObservableProperty] private bool _footPlantEnabled = true;
+
+    /// <summary>0 = no plant correction, 1 = full. Default 0.5 is gentler on
+    /// freemode ankles than the old always-on full pull.</summary>
+    [ObservableProperty] private double _footPlantIntensity = 0.5;
+
+    /// <summary>Plant controls only apply while the ped is travelling.</summary>
+    public bool FootPlantControlsEnabled => Movement == Services.EmoteMovement.RootMotion;
+
+    partial void OnMovementIndexChanged(int value)
+    {
+        OnPropertyChanged(nameof(RootMotionScaleEnabled));
+        OnPropertyChanged(nameof(FootPlantControlsEnabled));
+    }
+
     // ── Body calibration (retarget → this ped) ─────────────────────────
     // A retarget copies joint ANGLES, which is only complete if the target has
     // the source's build. It never does, so identical angles land the hands
@@ -855,22 +890,23 @@ public partial class PoseToEmoteViewModel : ObservableObject
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(IsSequencerMode))]
     [NotifyPropertyChangedFor(nameof(IsDopeSheetMode))]
-    private Services.TimelineEditorMode _timelineMode = Services.TimelineEditorMode.Sequencer;
+    [NotifyPropertyChangedFor(nameof(ShowClipsSection))]
+    [NotifyPropertyChangedFor(nameof(ShowKeysSection))]
+    private Services.TimelineEditorMode _timelineMode = Services.TimelineEditorMode.DopeSheet;
 
-    // Unified AE-style layers timeline (2026-07-16): BOTH sections are always
-    // live — layer bars on top, per-bone key lanes beneath. TimelineMode is
-    // kept only so legacy setters (double-click strip, etc.) stay harmless.
-    public bool IsSequencerMode => true;
-    public bool IsDopeSheetMode => true;
+    /// <summary>Clips mode — NLA strip / clip bars.</summary>
+    public bool IsSequencerMode => TimelineMode == Services.TimelineEditorMode.Sequencer;
+    /// <summary>Keys mode — per-bone dope-sheet diamonds.</summary>
+    public bool IsDopeSheetMode => TimelineMode == Services.TimelineEditorMode.DopeSheet;
+
+    public bool ShowClipsSection => IsSequencerMode;
+    public bool ShowKeysSection => IsDopeSheetMode;
 
     [ObservableProperty] private bool _timelineSnapEnabled = true;
     [ObservableProperty] private string _timelineTrackFilter = "";
 
-    // Playback-range boxes in the transport (AE-style Start/End + Trim,
-    // 2026-07-17). Frame numbers; End re-syncs to the clip length whenever
-    // the duration changes (see the pose-timeline-update handler).
     [ObservableProperty] private int _trimStartFrame;
-    [ObservableProperty] private int _trimEndFrame;
+    [ObservableProperty] private int _trimEndFrame = 60;
 
     /// <summary>When false (default), Dope Sheet hides bone tracks with no keys.</summary>
     [ObservableProperty] private bool _showEmptyTracks;
@@ -964,10 +1000,10 @@ public partial class PoseToEmoteViewModel : ObservableObject
     public string PrimaryTrackLabel =>
         Strips.Count > 0 ? Strips[0].ClipName : "Animation";
 
-    /// <summary>Clip track row — gutter entry and its lane. An empty track
-    /// has nothing to act on: its eye/lock toggles would mutate state that
-    /// no clip reads, so the row stays hidden until the first clip lands.</summary>
-    public bool ShowClipTrack => Strips.Count > 0;
+    /// <summary>Clip track row — gutter entry and its lane. Always shown in
+    /// Clips mode so an empty timeline can explain how to get a strip
+    /// (library imports land as Keys, not strips).</summary>
+    public bool ShowClipTrack => true;
 
     // ── Prop (emote-with-prop authoring) ────────────────────────────
 
@@ -1159,6 +1195,9 @@ public partial class KeyframeMarker : ObservableObject
     [ObservableProperty] private string _boneName = "Summary";
     [ObservableProperty] private string _ease = "auto";
     [ObservableProperty] private bool _isSelected;
+    /// <summary>"clip" = imported animation, "user" = hand-recorded. Pieces
+    /// never merge across sources — recorded keys stay their own segment.</summary>
+    [ObservableProperty] private string _src = "clip";
     public string TooltipText => $"Keyframe at {Time:F2}s";
 }
 

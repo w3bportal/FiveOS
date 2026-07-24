@@ -19,6 +19,10 @@ public partial class SketchfabUrlDialog : FluentWindow
     /// <summary>Absolute path to the unpacked model entrypoint, set on success.</summary>
     public string? ResultModelPath { get; private set; }
 
+    /// <summary>The Sketchfab model's TITLE — the prop gets named after
+    /// this instead of the archive's generic "scene.gltf" stem.</summary>
+    public string? ResultModelName { get; private set; }
+
     private readonly string _token;
     private CancellationTokenSource? _cts;
     private bool _busy;
@@ -91,6 +95,7 @@ public partial class SketchfabUrlDialog : FluentWindow
             var modelPath = await client.DownloadGlbAsync(uid, stagingDir, progress, _cts.Token);
 
             ResultModelPath = modelPath;
+            ResultModelName = info.Name;
             DialogResult = true;
             Close();
         }

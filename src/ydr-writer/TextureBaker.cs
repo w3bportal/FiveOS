@@ -2,6 +2,7 @@
 // https://github.com/w3bportal/FiveOS
 
 using System.Diagnostics;
+using System.Linq;
 using Assimp;
 using CodeWalker.GameFiles;
 using CodeWalker.Utils;
@@ -24,7 +25,14 @@ public static class TextureBaker
         string MaterialName,
         Texture? Diffuse,
         Texture? Normal,
-        bool DiffuseHasAlpha);
+        bool DiffuseHasAlpha,
+        // Specular / detail maps pulled from the source material when present.
+        // A spec map upgrades the part from the opaque default shader to a real
+        // spec shader (normal_spec / spec) so RAGE actually samples highlights;
+        // a detail map further upgrades it to normal_spec_detail. Both optional
+        // so existing 4-arg construction/`with` sites keep compiling.
+        Texture? Specular = null,
+        Texture? Detail = null);
 
     /// <summary>
     /// Walks `scene.Materials`, encodes each material's diffuse + normal
@@ -64,10 +72,34 @@ public static class TextureBaker
                 if (matIdx < 0) continue;
                 matDiffuseOverrides[matIdx] = texPath;
             }
-            Log($"  part diffuse overrides: {partDiffuseOverrides.Count} part(s) → {matDiffuseOverrides.Count} material(s)");
+
+            // Viewer / host part names often don't survive Assimp import
+            // (PreTransformVertices, glTF flattening). If nothing matched,
+            // paint the first usable override onto every material — that's
+            // what the Props texture-library preview does visually.
+            if (matDiffuseOverrides.Count == 0)
+            {
+                var any = partDiffuseOverrides.Values.FirstOrDefault(File.Exists);
+                if (!string.IsNullOrEmpty(any))
+                {
+                    for (int i = 0; i < scene.MaterialCount; i++)
+                        matDiffuseOverrides[i] = any;
+                    Log($"  part diffuse overrides: no mesh-name match — applying 1 image to {scene.MaterialCount} material(s)");
+                }
+            }
+            else
+            {
+                Log($"  part diffuse overrides: {partDiffuseOverrides.Count} part(s) → {matDiffuseOverrides.Count} material(s)");
+            }
         }
 
         var results = new List<MaterialTextures>();
+        // One override image shared by several materials must become ONE
+        // dictionary entry named after the IMAGE (not per-material copies
+        // named assetName_matNN) — the user sees their texture by name in
+        // the compiled TXD next to the untouched base maps, and VRAM isn't
+        // paid N times. Encode once, reuse the Texture instance.
+        var overrideEncoded = new Dictionary<string, (Texture? Tex, bool Alpha)>(StringComparer.OrdinalIgnoreCase);
         for (int i = 0; i < scene.MaterialCount; i++)
         {
             var mat = scene.Materials[i];
@@ -76,15 +108,117 @@ public static class TextureBaker
             string? diffuseOverride = null;
             matDiffuseOverrides?.TryGetValue(i, out diffuseOverride);
 
-            var (diffuse, diffuseHasAlpha) = ExtractAndEncode(
-                scene, mat, "diffuse", workDir, assetName, i, texconv, sourceDir, diffuseOverride);
-            var (normal,  _)               = ExtractAndEncode(
+            (Texture? Tex, bool Alpha) diffuseRes;
+            if (!string.IsNullOrEmpty(diffuseOverride) &&
+                overrideEncoded.TryGetValue(diffuseOverride, out var cached))
+            {
+                diffuseRes = cached;
+            }
+            else
+            {
+                string? overrideTexName = null;
+                if (!string.IsNullOrEmpty(diffuseOverride))
+                {
+                    // Host staging prefixes copies with "xxxxxxxx_" (8 hex) —
+                    // strip it so the TXD entry reads like the user's file.
+                    var stem = Path.GetFileNameWithoutExtension(diffuseOverride);
+                    stem = System.Text.RegularExpressions.Regex.Replace(
+                        stem, "^[0-9a-fA-F]{8}_", "");
+                    overrideTexName = SanitizeName(stem) ?? $"{assetName}_custom";
+                }
+                var (dTex, dAlpha) = ExtractAndEncode(
+                    scene, mat, "diffuse", workDir, assetName, i, texconv, sourceDir,
+                    diffuseOverride, overrideTexName);
+                diffuseRes = (dTex, dAlpha);
+                if (!string.IsNullOrEmpty(diffuseOverride))
+                    overrideEncoded[diffuseOverride] = diffuseRes;
+            }
+
+            var (normal, _) = ExtractAndEncode(
                 scene, mat, "normal",  workDir, assetName, i, texconv, sourceDir);
 
-            results.Add(new MaterialTextures(matName, diffuse, normal, diffuseHasAlpha));
-            Log($"  mat[{i:D2}] '{matName}' -> diffuse={diffuse?.Name ?? "<none>"}{(diffuseHasAlpha ? " (alpha)" : "")} normal={normal?.Name ?? "<none>"}");
+            // Specular / detail are optional — most source materials carry
+            // neither. When present they promote the part to a spec-aware
+            // shader (see BindOneShader). Detail maps are rare in glTF/FBX;
+            // Assimp exposes them via the displacement slot when authored.
+            var (specular, _) = ExtractAndEncode(
+                scene, mat, "specular", workDir, assetName, i, texconv, sourceDir);
+            var (detail, _) = ExtractAndEncode(
+                scene, mat, "detail",  workDir, assetName, i, texconv, sourceDir);
+
+            results.Add(new MaterialTextures(matName, diffuseRes.Tex, normal, diffuseRes.Alpha, specular, detail));
+            Log($"  mat[{i:D2}] '{matName}' -> diffuse={diffuseRes.Tex?.Name ?? "<none>"}{(diffuseRes.Alpha ? " (alpha)" : "")} normal={normal?.Name ?? "<none>"} spec={specular?.Name ?? "<none>"} detail={detail?.Name ?? "<none>"}");
         }
         return results;
+    }
+
+    /// <summary>
+    /// After a retexture bake, copy Normal (BumpSampler) textures from the
+    /// donor YDR's shaders into any material that got a new diffuse but lost
+    /// its normal. Keeps the embedded TXD complete so in-game sampling still
+    /// matches the base prop (housing / CreateObject / pack stream).
+    /// </summary>
+    public static void EnrichMissingMapsFromDonorYdr(
+        List<MaterialTextures> matsByMaterial,
+        Scene scene,
+        YdrFile donorYdr,
+        IReadOnlySet<string>? excludeMeshNames = null)
+    {
+        var shaders = donorYdr.Drawable?.ShaderGroup?.Shaders?.data_items;
+        if (shaders == null || matsByMaterial.Count == 0) return;
+
+        var surviving = new List<int>(scene.MeshCount);
+        for (int mi = 0; mi < scene.MeshCount; mi++)
+        {
+            var name = scene.Meshes[mi].Name;
+            if (excludeMeshNames != null && !string.IsNullOrEmpty(name)
+                && excludeMeshNames.Contains(name))
+                continue;
+            surviving.Add(mi);
+        }
+
+        int filled = 0;
+        for (int i = 0; i < surviving.Count && i < shaders.Length; i++)
+        {
+            int matIdx = scene.Meshes[surviving[i]].MaterialIndex;
+            if (matIdx < 0 || matIdx >= matsByMaterial.Count) continue;
+            var cur = matsByMaterial[matIdx];
+            if (cur.Normal != null) continue;
+
+            var bump = FindSamplerTexture(shaders[i], "BumpSampler", slotFallback: 1);
+            if (bump == null) continue;
+            matsByMaterial[matIdx] = cur with { Normal = bump };
+            filled++;
+        }
+        if (filled > 0)
+            Log($"  retexture: restored {filled} bump map(s) from base YDR into embedded TXD");
+    }
+
+    private static Texture? FindSamplerTexture(ShaderFX shader, string samplerName, int slotFallback)
+    {
+        var block = shader.ParametersList;
+        if (block?.Parameters == null) return null;
+
+        uint want = JenkHash.GenHash(samplerName);
+        if (block.Hashes != null && block.Hashes.Length == block.Parameters.Length)
+        {
+            for (int i = 0; i < block.Hashes.Length; i++)
+            {
+                if ((uint)block.Hashes[i] != want) continue;
+                if (block.Parameters[i].DataType != 0) continue;
+                return block.Parameters[i].Data as Texture;
+            }
+        }
+
+        int slot = 0;
+        foreach (var p in block.Parameters)
+        {
+            if (p.DataType != 0) continue;
+            if (slot == slotFallback)
+                return p.Data as Texture;
+            slot++;
+        }
+        return null;
     }
 
     /// <summary>
@@ -100,6 +234,10 @@ public static class TextureBaker
                 unique[m.Diffuse.Name] = m.Diffuse;
             if (m.Normal != null && !unique.ContainsKey(m.Normal.Name))
                 unique[m.Normal.Name] = m.Normal;
+            if (m.Specular != null && !unique.ContainsKey(m.Specular.Name))
+                unique[m.Specular.Name] = m.Specular;
+            if (m.Detail != null && !unique.ContainsKey(m.Detail.Name))
+                unique[m.Detail.Name] = m.Detail;
         }
 
         var list = new ResourcePointerList64<Texture>();
@@ -168,6 +306,7 @@ public static class TextureBaker
 
         int bound = 0, skipped = 0;
         bool glassUsed = false;
+        bool metalSpecUsed = false;
         for (int i = 0; i < shaders.Length; i++)
         {
             if (i >= surviving.Count) { skipped++; continue; }
@@ -189,6 +328,11 @@ public static class TextureBaker
 
             if (string.Equals(preset, "GLASS", StringComparison.OrdinalIgnoreCase))
                 glassUsed = true;
+            // Metal with no source spec map binds the generated grey spec —
+            // which, like the glass diffuse, must be embedded in the YTD.
+            if (string.Equals(preset, "METAL", StringComparison.OrdinalIgnoreCase)
+                && matsByMaterial[srcMatIdx].Specular == null)
+                metalSpecUsed = true;
 
             var filled = BindOneShader(shaders[i], matsByMaterial[srcMatIdx], preset);
             Log($"  shader[{i:D2}] <- mesh[{meshIdx:D2}] '{scene.Meshes[meshIdx].Name}' -> mat[{srcMatIdx}] '{matsByMaterial[srcMatIdx].MaterialName}' ({filled} tex, preset={preset ?? "STANDARD"})");
@@ -201,6 +345,13 @@ public static class TextureBaker
             AddTextureToDict(ydr.Drawable.ShaderGroup.TextureDictionary, GetGlassDiffuse());
             AddTextureToDict(ydr.Drawable.ShaderGroup.TextureDictionary, GetGlassNormal());
             Log("  embedded generated glass diffuse + flat normal (fiveos_glass) for see-through panes");
+        }
+        // Same for the generated metal spec map — the SpecSampler points at it,
+        // so it has to exist in the embedded YTD.
+        if (metalSpecUsed)
+        {
+            AddTextureToDict(ydr.Drawable.ShaderGroup.TextureDictionary, GetMetalSpec());
+            Log("  embedded generated metal spec map (fiveos_metal_spec)");
         }
         Log($"  shader bindings: {bound} ok, {skipped} skipped (kept meshes: {surviving.Count} / {scene.MeshCount})");
     }
@@ -363,15 +514,55 @@ public static class TextureBaker
             s.RenderBucketMask = (1u << shaderOverride.bucket) | 0xFF00u;
             return s.ParametersList.TextureParamsCount;
         }
-        else if (texs.DiffuseHasAlpha)
+
+        bool metal  = string.Equals(preset, "METAL",  StringComparison.OrdinalIgnoreCase);
+        bool cutout = string.Equals(preset, "CUTOUT", StringComparison.OrdinalIgnoreCase);
+
+        // Data-driven specular. A source specular map — or the Metal preset,
+        // which synthesizes a mid-grey one — promotes the part off the opaque
+        // default shader onto a real spec shader so RAGE actually samples the
+        // highlight. Like the glass/emissive presets, the parameter block is
+        // rebuilt to the canonical Sollumz layout for the chosen shader; a
+        // spec-named shader wearing default.sps parameter hashes is exactly the
+        // mismatch that crashes CW's viewer, so we never reuse FbxConverter's.
+        Texture? specTex = texs.Specular ?? (metal ? GetMetalSpec() : null);
+        if (specTex != null)
         {
-            // If the diffuse has alpha, swap the shader from the default
-            // opaque (`normal.sps`, bucket 0) to the cutout variant
-            // (`normal_decal.sps`, bucket 1) so RAGE actually samples alpha.
-            // Otherwise the alpha bytes we just preserved with BC3 still
-            // wouldn't reach the rasterizer — `normal.sps` ignores them
-            // and the geometry still renders opaque, casting a hard shadow
-            // exactly like the broken laptop-screen YDR.
+            bool hasBump   = texs.Normal != null;
+            bool hasDetail = texs.Detail != null;
+            // normal_spec carries a bump slot; spec is the bump-less variant;
+            // a detail map (only meaningful alongside a bump) upgrades to
+            // normal_spec_detail for tiling micro-surface at distance.
+            string sName = (hasBump, hasDetail) switch
+            {
+                (true,  true)  => "normal_spec_detail",
+                (true,  false) => "normal_spec",
+                (false, _)     => "spec",
+            };
+            byte bucket = (texs.DiffuseHasAlpha || cutout) ? (byte)1 : (byte)0;
+            s.Name         = JenkHash.GenHash(sName);
+            s.FileName     = JenkHash.GenHash(sName + ".sps");
+            s.RenderBucket = bucket;
+            s.ParametersList = BuildSpecParametersBlock(s, sName, texs, specTex, metal);
+            s.ParameterCount         = (byte)s.ParametersList.Count;
+            s.ParameterSize          = s.ParametersList.ParametersSize;
+            s.ParameterDataSize      = s.ParametersList.ParametersDataSize;
+            s.TextureParametersCount = s.ParametersList.TextureParamsCount;
+            s.RenderBucketMask       = (1u << bucket) | 0xFF00u;
+            return s.ParametersList.TextureParamsCount;
+        }
+
+        if (texs.DiffuseHasAlpha || cutout)
+        {
+            // If the diffuse has alpha (or the part is tagged Cutout), swap the
+            // shader from the default opaque (`normal.sps`, bucket 0) to the
+            // cutout variant (`normal_decal.sps`, bucket 1) so RAGE actually
+            // samples alpha. Otherwise the alpha bytes we just preserved with
+            // BC3 still wouldn't reach the rasterizer — `normal.sps` ignores
+            // them and the geometry still renders opaque, casting a hard shadow
+            // exactly like the broken laptop-screen YDR. normal_decal keeps the
+            // same DiffuseSampler(0)/BumpSampler(1) layout as normal, so the
+            // shared slot-binding loop below is all it needs — no rebuild.
             const string AlphaShaderName = "normal_decal";
             const string AlphaShaderFile = "normal_decal.sps";
             s.Name     = JenkHash.GenHash(AlphaShaderName);
@@ -381,7 +572,12 @@ public static class TextureBaker
 
         // Slot 0 = DiffuseSampler, slot 1 = BumpSampler in CW's normal.sps
         // (verified via hash-resolved param dump). Anything past slot 1 is
-        // a vector parameter we leave at the engine default.
+        // a vector parameter we leave at the engine default — EXCEPT leftover
+        // TextureRefs from FbxConverter (SpecularSampler, etc.). Those still
+        // point at Texture objects that may no longer live in the embedded
+        // TextureDictionary after a retexture/rebuild; RAGE then fails the
+        // lookup and the prop renders untextured/pink. Always rewrite every
+        // texture slot: bind 0/1, clear the rest.
         int slot = 0, filled = 0;
         foreach (var p in s.ParametersList.Parameters)
         {
@@ -392,7 +588,8 @@ public static class TextureBaker
                 1 => (object?)(texs.Normal ?? texs.Diffuse),
                 _ => null,
             };
-            if (tex != null) { p.Data = tex; filled++; }
+            p.Data = tex;
+            if (tex != null) filled++;
             slot++;
         }
         return filled;
@@ -497,12 +694,84 @@ public static class TextureBaker
         return block;
     }
 
+    /// <summary>Construct the parameter block for a specular shader
+    /// (<c>spec</c> / <c>normal_spec</c> / <c>normal_spec_detail</c>). Sampler
+    /// slots come first (RAGE packs texture parameters ahead of vectors — the
+    /// same order the glass/emissive presets use), then the specular vector
+    /// controls. Hash names and slot roles are the canonical GTA5 Shaders.xml
+    /// entries. The Metal preset drives the highlight harder (sharper, more
+    /// intense, lower Fresnel) so a synthesized grey spec map still reads as
+    /// metal; a data-driven spec map keeps the softer surface defaults.</summary>
+    private static CodeWalker.GameFiles.ShaderParametersBlock BuildSpecParametersBlock(
+        CodeWalker.GameFiles.ShaderFX owner, string shaderName, MaterialTextures texs,
+        Texture? specTex, bool metal)
+    {
+        var block = new CodeWalker.GameFiles.ShaderParametersBlock { Owner = owner };
+
+        static CodeWalker.GameFiles.ShaderParameter Tex(Texture? t) =>
+            new() { DataType = 0, Data = t };
+        static CodeWalker.GameFiles.ShaderParameter Vec(float x, float y = 0, float z = 0, float w = 0) =>
+            new() { DataType = 1, Data = new SharpDX.Vector4(x, y, z, w) };
+        static CodeWalker.GameFiles.MetaName H(string name) =>
+            (CodeWalker.GameFiles.MetaName)JenkHash.GenHash(name);
+
+        bool hasBump   = shaderName != "spec";                 // spec is bump-less
+        bool hasDetail = shaderName == "normal_spec_detail";
+
+        float specIntensity = metal ? 1.4f  : 0.7f;
+        float specFalloff   = metal ? 60f   : 100f;   // lower = broader, softer highlight
+        float specFresnel   = metal ? 0.55f : 0.97f;  // lower = metal-like edge response
+
+        var pars   = new List<CodeWalker.GameFiles.ShaderParameter>();
+        var hashes = new List<CodeWalker.GameFiles.MetaName>();
+        void Add(string hash, CodeWalker.GameFiles.ShaderParameter p)
+        { hashes.Add(H(hash)); pars.Add(p); }
+
+        // Texture samplers first.
+        Add("DiffuseSampler", Tex(texs.Diffuse));
+        if (hasBump)   Add("BumpSampler",   Tex(texs.Normal));
+        Add("SpecSampler", Tex(specTex));
+        if (hasDetail) Add("DetailSampler", Tex(texs.Detail));
+
+        // Vector controls.
+        if (hasBump) Add("bumpiness", Vec(1f));
+        Add("specularIntensityMult", Vec(specIntensity));
+        Add("specularFalloffMult",   Vec(specFalloff));
+        Add("specularFresnel",       Vec(specFresnel));
+        if (hasDetail)
+            // detailSettings.zw tile the detail map across the surface; .x
+            // scales its bump contribution. Conservative tiling so a present
+            // detail map adds micro-surface without visibly repeating.
+            Add("detailSettings", Vec(1f, 0f, 24f, 24f));
+
+        block.Parameters = pars.ToArray();
+        block.Hashes     = hashes.ToArray();
+        // Same structural guard as BuildPresetParametersBlock: a header/hash
+        // count desync corrupts the resource and crashes the client on load.
+        if (block.Parameters.Length != block.Hashes.Length)
+            throw new InvalidOperationException(
+                $"spec shader '{shaderName}' param/hash desync: {block.Parameters.Length} params vs {block.Hashes.Length} hashes");
+        block.Count = block.Parameters.Length;
+        return block;
+    }
+
+    // ── Generated metal specular map ────────────────────────────────────
+    // The Metal preset upgrades a part to normal_spec/spec even when the
+    // source carried no specular texture. GTA's SpecSampler reads the highlight
+    // strength from the map's luminance, so bind a uniform mid-grey (like the
+    // generated glass diffuse) — the specular*Mult vectors then shape the look.
+    private const string MetalSpecName = "fiveos_metal_spec";
+    private static Texture? _metalSpec;
+    private static Texture GetMetalSpec() =>
+        _metalSpec ??= BuildSolidTexture(150, 150, 150, 255, MetalSpecName);
+
     // ---------------------------------------------------------------------
 
     private static (Texture? Texture, bool HasAlpha) ExtractAndEncode(
         Scene scene, Assimp.Material mat, string role,
         string workDir, string assetName, int matIdx, string texconv, string sourceDir,
-        string? diffuseOverridePath = null)
+        string? diffuseOverridePath = null,
+        string? overrideTexName = null)
     {
         byte[]? srcBytes = null;
         string srcExt = ".png";
@@ -532,6 +801,16 @@ public static class TextureBaker
                            : PbrSlot(mat, TextureType.BaseColor),
                 "normal"  => mat.HasTextureNormal  ? (TextureSlot?)mat.TextureNormal
                            : PbrSlot(mat, TextureType.NormalCamera),
+                // GTA's SpecSampler is a legacy specular/gloss map. PBR
+                // metallic-roughness exports don't have a direct equivalent —
+                // fall back to the metalness map (bright metal = strong spec),
+                // then shininess, so a spec-authored FBX still lights up.
+                "specular" => mat.HasTextureSpecular ? (TextureSlot?)mat.TextureSpecular
+                            : PbrSlot(mat, TextureType.Metalness)
+                              ?? PbrSlot(mat, TextureType.Shininess),
+                // Detail maps are seldom authored in glTF/FBX; the displacement
+                // slot is the closest Assimp semantic when one exists.
+                "detail" => PbrSlot(mat, TextureType.Displacement),
                 _ => null,
             };
             if (slot == null) return (null, false);
@@ -558,8 +837,23 @@ public static class TextureBaker
         }
         if (srcBytes == null) return (null, false);
 
-        string suffix = role == "normal" ? "_n" : "";
-        string baseName = $"{assetName}_mat{matIdx:D2}{suffix}";
+        // Distinct suffix per role so specular/detail bakes don't collide with
+        // the diffuse name ({asset}_matNN) in the workDir or the embedded TXD.
+        string suffix = role switch
+        {
+            "normal"   => "_n",
+            "specular" => "_s",
+            "detail"   => "_dt",
+            _          => "",
+        };
+        // Library/override textures keep the image's own name so the user
+        // finds them in the compiled TXD; source-slot bakes stay per-material.
+        bool usedOverride = role == "diffuse"
+            && !string.IsNullOrEmpty(diffuseOverridePath)
+            && File.Exists(diffuseOverridePath);
+        string baseName = usedOverride && !string.IsNullOrEmpty(overrideTexName)
+            ? overrideTexName!
+            : $"{assetName}_mat{matIdx:D2}{suffix}";
         // IMPORTANT: write with the REAL image extension. texconv picks its
         // input codec from the extension, so a JPEG written as ".png" fails to
         // decode and the model comes out untextured. Meshy diffuse maps are JPEG.
@@ -596,12 +890,20 @@ public static class TextureBaker
         };
         foreach (var a in args) psi.ArgumentList.Add(a);
 
-        var proc = Process.Start(psi);
+        using var proc = Process.Start(psi);
         if (proc == null) return (null, false);
-        proc.WaitForExit(30_000);
+        if (!proc.WaitForExit(30_000))
+        {
+            try { proc.Kill(entireProcessTree: true); } catch { /* */ }
+            Log($"  texconv timed out for {baseName}");
+            return (null, false);
+        }
         if (proc.ExitCode != 0)
         {
-            Log($"  texconv failed for {baseName}: {proc.StandardError.ReadToEnd().Trim()[..Math.Min(200, proc.StandardError.ReadToEnd().Length)]}");
+            var err = "";
+            try { err = proc.StandardError.ReadToEnd().Trim(); } catch { /* */ }
+            if (err.Length > 200) err = err[..200];
+            Log($"  texconv failed for {baseName}: {err}");
             return (null, false);
         }
         if (!File.Exists(ddsPath)) return (null, false);

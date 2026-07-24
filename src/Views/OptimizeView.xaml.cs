@@ -64,12 +64,59 @@ public partial class OptimizeView : UserControl
         // it's a full in-memory save, so only fire once the user has settled.
         _sizeDebounce = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(600) };
         _sizeDebounce.Tick += (_, _) => { _sizeDebounce.Stop(); _ = ComputeSizeEstimateAsync(); };
-        Loaded += (_, _) => WirePreviewPanel();
+        Loaded += (_, _) => { WirePreviewPanel(); ApplySavedQueueWidth(); };
         DataContextChanged += (_, _) => WirePreviewPanel();
-        Unloaded += (_, _) => { _debounce.Stop(); _sizeDebounce.Stop(); };
+        Unloaded += (_, _) =>
+        {
+            _debounce.Stop();
+            _sizeDebounce.Stop();
+        };
         // Spawn the WebView2 only when the Optimize tab is first shown — the
         // Edge process tree (~40 MB) shouldn't exist for users who never open it.
         IsVisibleChanged += (_, e) => { if (e.NewValue is true && !_webViewReady) _ = InitWebViewAsync(); };
+    }
+
+    /// <summary>Dispose WebView2, cancel loads, and delete the session viewer dir.</summary>
+    public void Teardown()
+    {
+        _debounce.Stop();
+        _sizeDebounce.Stop();
+
+        try { _loadCts?.Cancel(); _loadCts?.Dispose(); } catch { /* */ }
+        _loadCts = null;
+        try { _galleryCts?.Cancel(); _galleryCts?.Dispose(); } catch { /* */ }
+        _galleryCts = null;
+
+        if (_vmHandler != null && Vm != null)
+        {
+            try { Vm.PropertyChanged -= _vmHandler; } catch { /* */ }
+            _vmHandler = null;
+        }
+
+        try
+        {
+            if (OptimizeViewport?.CoreWebView2 != null)
+                OptimizeViewport.CoreWebView2.WebMessageReceived -= OnViewerMessage;
+        }
+        catch { /* */ }
+
+        try { OptimizeViewport?.Dispose(); } catch { /* already gone */ }
+        _webViewReady = false;
+        _viewerReady = false;
+
+        _galleryTiles.Clear();
+
+        if (!string.IsNullOrEmpty(_sessionDir))
+        {
+            try
+            {
+                if (Directory.Exists(_sessionDir))
+                    Directory.Delete(_sessionDir, recursive: true);
+            }
+            catch { /* CacheService sweeps leftovers */ }
+            _sessionDir = null;
+        }
+        _extractor = null;
     }
 
     private OptimizeViewModel? Vm => DataContext as OptimizeViewModel;
@@ -93,9 +140,32 @@ public partial class OptimizeView : UserControl
 
     /// <summary>Collapse the left options column for the geometry/LOD modes
     /// (everything is driven from the workbench); keep it for texture modes,
-    /// which use the compression settings.</summary>
+    /// which use the compression settings. Texture modes honour the width the
+    /// user last dragged the options splitter to.</summary>
     private void UpdateOptionsColumn()
-        => OptionsColumn.Width = (Vm?.IsTextureMode == true) ? new GridLength(320) : new GridLength(0);
+        => OptionsColumn.Width = (Vm?.IsTextureMode == true)
+            ? new GridLength(UserSettings.LoadOptimizeOptionsWidth())
+            : new GridLength(0);
+
+    /// <summary>Restore the queue column to the pixel width the user last
+    /// dragged the content splitter to. Left at its default proportional
+    /// (2*) share until then.</summary>
+    private void ApplySavedQueueWidth()
+    {
+        var w = UserSettings.LoadOptimizeQueueWidth();
+        if (w > 0) QueueColumn.Width = new GridLength(w);
+    }
+
+    private void OnOptionsSplitterDragCompleted(object sender, System.Windows.Controls.Primitives.DragCompletedEventArgs e)
+        => UserSettings.SaveOptimizeOptionsWidth(OptionsColumn.ActualWidth);
+
+    private void OnContentSplitterDragCompleted(object sender, System.Windows.Controls.Primitives.DragCompletedEventArgs e)
+    {
+        // The queue starts as a star column; pin it to the dragged pixel width
+        // so the preview/gallery keeps every remaining pixel as the window grows.
+        QueueColumn.Width = new GridLength(QueueColumn.ActualWidth);
+        UserSettings.SaveOptimizeQueueWidth(QueueColumn.ActualWidth);
+    }
 
     // ─── Mode picker ──────────────────────────────────────────────────
 
@@ -115,6 +185,11 @@ public partial class OptimizeView : UserControl
 
     private void OnDragOver(object sender, DragEventArgs e)
     {
+        // Hosted tool modes (txAdmin) run their own drag-drop inside the
+        // swapped-in view — don't intercept the tunneling events here or
+        // the hosted view never sees them.
+        if (Vm?.IsHostedToolMode == true) return;
+
         e.Effects = DragDropEffects.None;
         if (Vm == null) { e.Handled = true; return; }
         if (e.Data.GetDataPresent(DataFormats.FileDrop))
@@ -129,6 +204,9 @@ public partial class OptimizeView : UserControl
     private void OnFilesDropped(object sender, DragEventArgs e)
     {
         if (Vm == null) return;
+        // Let the hosted tool view (txAdmin) take its own drops instead of
+        // routing everything into the asset queues.
+        if (Vm.IsHostedToolMode) return;
         if (!e.Data.GetDataPresent(DataFormats.FileDrop)) return;
         var files = (string[])e.Data.GetData(DataFormats.FileDrop)!;
         Vm.AddPaths(files);
@@ -322,6 +400,7 @@ public partial class OptimizeView : UserControl
         OptYtdNameText.Text = "scanning for .ytd…";
 
         _loadCts?.Cancel();
+        _loadCts?.Dispose();
         _loadCts = new CancellationTokenSource();
         _ = LoadAsync(item, item.Path, vm.Mode, _loadCts.Token);
     }
@@ -450,6 +529,7 @@ public partial class OptimizeView : UserControl
     private void LoadTextureGallery(OptimizeQueueItem? item)
     {
         _galleryCts?.Cancel();
+        _galleryCts?.Dispose();
         _galleryTiles.Clear();
         GalleryHeader.Text = "TEXTURES";
 
@@ -846,6 +926,7 @@ public partial class OptimizeView : UserControl
             if (ReferenceEquals(item, _loadedItem))
             {
                 _loadCts?.Cancel();
+                _loadCts?.Dispose();
                 _loadCts = new CancellationTokenSource();
                 await LoadAsync(item, path, mode, _loadCts.Token);
             }

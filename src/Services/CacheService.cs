@@ -1,6 +1,7 @@
 // Copyright (c) 2026 FiveOS. All rights reserved.
 // https://github.com/w3bportal/FiveOS
 
+using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
@@ -8,36 +9,39 @@ using System.Linq;
 namespace FiveOS.Services;
 
 /// <summary>
-/// Inventory + clear logic for the temp-folder caches the app generates
-/// during normal use:
+/// Inventory + clear logic for caches the app generates during normal use:
 /// <list type="bullet">
-///   <item><c>%TEMP%\FiveOS\WebView2\</c> — WebView2 user data (locked while app runs)</item>
-///   <item><c>%TEMP%\FiveOS\Viewer-*\</c> — per-session viewer bundle (active one locked)</item>
-///   <item><c>%TEMP%\FiveOS\ytd-opt-*\</c>, <c>sketchfab-*\</c>, plain GUIDs — per-operation work dirs</item>
-///   <item><c>%TEMP%\FiveOS\motion-opt\*\</c> — pre-upload clip transcode work dirs</item>
-///   <item><c>%TEMP%\ydr-writer\*\</c> — YDR writer work dirs</item>
+///   <item><c>%TEMP%\FiveOS\</c> — WebView2 profiles, viewer bundles, Sketchfab/AI/opt temps</item>
+///   <item><c>%TEMP%\ydr-writer\</c> — YDR writer work dirs</item>
+///   <item><c>%LOCALAPPDATA%\FiveOS\runtime\</c> — old version extracts (current kept)</item>
 /// </list>
-///
-/// Saved API keys live under <c>%APPDATA%\FiveOS\secrets\</c> (DPAPI), and
-/// extracted runtime assets live under <c>%LOCALAPPDATA%\FiveOS\runtime\</c>;
-/// neither path is touched here.
+/// Secrets under <c>%APPDATA%\FiveOS\secrets\</c> are never touched.
 /// </summary>
 public static class CacheService
 {
     public sealed record Report(long BytesTotal, long BytesFreed, int SkippedDirs);
 
-    private static IEnumerable<string> CacheRoots()
+    /// <summary>How many content-keyed Emotes viewer folders to keep when pruning.</summary>
+    private const int KeepViewerPoseFolders = 2;
+
+    private static IEnumerable<string> TempCacheRoots()
     {
         var temp = Path.GetTempPath();
         yield return Path.Combine(temp, "FiveOS");
         yield return Path.Combine(temp, "ydr-writer");
     }
 
+    private static string RuntimeRoot() =>
+        Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+            "FiveOS", "runtime");
+
     public static long ComputeSize()
     {
         long total = 0;
-        foreach (var root in CacheRoots())
+        foreach (var root in TempCacheRoots())
             total += DirSize(root);
+        total += DirSize(RuntimeRoot());
         return total;
     }
 
@@ -46,14 +50,19 @@ public static class CacheService
         long total = 0, freed = 0;
         var skipped = 0;
 
-        foreach (var root in CacheRoots())
+        // Drop stale Emotes content caches first so Clear frees disk even when
+        // the active WebView2 profile is locked.
+        PruneViewerPoseFolders(ref total, ref freed, ref skipped);
+
+        foreach (var root in TempCacheRoots())
         {
             if (!Directory.Exists(root)) continue;
 
-            // Try every immediate child individually so a single locked dir
-            // (active WebView2 / Viewer session) doesn't abort the rest.
             foreach (var child in Directory.EnumerateFileSystemEntries(root))
             {
+                // ViewerPose folders already handled (kept newest N).
+                if (IsViewerPoseDir(child)) continue;
+
                 var size = PathSize(child);
                 total += size;
                 if (TryDelete(child))
@@ -63,7 +72,113 @@ public static class CacheService
             }
         }
 
+        // Old published runtime extracts (previous app versions / hash dirs).
+        PurgeStaleRuntime(ref total, ref freed, ref skipped);
+
         return new Report(total, freed, skipped);
+    }
+
+    /// <summary>Called on startup / after Clear — keep only the newest
+    /// content-keyed Emotes viewer folders so upgrades don't leave GB of
+    /// three.js bundles under %TEMP%.</summary>
+    public static void PruneStaleViewerCaches()
+    {
+        long t = 0, f = 0;
+        var s = 0;
+        PruneViewerPoseFolders(ref t, ref f, ref s);
+        PurgeStaleRuntime(ref t, ref f, ref s);
+    }
+
+    private static bool IsViewerPoseDir(string path) =>
+        Directory.Exists(path)
+        && Path.GetFileName(path).StartsWith("ViewerPose-", StringComparison.OrdinalIgnoreCase);
+
+    private static void PruneViewerPoseFolders(ref long total, ref long freed, ref int skipped)
+    {
+        var root = Path.Combine(Path.GetTempPath(), "FiveOS");
+        if (!Directory.Exists(root)) return;
+
+        List<DirectoryInfo> poseDirs;
+        try
+        {
+            poseDirs = new DirectoryInfo(root)
+                .EnumerateDirectories("ViewerPose-*")
+                .OrderByDescending(d => d.LastWriteTimeUtc)
+                .ToList();
+        }
+        catch { return; }
+
+        for (var i = 0; i < poseDirs.Count; i++)
+        {
+            var dir = poseDirs[i];
+            var size = DirSize(dir.FullName);
+            total += size;
+            if (i < KeepViewerPoseFolders)
+                continue;
+            if (TryDelete(dir.FullName))
+                freed += size;
+            else
+                skipped++;
+        }
+    }
+
+    private static void PurgeStaleRuntime(ref long total, ref long freed, ref int skipped)
+    {
+        var root = RuntimeRoot();
+        if (!Directory.Exists(root)) return;
+
+        var currentVersion = typeof(CacheService).Assembly.GetName().Version?.ToString() ?? "0.0.0";
+
+        foreach (var versionDir in Directory.EnumerateDirectories(root))
+        {
+            var name = Path.GetFileName(versionDir);
+            if (string.Equals(name, currentVersion, StringComparison.OrdinalIgnoreCase))
+            {
+                // Inside the current version, keep only the newest hash extract
+                // per subdir prefix (viewer-*, engine-*).
+                PruneOldHashExtracts(versionDir, ref total, ref freed, ref skipped);
+                continue;
+            }
+
+            var size = DirSize(versionDir);
+            total += size;
+            if (TryDelete(versionDir))
+                freed += size;
+            else
+                skipped++;
+        }
+    }
+
+    private static void PruneOldHashExtracts(string versionDir, ref long total, ref long freed, ref int skipped)
+    {
+        IEnumerable<IGrouping<string, DirectoryInfo>> groups;
+        try
+        {
+            groups = new DirectoryInfo(versionDir)
+                .EnumerateDirectories()
+                .GroupBy(d =>
+                {
+                    var n = d.Name;
+                    var dash = n.LastIndexOf('-');
+                    return dash > 0 ? n[..dash] : n;
+                });
+        }
+        catch { return; }
+
+        foreach (var g in groups)
+        {
+            var ordered = g.OrderByDescending(d => d.LastWriteTimeUtc).ToList();
+            for (var i = 0; i < ordered.Count; i++)
+            {
+                var size = DirSize(ordered[i].FullName);
+                total += size;
+                if (i == 0) continue; // keep newest hash for this prefix
+                if (TryDelete(ordered[i].FullName))
+                    freed += size;
+                else
+                    skipped++;
+            }
+        }
     }
 
     private static long DirSize(string path)

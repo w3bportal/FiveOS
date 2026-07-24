@@ -77,12 +77,25 @@ public sealed class VehicleMeshBuilder
         }
         catch { _extractor.SetExternalTextures(null); _extractor.SetLiveryTexture(null); }
 
-        var bones = drawable.Skeleton?.Bones?.Items;
+        var skeleton = drawable.Skeleton;
+        try
+        {
+            skeleton?.ResetBoneTransforms();
+            skeleton?.BuildTransformations();
+            skeleton?.UpdateBoneTransforms();
+        }
+        catch { /* bind-pose matrices stay at whatever the file loaded */ }
+
+        var bones = skeleton?.Bones?.Items;
         string BoneName(int i) => (bones != null && i >= 0 && i < bones.Length ? bones[i].Name : null) ?? "body";
         float[] BonePivot(string name)
         {
             var b = bones?.FirstOrDefault(x => string.Equals(x.Name, name, StringComparison.OrdinalIgnoreCase));
-            return b != null ? new[] { b.Translation.X, b.Translation.Y, b.Translation.Z } : new[] { 0f, 0f, 0f };
+            if (b == null) return new[] { 0f, 0f, 0f };
+            var t = b.AbsTransform.TranslationVector;
+            if (t.X != 0 || t.Y != 0 || t.Z != 0)
+                return new[] { t.X, t.Y, t.Z };
+            return new[] { b.Translation.X, b.Translation.Y, b.Translation.Z };
         }
 
         var parts = new List<(DrawableMeshExtractor.Part Part, string Group)>();
@@ -173,41 +186,67 @@ public sealed class VehicleMeshBuilder
     private static bool IsNamedBetter(Texture cur, Texture cand)
         => (long)cand.Width * cand.Height > (long)cur.Width * cur.Height;
 
-    /// <summary>Vehicle geometries are rigidly skinned: every vertex carries
-    /// the same blend index, which selects into the geometry's BoneIds
-    /// palette (verified: 1 distinct blend per geometry on real cars). The
-    /// first vertex's blend byte (declaration component 2, "BlendIndices")
-    /// therefore names the bone driving the whole geometry.</summary>
     private static int GeometryBone(DrawableGeometry geom, DrawableModel model)
     {
         try
         {
-            var vd = geom.VertexData;
             var ids = geom.BoneIds;
-            if (vd?.VertexBytes is { } bytes && vd.Info != null && ids is { Length: > 0 })
+            if (ids is { Length: > 0 })
             {
-                int off = vd.Info.GetComponentOffset(2);
-                if (off >= 0 && bytes.Length > off)
+                var vd = geom.VertexData;
+                if (vd?.VertexBytes is { } bytes && vd.Info != null && vd.VertexCount > 0 && vd.VertexStride > 0)
                 {
-                    int blend = bytes[off];
-                    if (blend < ids.Length) return ids[blend];
+                    int off = FindBlendIndexOffset(vd.Info);
+                    if (off >= 0)
+                    {
+                        var tallies = new Dictionary<int, int>();
+                        int n = Math.Min(vd.VertexCount, 96);
+                        int stride = vd.VertexStride;
+                        for (int i = 0; i < n; i++)
+                        {
+                            int o = i * stride + off;
+                            if (o < 0 || o >= bytes.Length) break;
+                            int blend = bytes[o];
+                            if (blend >= ids.Length) continue;
+                            int bone = ids[blend];
+                            tallies[bone] = tallies.TryGetValue(bone, out var c) ? c + 1 : 1;
+                        }
+                        if (tallies.Count > 0)
+                            return tallies.OrderByDescending(kv => kv.Value).First().Key;
+                    }
                 }
                 return ids[0];
             }
-            if (ids is { Length: > 0 }) return ids[0];
         }
         catch { /* fall through to the model's bone */ }
         return model.BoneIndex;
     }
 
-    /// <summary>Which sidebar toggle a group gets; null = always-on body.</summary>
+    private static int FindBlendIndexOffset(VertexDeclaration info)
+    {
+        int off = info.GetComponentOffset(2);
+        if (off >= 0) return off;
+        for (int c = 0; c < 16; c++)
+        {
+            var t = info.GetComponentType(c);
+            if (t is VertexComponentType.UByte4 or VertexComponentType.Colour)
+            {
+                off = info.GetComponentOffset(c);
+                if (off >= 0) return off;
+            }
+        }
+        return -1;
+    }
+
     private static string? GroupKind(string group)
     {
         var g = group.ToLowerInvariant();
-        if (g.StartsWith("door_dside")) return "door_l";
-        if (g.StartsWith("door_pside")) return "door_r";
-        if (g.StartsWith("bonnet")) return "bonnet";
-        if (g.StartsWith("boot")) return "boot";
+        if (g.StartsWith("door_dside") || g is "door_lf" or "door_lr" or "door_l") return "door_l";
+        if (g.StartsWith("door_pside") || g is "door_rf" or "door_rr" or "door_r") return "door_r";
+        if (g.StartsWith("door_hatch_l")) return "door_l";
+        if (g.StartsWith("door_hatch_r")) return "door_r";
+        if (g.StartsWith("bonnet") || g is "hood") return "bonnet";
+        if (g.StartsWith("boot") || g is "trunk" or "bag") return "boot";
         if (g.StartsWith("extra_")) return "extra";
         if (g.StartsWith("wheel_")) return "wheel";
         if (g.StartsWith("misc_") || g.StartsWith("window") || g.StartsWith("windscreen")) return "part";

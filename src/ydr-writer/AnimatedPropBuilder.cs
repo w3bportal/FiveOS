@@ -349,6 +349,126 @@ internal static class AnimatedPropBuilder
         return new Result(true, clipName, 2, 1, frames, durationSec, models.Length, null);
     }
 
+    /// <summary>
+    /// Build an animated prop from an authored keys JSON file produced by
+    /// the Animated workspace timeline. Same 2-bone rigid spin skeleton as
+    /// <see cref="BuildAutoSpin"/>, but rotation samples come from the
+    /// user's keys (euler degrees → quaternion, linearly interpolated).
+    /// JSON shape: { "fps": 30, "duration": 4.0, "keys": [ { "t": 0, "rx": 0, "ry": 0, "rz": 0 }, ... ] }
+    /// </summary>
+    public static Result BuildFromKeys(YdrFile ydr, ConvertOptions opts, string streamDir)
+    {
+        var drawable = ydr.Drawable;
+        var models = drawable?.DrawableModels?.High;
+        if (drawable is null || models is null || models.Length == 0)
+            return new Result(false, null, 0, 0, 0, 0, 0, "no drawable models for keys");
+
+        if (string.IsNullOrWhiteSpace(opts.AnimKeysPath) || !System.IO.File.Exists(opts.AnimKeysPath))
+            return new Result(false, null, 0, 0, 0, 0, 0, "anim-keys file missing");
+
+        string json;
+        try { json = System.IO.File.ReadAllText(opts.AnimKeysPath); }
+        catch (Exception ex)
+        {
+            return new Result(false, null, 0, 0, 0, 0, 0, "anim-keys read failed: " + ex.Message);
+        }
+
+        if (!TryParseAnimKeys(json, out var fps, out var duration, out var keys) || keys.Count < 2)
+            return new Result(false, null, 0, 0, 0, 0, 0, "anim-keys need at least 2 entries");
+
+        var acc = Vector3.Zero; long n = 0;
+        foreach (var m in models)
+            foreach (var g in m.Geometries ?? Array.Empty<DrawableGeometry>())
+            {
+                var vd = g.VertexData; if (vd == null) continue;
+                for (int i = 0; i < vd.VertexCount; i++)
+                { var p = vd.GetVector3(i, 0); acc += new Vector3(p.X, p.Y, p.Z); n++; }
+            }
+        var centroid = n > 0 ? acc / n : Vector3.Zero;
+
+        ushort rotTag = (ushort)(Joaat(opts.AssetName + "_rotation") & 0xFFFF);
+        if (rotTag == 0) rotTag = 1;
+        var skel = new Skeleton();
+        skel.ReadXml(LoadXml(BuildSpinSkeletonXml(centroid, rotTag)).DocumentElement!);
+        skel.BuildBonesMap();
+        drawable.Skeleton = skel;
+        foreach (var m in models) { m.BoneIndex = 1; m.HasSkin = 0; }
+
+        fps = Math.Clamp(fps, 1, 120);
+        duration = Math.Max(0.1, duration);
+        int frames = Math.Max(2, (int)Math.Round(duration * fps));
+        var quats = new NQuaternion[frames];
+        for (int f = 0; f < frames; f++)
+        {
+            double t = duration * f / Math.Max(1, frames - 1);
+            SampleEuler(keys, t, out double rx, out double ry, out double rz);
+            // Degrees → radians; compose ZYX (matches gizmo readout order).
+            var qx = NQuaternion.CreateFromAxisAngle(Vector3.UnitX, (float)(rx * Math.PI / 180.0));
+            var qy = NQuaternion.CreateFromAxisAngle(Vector3.UnitY, (float)(ry * Math.PI / 180.0));
+            var qz = NQuaternion.CreateFromAxisAngle(Vector3.UnitZ, (float)(rz * Math.PI / 180.0));
+            quats[f] = NQuaternion.Normalize(qz * qy * qx);
+        }
+
+        var clipName = YcdAnimationBuilder.SanitizeClipName(opts.AssetName);
+        System.IO.File.WriteAllBytes(
+            System.IO.Path.Combine(streamDir, opts.AssetName + ".ydr"), ydr.Save());
+        var ycdBytes = YcdAnimationBuilder.Build(clipName,
+            new List<PosedBoneTrack> { new(rotTag, quats) }, frames, fps);
+        System.IO.File.WriteAllBytes(System.IO.Path.Combine(streamDir, clipName + ".ycd"), ycdBytes);
+        RewriteYtypAutoStart(drawable, opts, streamDir, clipName);
+
+        Log($"timeline keys: {keys.Count} keys → {frames} frames @ {fps}fps ({duration:F2}s), " +
+            $"{models.Length} model(s) bound -> {clipName}.ycd ({ycdBytes.Length:N0} bytes)");
+        return new Result(true, clipName, 2, 1, frames, duration, models.Length, null);
+    }
+
+    private readonly record struct AnimKeySample(double T, double Rx, double Ry, double Rz);
+
+    private static bool TryParseAnimKeys(string json, out int fps, out double duration, out List<AnimKeySample> keys)
+    {
+        fps = 30; duration = 4; keys = new List<AnimKeySample>();
+        try
+        {
+            using var doc = System.Text.Json.JsonDocument.Parse(json);
+            var root = doc.RootElement;
+            if (root.TryGetProperty("fps", out var fpsEl) && fpsEl.TryGetInt32(out var f)) fps = f;
+            if (root.TryGetProperty("duration", out var durEl) && durEl.TryGetDouble(out var d)) duration = d;
+            if (!root.TryGetProperty("keys", out var arr) || arr.ValueKind != System.Text.Json.JsonValueKind.Array)
+                return false;
+            foreach (var el in arr.EnumerateArray())
+            {
+                double t = el.TryGetProperty("t", out var te) && te.TryGetDouble(out var tv) ? tv : 0;
+                double rx = el.TryGetProperty("rx", out var xe) && xe.TryGetDouble(out var xv) ? xv : 0;
+                double ry = el.TryGetProperty("ry", out var ye) && ye.TryGetDouble(out var yv) ? yv : 0;
+                double rz = el.TryGetProperty("rz", out var ze) && ze.TryGetDouble(out var zv) ? zv : 0;
+                keys.Add(new AnimKeySample(t, rx, ry, rz));
+            }
+            keys.Sort((a, b) => a.T.CompareTo(b.T));
+            if (keys.Count >= 2)
+                duration = Math.Max(duration, keys[^1].T);
+            return keys.Count >= 2;
+        }
+        catch { return false; }
+    }
+
+    private static void SampleEuler(List<AnimKeySample> keys, double t, out double rx, out double ry, out double rz)
+    {
+        if (t <= keys[0].T) { rx = keys[0].Rx; ry = keys[0].Ry; rz = keys[0].Rz; return; }
+        var last = keys[^1];
+        if (t >= last.T) { rx = last.Rx; ry = last.Ry; rz = last.Rz; return; }
+        for (int i = 0; i < keys.Count - 1; i++)
+        {
+            var a = keys[i]; var b = keys[i + 1];
+            if (t < a.T || t > b.T) continue;
+            double u = (b.T - a.T) < 1e-9 ? 0 : (t - a.T) / (b.T - a.T);
+            rx = a.Rx + (b.Rx - a.Rx) * u;
+            ry = a.Ry + (b.Ry - a.Ry) * u;
+            rz = a.Rz + (b.Rz - a.Rz) * u;
+            return;
+        }
+        rx = last.Rx; ry = last.Ry; rz = last.Rz;
+    }
+
     /// <summary>Rewrite the archetype .ytyp (if present) so the placed prop
     /// auto-plays the clip: clip-dictionary reference + Has Anim (512) +
     /// Auto Start Anim (524288) flags. Shared by the import + auto-spin paths.</summary>

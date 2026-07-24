@@ -1,0 +1,1332 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Car Pack UI — layout preview</title>
+  <style>
+    :root {
+      --bg: #2B2B2B;
+      --panel: #262626;
+      --panel-deep: #1F1F1F;
+      --panel-raised: #3D3D3D;
+      --border: #363636;
+      --hover: #333333;
+      --input: #1C1C1C;
+      --track: #4D4D4D;
+      --text: #CCCCCC;
+      --muted: #A6A6A6;
+      --faint: #666666;
+      --accent: #0078D4;
+      --accent-bright: #3A9EEC;
+      --accent-deep: #005A9E;
+      --accent-soft: rgba(0, 120, 212, 0.2);
+      --accent-text: #FFFFFF;
+      --viewport: #1F1F1F;
+      --ok: #3FB950;
+      --warn: #E0A33A;
+      --radius: 3px;
+      --radius-lg: 4px;
+      --font: "Segoe UI", system-ui, -apple-system, sans-serif;
+      --mono: Consolas, "Cascadia Mono", "Courier New", monospace;
+    }
+    * { box-sizing: border-box; }
+    html, body {
+      margin: 0; height: 100%;
+      background: var(--bg);
+      color: var(--text);
+      font-family: var(--font);
+      font-size: 13px;
+    }
+    .app {
+      display: grid;
+      grid-template-rows: auto 1fr 40px;
+      height: 100%;
+      background: var(--bg);
+    }
+    .top {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+      padding: 10px 16px;
+      border-bottom: 1px solid var(--border);
+      background: var(--panel);
+    }
+    .top-left { display: flex; align-items: center; gap: 10px; flex-shrink: 0; }
+    .top-left h1 { font-size: 15px; font-weight: 600; margin: 0; }
+    .top-left .count { font-size: 11px; color: var(--muted); }
+    .pack-stats {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px 18px;
+      align-items: center;
+      justify-content: flex-end;
+      min-width: 0;
+    }
+    .stat {
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+      min-width: 72px;
+    }
+    .stat .label {
+      font-size: 9px;
+      font-weight: 600;
+      letter-spacing: .06em;
+      color: var(--faint);
+      text-transform: uppercase;
+    }
+    .stat .value {
+      font-size: 13px;
+      font-weight: 600;
+      color: var(--text);
+      font-variant-numeric: tabular-nums;
+    }
+    .stat.warn .value { color: var(--warn); }
+    .stat.ok .value { color: var(--ok); }
+    .stat-divider {
+      width: 1px;
+      height: 28px;
+      background: var(--border);
+      flex-shrink: 0;
+    }
+    .top-actions { display: flex; gap: 8px; }
+    .btn {
+      border: 1px solid var(--border);
+      background: var(--panel-raised);
+      color: var(--text);
+      font-family: var(--font);
+      font-size: 12px;
+      padding: 7px 12px;
+      border-radius: var(--radius);
+      cursor: pointer;
+    }
+    .btn:hover { background: var(--hover); }
+    .btn.primary {
+      background: var(--accent);
+      border-color: var(--accent-deep);
+      color: var(--accent-text);
+      font-weight: 600;
+    }
+    .btn.primary:hover { background: var(--accent-bright); border-color: var(--accent); }
+    .btn.ghost {
+      background: transparent;
+      padding: 6px 10px;
+    }
+    .icon-btn {
+      width: 30px; height: 30px;
+      display: inline-flex; align-items: center; justify-content: center;
+      border: 1px solid var(--border);
+      background: var(--panel);
+      color: var(--text);
+      border-radius: var(--radius);
+      cursor: pointer;
+      font-size: 13px;
+    }
+    .icon-btn:hover { background: var(--hover); }
+
+    .main {
+      display: flex;
+      min-height: 0;
+      overflow: hidden;
+    }
+
+    .split-v, .split-h {
+      flex: 0 0 5px;
+      background: var(--border);
+      position: relative;
+      z-index: 3;
+    }
+    .split-v {
+      cursor: col-resize;
+    }
+    .split-h {
+      cursor: row-resize;
+    }
+    .split-v:hover, .split-h:hover,
+    .split-v.dragging, .split-h.dragging {
+      background: var(--accent);
+    }
+    body.resizing-col { cursor: col-resize !important; user-select: none; }
+    body.resizing-row { cursor: row-resize !important; user-select: none; }
+
+    .layers {
+      width: 260px;
+      min-width: 180px;
+      max-width: 55vw;
+      flex: 0 0 auto;
+      background: var(--panel);
+      display: flex;
+      flex-direction: column;
+      min-height: 0;
+      overflow: hidden;
+    }
+    .panel-label {
+      font-size: 11px;
+      font-weight: 600;
+      letter-spacing: .06em;
+      color: var(--muted);
+      opacity: 0.9;
+      padding: 14px 14px 8px;
+    }
+    .tree {
+      flex: 1;
+      overflow: auto;
+      padding: 0 8px 12px;
+      font-size: 12px;
+      font-family: var(--mono);
+    }
+    .node {
+      display: flex; align-items: center; gap: 8px;
+      padding: 5px 6px;
+      border-radius: var(--radius);
+      cursor: pointer;
+      color: var(--text);
+    }
+    .node:hover { background: var(--hover); }
+    .node.active { background: var(--accent); color: var(--accent-text); }
+    .node .chev { width: 12px; opacity: .55; font-size: 11px; }
+    .node .ico { opacity: .85; width: 14px; text-align: center; }
+    .node .name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .node .size {
+      margin-left: auto;
+      font-size: 10px;
+      opacity: .55;
+      font-variant-numeric: tabular-nums;
+      white-space: nowrap;
+      padding-left: 8px;
+    }
+    .node.active .size { opacity: .85; }
+    .node .x { opacity: .55; font-size: 11px; flex-shrink: 0; }
+    .indent-1 { padding-left: 18px; }
+    .indent-2 { padding-left: 36px; }
+    .layers-foot {
+      border-top: 1px solid var(--border);
+      padding: 10px 12px;
+      background: var(--panel);
+    }
+    .layers-foot label {
+      display: block;
+      font-size: 10px;
+      color: var(--faint);
+      margin-bottom: 6px;
+    }
+    .row { display: flex; gap: 6px; }
+    .row input {
+      flex: 1;
+      background: var(--input);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      color: var(--text);
+      font-family: var(--font);
+      font-size: 11px;
+      padding: 7px 8px;
+      outline: none;
+    }
+    .row input:focus {
+      border-color: var(--accent);
+      box-shadow: 0 0 0 1px var(--accent-soft);
+    }
+    .row input::placeholder { color: var(--faint); }
+
+    .workspace {
+      flex: 1 1 auto;
+      display: flex;
+      flex-direction: column;
+      min-height: 0;
+      min-width: 0;
+      overflow: hidden;
+    }
+    .workspace.expanded .split-stage-details,
+    .workspace.expanded .details,
+    .workspace.expanded .split-viewport-paint,
+    .workspace.expanded .stage-side {
+      display: none !important;
+    }
+    .workspace.expanded .stage {
+      flex: 1 1 auto;
+      height: auto !important;
+      margin-bottom: 12px;
+    }
+
+    .stage {
+      display: flex;
+      height: 48%;
+      min-height: 160px;
+      margin: 12px 12px 0;
+      min-width: 0;
+      overflow: hidden;
+    }
+
+    .viewport {
+      position: relative;
+      flex: 1 1 auto;
+      min-width: 160px;
+      border: 1px solid var(--border);
+      border-radius: var(--radius-lg);
+      background: var(--viewport);
+      min-height: 0;
+      overflow: hidden;
+    }
+    .viewport-stage {
+      position: absolute; inset: 0;
+      display: grid;
+      place-items: center;
+      background: var(--viewport);
+    }
+    .car-silhouette {
+      width: 48%;
+      max-width: 360px;
+      opacity: .55;
+      filter: drop-shadow(0 12px 24px rgba(0,0,0,.55));
+    }
+    .viewport-tools {
+      position: absolute;
+      top: 8px; right: 8px;
+      display: flex;
+      gap: 6px;
+      z-index: 2;
+    }
+    .viewport-meta {
+      position: absolute;
+      left: 10px; bottom: 8px;
+      font-size: 10px;
+      color: rgba(255,255,255,.55);
+      z-index: 2;
+    }
+    .viewport-tag {
+      position: absolute;
+      top: 10px; left: 10px;
+      font-size: 10px;
+      font-weight: 600;
+      letter-spacing: .08em;
+      color: rgba(255,255,255,.4);
+      z-index: 2;
+    }
+
+    .stage-side {
+      width: 240px;
+      min-width: 160px;
+      max-width: 50%;
+      flex: 0 0 auto;
+      min-height: 0;
+      margin-left: 0;
+    }
+    .paint {
+      height: 100%;
+      border: 1px solid var(--border);
+      border-radius: var(--radius-lg);
+      background: var(--panel);
+      padding: 12px 14px;
+      overflow: auto;
+    }
+    .paint h2, .details h2 {
+      margin: 0 0 10px;
+      font-size: 11px;
+      font-weight: 600;
+      letter-spacing: .06em;
+      color: var(--muted);
+    }
+    .swatches { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 12px; }
+    .swatch {
+      width: 22px; height: 22px;
+      border-radius: var(--radius);
+      border: 1px solid var(--border);
+      cursor: pointer;
+    }
+    .swatch.active { outline: 2px solid var(--accent); outline-offset: 1px; }
+    .controls {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 14px 20px;
+      align-items: center;
+      font-size: 12px;
+    }
+    .toggle {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      cursor: pointer;
+      user-select: none;
+    }
+    .toggle input { accent-color: var(--accent); }
+    .toggle { color: var(--text); }
+    .parts {
+      display: flex; flex-wrap: wrap; gap: 8px 14px;
+      margin-top: 10px;
+      font-size: 11px;
+      color: var(--muted);
+    }
+    .parts label { display: inline-flex; gap: 6px; align-items: center; cursor: pointer; }
+
+    .details {
+      flex: 1 1 auto;
+      margin: 0 12px 12px;
+      border: 1px solid var(--border);
+      border-radius: var(--radius-lg);
+      background: var(--panel);
+      padding: 12px 14px;
+      overflow: auto;
+      min-height: 120px;
+    }
+    .split-stage-details {
+      margin: 0 12px;
+      flex: 0 0 5px;
+    }
+    .details .title {
+      font-size: 15px;
+      font-weight: 600;
+      margin: 0 0 4px;
+      color: var(--text);
+    }
+    .details .sub { font-size: 11px; color: var(--muted); margin-bottom: 12px; }
+    .kv {
+      display: grid;
+      grid-template-columns: 88px 1fr;
+      gap: 6px 10px;
+      font-size: 12px;
+      margin-bottom: 14px;
+    }
+    .kv dt { color: var(--faint); }
+    .kv dd { margin: 0; font-family: var(--mono); font-size: 11px; color: var(--text); word-break: break-all; }
+    .field { margin-bottom: 12px; }
+    .field label {
+      display: block;
+      font-size: 10px;
+      font-weight: 600;
+      letter-spacing: .06em;
+      color: var(--muted);
+      margin-bottom: 6px;
+    }
+    .field input, .field .path, select.field-select {
+      width: 100%;
+      background: var(--input);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      color: var(--text);
+      font-family: var(--font);
+      font-size: 12px;
+      padding: 8px 10px;
+      outline: none;
+    }
+    .field input:focus, select.field-select:focus {
+      border-color: var(--accent);
+    }
+    .field .path {
+      font-family: var(--mono);
+      font-size: 11px;
+      color: var(--muted);
+    }
+
+    .foot {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 0 16px;
+      border-top: 1px solid var(--border);
+      background: var(--panel);
+      font-size: 12px;
+      color: var(--muted);
+    }
+    .foot .spacer { flex: 1; }
+
+    .banner {
+      position: fixed;
+      left: 16px; bottom: 16px;
+      background: var(--panel-deep);
+      border: 1px solid var(--border);
+      color: var(--muted);
+      font-size: 11px;
+      padding: 8px 12px;
+      border-radius: var(--radius-lg);
+      max-width: 360px;
+      z-index: 10;
+    }
+    .banner strong { color: var(--text); }
+
+    .mode-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      margin-bottom: 10px;
+      font-size: 12px;
+    }
+    .mode-row .hint {
+      font-size: 10px;
+      color: var(--faint);
+      margin-top: 2px;
+    }
+    .switch {
+      position: relative;
+      width: 40px;
+      height: 22px;
+      flex-shrink: 0;
+    }
+    .switch input { opacity: 0; width: 0; height: 0; }
+    .switch span {
+      position: absolute; inset: 0;
+      background: var(--track);
+      border-radius: 999px;
+      cursor: pointer;
+      transition: background .15s;
+    }
+    .switch span::after {
+      content: "";
+      position: absolute;
+      width: 16px; height: 16px;
+      left: 3px; top: 3px;
+      background: #fff;
+      border-radius: 50%;
+      transition: transform .15s;
+    }
+    .switch input:checked + span { background: var(--accent); }
+    .switch input:checked + span::after { transform: translateX(18px); }
+    .stack-gap { display: flex; flex-direction: column; gap: 8px; }
+    .hidden { display: none !important; }
+
+    .meta-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 10px;
+    }
+    .meta-grid .field.span2 { grid-column: 1 / -1; }
+    .meta-actions {
+      display: flex;
+      gap: 8px;
+      margin-top: 4px;
+    }
+    .meta-actions .btn { flex: 1; }
+    .section-note {
+      font-size: 10px;
+      color: var(--faint);
+      margin: -4px 0 12px;
+    }
+    .banner code {
+      color: var(--accent-bright);
+      font-family: var(--mono);
+      font-size: 11px;
+    }
+    .meta-mode {
+      display: flex;
+      gap: 4px;
+      margin-bottom: 12px;
+      padding: 2px;
+      background: var(--panel-deep);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+    }
+    .meta-mode button {
+      flex: 1;
+      border: none;
+      background: transparent;
+      color: var(--muted);
+      font-family: var(--font);
+      font-size: 11px;
+      font-weight: 600;
+      padding: 7px 8px;
+      border-radius: var(--radius);
+      cursor: pointer;
+    }
+    .meta-mode button.active {
+      background: var(--accent);
+      color: var(--accent-text);
+    }
+    .meta-mode button:hover:not(.active) {
+      background: var(--hover);
+      color: var(--text);
+    }
+    #metaRawEditor {
+      width: 100%;
+      min-height: 220px;
+      height: 100%;
+      resize: vertical;
+      background: var(--input);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      color: var(--text);
+      font-family: var(--mono);
+      font-size: 11px;
+      line-height: 1.45;
+      padding: 10px;
+      outline: none;
+      white-space: pre;
+      tab-size: 2;
+    }
+    #metaRawEditor:focus { border-color: var(--accent); }
+  </style>
+</head>
+<body>
+  <div class="app">
+    <header class="top">
+      <div class="top-left">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M3 13l2-5h14l2 5M5 13v5h2v-2h10v2h2v-5M7 16h.01M17 16h.01"/></svg>
+        <h1>Car Pack</h1>
+      </div>
+      <div class="pack-stats" id="packStats">
+        <div class="stat">
+          <span class="label">Total cars</span>
+          <span class="value" id="statCars">1</span>
+        </div>
+        <div class="stat-divider"></div>
+        <div class="stat">
+          <span class="label">Size</span>
+          <span class="value" id="statSize">48.2 MB</span>
+        </div>
+        <div class="stat-divider"></div>
+        <div class="stat">
+          <span class="label">Total polygons</span>
+          <span class="value" id="statPolys">184,220</span>
+        </div>
+        <div class="stat-divider"></div>
+        <div class="stat warn">
+          <span class="label">Unoptimized</span>
+          <span class="value" id="statHeavy">1</span>
+        </div>
+        <div class="stat-divider"></div>
+        <div class="stat ok">
+          <span class="label">Optimized</span>
+          <span class="value" id="statOpt">0</span>
+        </div>
+      </div>
+    </header>
+
+    <div class="main" id="mainSplit">
+      <aside class="layers" id="panelLayers">
+        <div class="layers-foot" style="border-top:none;border-bottom:1px solid var(--border)">
+          <div class="mode-row">
+            <div>
+              <div>Multi-car pack</div>
+              <div class="hint" id="modeHint">Off — one car only</div>
+            </div>
+            <label class="switch" title="Queue multiple cars into one pack">
+              <input type="checkbox" id="multiToggle" />
+              <span></span>
+            </label>
+          </div>
+
+          <div class="stack-gap" style="margin-bottom:10px">
+            <div class="row" id="singleActions">
+              <button class="btn primary" type="button" style="flex:1">Add car</button>
+              <button class="btn" type="button" style="flex:1">Import</button>
+            </div>
+            <div class="row hidden" id="multiActions">
+              <button class="btn" type="button" style="flex:1">Add to queue</button>
+              <button class="btn primary" type="button" style="flex:1">Import all</button>
+            </div>
+            <div class="row">
+              <button class="btn" type="button" id="templateBtn" style="flex:1" title="Create empty FiveM pack folders: stream, data, audio…">New template</button>
+              <button class="btn" type="button" style="flex:1" title="Open an existing FiveM car resource folder">Load folder…</button>
+            </div>
+          </div>
+
+          <label>Or paste a gta5-mods link</label>
+          <div class="row">
+            <input placeholder="gta5-mods.com/vehicles/…" />
+            <button class="btn" type="button">Add</button>
+          </div>
+        </div>
+        <div class="panel-label">LAYERS</div>
+        <div class="tree" id="layersTree"></div>
+      </aside>
+
+      <div class="split-v" id="splitLayers" title="Drag to resize Layers"></div>
+
+      <section class="workspace" id="workspace">
+        <div class="stage" id="panelStage">
+          <div class="viewport" id="panelViewport">
+            <div class="viewport-tag">VIEWPORT</div>
+            <div class="viewport-tools">
+              <button class="icon-btn" type="button" title="GTA folder">GTA</button>
+              <button class="icon-btn" type="button" title="Recenter">↺</button>
+              <button class="icon-btn" type="button" id="expandBtn" title="Expand viewport">⛶</button>
+            </div>
+            <div class="viewport-stage">
+              <svg class="car-silhouette" viewBox="0 0 240 90" fill="none">
+                <path d="M20 58h20l12-22h90l18 22h40v14H20V58z" fill="#4D4D4D"/>
+                <path d="M52 36l10-14h68l14 14H52z" fill="#666666"/>
+                <circle cx="58" cy="72" r="12" fill="#1C1C1C" stroke="#A6A6A6" stroke-width="3"/>
+                <circle cx="178" cy="72" r="12" fill="#1C1C1C" stroke="#A6A6A6" stroke-width="3"/>
+                <rect x="70" y="40" width="28" height="12" rx="2" fill="#0078D4" opacity=".45"/>
+                <rect x="108" y="40" width="36" height="12" rx="2" fill="#0078D4" opacity=".3"/>
+              </svg>
+            </div>
+            <div class="viewport-meta">sultan_hi.yft · 184,220 tris — drag to orbit</div>
+          </div>
+
+          <div class="split-v" id="splitViewportPaint" title="Drag to resize Paint panel"></div>
+
+          <div class="stage-side" id="panelPaint">
+            <div class="paint">
+              <h2>PAINT &amp; VEHICLE CONTROLS</h2>
+              <div class="swatches">
+                <div class="swatch active" style="background:#9A9EA3"></div>
+                <div class="swatch" style="background:#E8E8EA"></div>
+                <div class="swatch" style="background:#1A1A1D"></div>
+                <div class="swatch" style="background:#3A3F44"></div>
+                <div class="swatch" style="background:#B01818"></div>
+                <div class="swatch" style="background:#1E3A8A"></div>
+                <div class="swatch" style="background:#1E6B3A"></div>
+                <div class="swatch" style="background:#D4A017"></div>
+                <div class="swatch" style="background:#C2560F"></div>
+              </div>
+              <div class="controls" style="flex-direction:column;align-items:flex-start;gap:10px">
+                <label class="toggle"><input type="checkbox" /> Open doors</label>
+                <label class="toggle"><input type="checkbox" checked /> Show wheels</label>
+                <label class="toggle"><input type="checkbox" checked /> Show extras</label>
+              </div>
+              <div class="parts" style="flex-direction:column;gap:8px">
+                <label><input type="checkbox" checked /> door_dside_f</label>
+                <label><input type="checkbox" checked /> door_pside_f</label>
+                <label><input type="checkbox" checked /> bonnet</label>
+                <label><input type="checkbox" checked /> boot</label>
+                <label><input type="checkbox" checked /> extra_1</label>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="split-h split-stage-details" id="splitStageDetails" title="Drag to resize Details"></div>
+
+        <div class="details" id="panelDetails">
+          <div id="detailsCar">
+            <h2>DETAILS</h2>
+            <p class="title">sultan</p>
+            <p class="sub">Imported · 12 files · 48.2 MB</p>
+            <dl class="kv">
+              <dt>Source</dt>
+              <dd>D:\Mods\sultan\dlc.rpf</dd>
+              <dt>Preview</dt>
+              <dd>stream\sultan_hi.yft</dd>
+            </dl>
+            <div class="field">
+              <label>RESOURCE</label>
+              <input value="sultan_pack" />
+            </div>
+            <div class="field">
+              <label>SAVE TO</label>
+              <div class="path">D:\Mods\sultan_fivem</div>
+            </div>
+            <button class="btn" type="button" style="width:100%">Change folder…</button>
+          </div>
+
+          <div id="detailsMeta" class="hidden">
+            <h2>META EDITOR</h2>
+            <p class="title" id="metaTitle">vehicles.meta</p>
+            <p class="section-note" id="metaModeNote">Form fields — not raw XML. Switch to Raw to edit the full file.</p>
+            <div class="meta-mode" id="metaModeTabs">
+              <button type="button" class="active" data-mode="form" id="metaModeForm">Form</button>
+              <button type="button" data-mode="raw" id="metaModeRaw">Raw editor</button>
+            </div>
+            <input type="file" id="metaImportInput" accept=".meta,.xml" class="hidden" />
+            <div class="meta-actions" style="margin-bottom:14px" id="metaFormToolbar">
+              <button class="btn" type="button" id="metaImportBtn" style="flex:1">Import meta…</button>
+              <button class="btn" type="button" id="metaResetBtn" style="flex:1">Reset form</button>
+            </div>
+            <p class="section-note hidden" id="metaImportNote" style="color:var(--ok);margin-top:-6px">Imported — review fields, then Save meta.</p>
+
+            <div id="metaFormView">
+              <div id="metaVehicles">
+                <div class="meta-grid">
+                  <div class="field">
+                    <label>MODEL NAME</label>
+                    <input value="sultan" />
+                  </div>
+                  <div class="field">
+                    <label>GAME NAME</label>
+                    <input value="SULTAN" />
+                  </div>
+                  <div class="field">
+                    <label>VEHICLE MAKE</label>
+                    <input value="KARIN" />
+                  </div>
+                  <div class="field">
+                    <label>VEHICLE CLASS</label>
+                    <select class="field-select">
+                      <option>VC_SPORT</option>
+                      <option selected>VC_SEDAN</option>
+                      <option>VC_SUPER</option>
+                      <option>VC_MUSCLE</option>
+                      <option>VC_SUV</option>
+                    </select>
+                  </div>
+                  <div class="field">
+                    <label>HANDLING ID</label>
+                    <input value="SULTAN" />
+                  </div>
+                  <div class="field">
+                    <label>FREQUENCY</label>
+                    <input type="number" value="100" />
+                  </div>
+                  <div class="field span2">
+                    <label>FLAGS</label>
+                    <input value="FLAG_SPORTS / FLAG_EXTRAS_STRONG" />
+                  </div>
+                </div>
+              </div>
+
+              <div id="metaHandling" class="hidden">
+                <div class="meta-grid">
+                  <div class="field">
+                    <label>HANDLING ID</label>
+                    <input value="SULTAN" />
+                  </div>
+                  <div class="field">
+                    <label>MASS (KG)</label>
+                    <input type="number" value="1400" />
+                  </div>
+                  <div class="field">
+                    <label>INITIAL DRIVE FORCE</label>
+                    <input type="number" step="0.01" value="0.26" />
+                  </div>
+                  <div class="field">
+                    <label>BRAKE FORCE</label>
+                    <input type="number" step="0.01" value="0.9" />
+                  </div>
+                  <div class="field">
+                    <label>TRACTION CURVE MAX</label>
+                    <input type="number" step="0.01" value="2.35" />
+                  </div>
+                  <div class="field">
+                    <label>TRACTION CURVE MIN</label>
+                    <input type="number" step="0.01" value="2.05" />
+                  </div>
+                  <div class="field">
+                    <label>TOP SPEED (KPH)</label>
+                    <input type="number" value="145" />
+                  </div>
+                  <div class="field">
+                    <label>DOWNFORCE MODIFIER</label>
+                    <input type="number" step="0.1" value="1.0" />
+                  </div>
+                </div>
+              </div>
+
+              <div id="metaCarvariations" class="hidden">
+                <div class="meta-grid">
+                  <div class="field">
+                    <label>MODEL NAME</label>
+                    <input value="sultan" />
+                  </div>
+                  <div class="field">
+                    <label>COLOR 1</label>
+                    <input type="number" value="12" />
+                  </div>
+                  <div class="field">
+                    <label>COLOR 2</label>
+                    <input type="number" value="12" />
+                  </div>
+                  <div class="field">
+                    <label>PEARLESCENT</label>
+                    <input type="number" value="0" />
+                  </div>
+                  <div class="field span2">
+                    <label>KITS / MODKITS</label>
+                    <input value="0, 112" />
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div id="metaRawView" class="hidden">
+              <textarea id="metaRawEditor" spellcheck="false"></textarea>
+            </div>
+
+            <div class="meta-actions">
+              <button class="btn primary" type="button" id="metaSaveBtn">Save meta</button>
+            </div>
+            <p class="section-note hidden" id="metaSaveNote" style="color:var(--ok);margin-top:10px">Saved into the selected layer file.</p>
+          </div>
+        </div>
+      </section>
+    </div>
+
+    <footer class="foot">
+      <span>1 car queued — ready</span>
+      <span class="spacer"></span>
+      <button class="btn" type="button">Open output</button>
+    </footer>
+  </div>
+
+  <div class="banner">
+    <strong>Preview</strong> — drag splitters to resize panels. Sizes &amp; meta edits save in this browser.
+  </div>
+
+  <script>
+    const ws = document.getElementById("workspace");
+    const btn = document.getElementById("expandBtn");
+    let expanded = false;
+    btn.addEventListener("click", () => {
+      expanded = !expanded;
+      ws.classList.toggle("expanded", expanded);
+      btn.title = expanded ? "Exit expand" : "Expand viewport";
+      if (typeof saveLayout === "function")
+        saveLayout({ expanded, multi: document.getElementById("multiToggle").checked });
+    });
+    document.querySelectorAll(".swatch").forEach(s => {
+      s.addEventListener("click", () => {
+        document.querySelectorAll(".swatch").forEach(x => x.classList.remove("active"));
+        s.classList.add("active");
+      });
+    });
+
+    const multi = document.getElementById("multiToggle");
+    const singleActions = document.getElementById("singleActions");
+    const multiActions = document.getElementById("multiActions");
+    const modeHint = document.getElementById("modeHint");
+    const layersTree = document.getElementById("layersTree");
+
+    function nodeHtml(opts) {
+      const {
+        sel = "file", meta = "", indent = 0, chev = "", ico = "📄",
+        name = "", size = "", active = false, remove = false,
+      } = opts;
+      const cls = ["node"];
+      if (indent === 1) cls.push("indent-1");
+      if (indent === 2) cls.push("indent-2");
+      if (indent === 3) cls.push("indent-2");
+      if (active) cls.push("active");
+      const indentStyle = indent === 3 ? ' style="padding-left:54px"' : "";
+      return `<div class="${cls.join(" ")}" data-sel="${sel}"${meta ? ` data-meta="${meta}"` : ""}${indentStyle}>
+        ${chev ? `<span class="chev">${chev}</span>` : `<span class="chev" style="visibility:hidden">▾</span>`}
+        <span class="ico">${ico}</span>
+        <span class="name">${name}</span>
+        ${size ? `<span class="size">${size}</span>` : ""}
+        ${remove ? `<span class="x">✕</span>` : ""}
+      </div>`;
+    }
+
+    function renderSamplePack() {
+      layersTree.innerHTML = [
+        nodeHtml({ sel: "car", chev: "▾", ico: "🚗", name: "sultan", size: "48,192 KB", active: true, remove: true }),
+        nodeHtml({ sel: "folder", indent: 1, chev: "▾", ico: "📁", name: "stream", size: "47,904 KB" }),
+        nodeHtml({ sel: "model", indent: 2, ico: "◼", name: "sultan.yft", size: "12,448 KB" }),
+        nodeHtml({ sel: "model", indent: 2, ico: "🖼", name: "sultan.ytd", size: "253,838 KB" }),
+        nodeHtml({ sel: "model", indent: 2, ico: "◼", name: "sultan_hi.yft", size: "32,512 KB" }),
+        nodeHtml({ sel: "folder", indent: 1, chev: "▾", ico: "📁", name: "data", size: "288 KB" }),
+        nodeHtml({ sel: "meta", meta: "vehicles", indent: 2, ico: "⚙", name: "vehicles.meta", size: "96 KB" }),
+        nodeHtml({ sel: "meta", meta: "handling", indent: 2, ico: "⚙", name: "handling.meta", size: "84 KB" }),
+        nodeHtml({ sel: "meta", meta: "carvariations", indent: 2, ico: "⚙", name: "carvariations.meta", size: "108 KB" }),
+        nodeHtml({ sel: "folder", indent: 1, chev: "▾", ico: "🔊", name: "audio", size: "0 KB" }),
+        nodeHtml({ sel: "folder", indent: 2, chev: "▾", ico: "📁", name: "sfx", size: "0 KB" }),
+        nodeHtml({ sel: "file", indent: 1, ico: "📄", name: "fxmanifest.lua", size: "2 KB" }),
+      ].join("");
+      showCarDetails();
+    }
+
+    function renderTemplatePack(packName = "car_pack") {
+      layersTree.innerHTML = [
+        nodeHtml({ sel: "car", chev: "▾", ico: "🚗", name: packName, size: "—", active: true, remove: true }),
+        nodeHtml({ sel: "folder", indent: 1, chev: "▾", ico: "📁", name: "stream", size: "empty" }),
+        nodeHtml({ sel: "file", indent: 2, ico: "·", name: ".gitkeep", size: "—" }),
+        nodeHtml({ sel: "folder", indent: 1, chev: "▾", ico: "📁", name: "data", size: "empty" }),
+        nodeHtml({ sel: "meta", meta: "vehicles", indent: 2, ico: "⚙", name: "vehicles.meta", size: "stub" }),
+        nodeHtml({ sel: "meta", meta: "handling", indent: 2, ico: "⚙", name: "handling.meta", size: "stub" }),
+        nodeHtml({ sel: "meta", meta: "carvariations", indent: 2, ico: "⚙", name: "carvariations.meta", size: "stub" }),
+        nodeHtml({ sel: "meta", meta: "vehicles", indent: 2, ico: "⚙", name: "carcols.meta", size: "stub" }),
+        nodeHtml({ sel: "folder", indent: 1, chev: "▾", ico: "🔊", name: "audio", size: "empty" }),
+        nodeHtml({ sel: "folder", indent: 2, chev: "▾", ico: "📁", name: "sfx", size: "empty" }),
+        nodeHtml({ sel: "file", indent: 3, ico: "·", name: "(drop .awc wavepacks here)", size: "—" }),
+        nodeHtml({ sel: "file", indent: 1, ico: "📄", name: "fxmanifest.lua", size: "stub" }),
+        nodeHtml({ sel: "file", indent: 1, ico: "📄", name: "vehicle_names.lua", size: "stub" }),
+      ].join("");
+      document.getElementById("statCars").textContent = "0";
+      document.getElementById("statSize").textContent = "—";
+      document.getElementById("statPolys").textContent = "0";
+      document.getElementById("statHeavy").textContent = "0";
+      document.getElementById("statOpt").textContent = "0";
+      document.querySelector(".foot span").textContent = "Empty pack template — drop models into stream/, sounds into audio/";
+      const title = detailsCar.querySelector(".title");
+      const sub = detailsCar.querySelector(".sub");
+      if (title) title.textContent = packName;
+      if (sub) sub.textContent = "Template · stream · data · audio/sfx";
+      showCarDetails();
+    }
+
+    document.getElementById("templateBtn").addEventListener("click", () => {
+      const name = prompt("Pack / resource name", "car_pack");
+      if (name == null || !name.trim()) return;
+      renderTemplatePack(name.trim().replace(/\s+/g, "_").toLowerCase());
+    });
+
+    function syncMode() {
+      const on = multi.checked;
+      singleActions.classList.toggle("hidden", on);
+      multiActions.classList.toggle("hidden", !on);
+      modeHint.textContent = on
+        ? "On — queue cars, then Import all"
+        : "Off — one car only";
+      if (!layersTree.querySelector("[data-sel='car'] .name")?.textContent?.includes("pack")
+          && layersTree.innerHTML.includes("stub")) return;
+      document.getElementById("statCars").textContent = on ? "3" : "1";
+      document.getElementById("statSize").textContent = on ? "126 MB" : "48.2 MB";
+      document.getElementById("statPolys").textContent = on ? "512,400" : "184,220";
+      document.getElementById("statHeavy").textContent = on ? "2" : "1";
+      document.getElementById("statOpt").textContent = on ? "1" : "0";
+    }
+    multi.addEventListener("change", syncMode);
+
+    const detailsCar = document.getElementById("detailsCar");
+    const detailsMeta = document.getElementById("detailsMeta");
+    const metaTitle = document.getElementById("metaTitle");
+    const metaPanels = {
+      vehicles: document.getElementById("metaVehicles"),
+      handling: document.getElementById("metaHandling"),
+      carvariations: document.getElementById("metaCarvariations"),
+    };
+
+    function showCarDetails() {
+      detailsCar.classList.remove("hidden");
+      detailsMeta.classList.add("hidden");
+    }
+
+    function showMetaEditor(kind, fileName) {
+      detailsCar.classList.add("hidden");
+      detailsMeta.classList.remove("hidden");
+      metaTitle.textContent = fileName;
+      Object.entries(metaPanels).forEach(([k, el]) => {
+        el.classList.toggle("hidden", k !== kind);
+      });
+      loadMetaForm(kind);
+      const keep = metaEditorMode;
+      metaEditorMode = keep === "raw" ? "form" : "raw";
+      setMetaEditorMode(keep || "form");
+    }
+
+    function saveMetaForm(kind) {
+      const vals = panelInputs(kind).map(el => el.value);
+      localStorage.setItem(`fiveos.carpack.meta.${kind}`, JSON.stringify(vals));
+    }
+
+    function loadMetaForm(kind) {
+      try {
+        const raw = localStorage.getItem(`fiveos.carpack.meta.${kind}`);
+        if (!raw) return;
+        const vals = JSON.parse(raw);
+        if (!Array.isArray(vals)) return;
+        panelInputs(kind).forEach((el, i) => {
+          if (vals[i] != null) el.value = vals[i];
+        });
+      } catch { /* ignore */ }
+    }
+
+    let selectedMetaKind = "vehicles";
+    let selectedMetaName = "vehicles.meta";
+
+    layersTree.addEventListener("click", (e) => {
+      const node = e.target.closest(".node");
+      if (!node || e.target.classList.contains("x")) return;
+      document.querySelectorAll("#layersTree .node").forEach(n => n.classList.remove("active"));
+      node.classList.add("active");
+      document.getElementById("metaImportNote").classList.add("hidden");
+      document.getElementById("metaSaveNote").classList.add("hidden");
+      if (node.dataset.sel === "meta") {
+        selectedMetaKind = node.dataset.meta;
+        selectedMetaName = node.querySelector(".name")?.textContent || selectedMetaKind + ".meta";
+        showMetaEditor(selectedMetaKind, selectedMetaName);
+      } else {
+        showCarDetails();
+      }
+    });
+
+    const importInput = document.getElementById("metaImportInput");
+    document.getElementById("metaImportBtn").addEventListener("click", () => importInput.click());
+    importInput.addEventListener("change", async () => {
+      const file = importInput.files && importInput.files[0];
+      importInput.value = "";
+      if (!file) return;
+      const text = await file.text();
+      applyImportedMeta(selectedMetaKind, text, file.name);
+      document.getElementById("metaImportNote").textContent =
+        `Imported from ${file.name} — review fields, then Save into ${selectedMetaName}.`;
+      document.getElementById("metaImportNote").classList.remove("hidden");
+      document.getElementById("metaSaveNote").classList.add("hidden");
+    });
+
+    let metaEditorMode = "form";
+
+    function setMetaEditorMode(mode) {
+      const next = mode === "raw" ? "raw" : "form";
+      const prev = metaEditorMode;
+      metaEditorMode = next;
+      const formView = document.getElementById("metaFormView");
+      const rawView = document.getElementById("metaRawView");
+      const toolbar = document.getElementById("metaFormToolbar");
+      const note = document.getElementById("metaModeNote");
+      document.getElementById("metaModeForm").classList.toggle("active", metaEditorMode === "form");
+      document.getElementById("metaModeRaw").classList.toggle("active", metaEditorMode === "raw");
+      formView.classList.toggle("hidden", metaEditorMode !== "form");
+      rawView.classList.toggle("hidden", metaEditorMode !== "raw");
+      toolbar.classList.toggle("hidden", metaEditorMode !== "form");
+      note.textContent = metaEditorMode === "raw"
+        ? "Raw XML editor — edit the full meta file, then Save."
+        : "Form fields — not raw XML. Switch to Raw to edit the full file.";
+      if (metaEditorMode === "raw") {
+        const editor = document.getElementById("metaRawEditor");
+        const stored = localStorage.getItem(`fiveos.carpack.meta.raw.${selectedMetaKind}`);
+        editor.value = stored || buildSampleXml(selectedMetaKind);
+      } else if (prev === "raw") {
+        const raw = document.getElementById("metaRawEditor").value;
+        if (raw.trim()) {
+          applyImportedMeta(selectedMetaKind, raw, selectedMetaName);
+          saveMetaForm(selectedMetaKind);
+        }
+        loadMetaForm(selectedMetaKind);
+      }
+    }
+
+    function buildSampleXml(kind) {
+      if (kind === "handling") {
+        const v = panelInputs(kind).map(el => el.value);
+        return `<?xml version="1.0" encoding="UTF-8"?>
+<CHandlingDataMgr>
+  <HandlingData>
+    <Item type="CHandlingData">
+      <handlingName>${v[0] || "SULTAN"}</handlingName>
+      <fMass value="${v[1] || "1400"}" />
+      <fInitialDriveForce value="${v[2] || "0.26"}" />
+      <fBrakeForce value="${v[3] || "0.9"}" />
+      <fTractionCurveMax value="${v[4] || "2.35"}" />
+      <fTractionCurveMin value="${v[5] || "2.05"}" />
+      <fInitialDriveMaxFlatVel value="${v[6] || "145"}" />
+      <fDownforceModifier value="${v[7] || "1.0"}" />
+    </Item>
+  </HandlingData>
+</CHandlingDataMgr>
+`;
+      }
+      if (kind === "carvariations") {
+        const v = panelInputs(kind).map(el => el.value);
+        return `<?xml version="1.0" encoding="UTF-8"?>
+<CVehicleModelInfoVariation>
+  <variationData>
+    <Item>
+      <modelName>${v[0] || "sultan"}</modelName>
+      <colors>
+        <Item>
+          <indices content="char_array">
+            ${v[1] || "12"}
+            ${v[2] || "12"}
+            0
+            ${v[3] || "0"}
+          </indices>
+        </Item>
+      </colors>
+      <kits>
+        <Item>0</Item>
+      </kits>
+    </Item>
+  </variationData>
+</CVehicleModelInfoVariation>
+`;
+      }
+      const v = panelInputs("vehicles").map(el => el.value);
+      return `<?xml version="1.0" encoding="UTF-8"?>
+<CVehicleModelInfo__InitDataList>
+  <InitDatas>
+    <Item>
+      <modelName>${v[0] || "sultan"}</modelName>
+      <txdName>${v[0] || "sultan"}</txdName>
+      <handlingId>${v[4] || "SULTAN"}</handlingId>
+      <gameName>${v[1] || "SULTAN"}</gameName>
+      <vehicleMakeName>${v[2] || "KARIN"}</vehicleMakeName>
+      <vehicleClass>${v[3] || "VC_SEDAN"}</vehicleClass>
+      <frequency>${v[5] || "100"}</frequency>
+      <flags>${(v[6] || "").replace(/ \\/g, "")}</flags>
+    </Item>
+  </InitDatas>
+</CVehicleModelInfo__InitDataList>
+`;
+    }
+
+    document.getElementById("metaModeForm").addEventListener("click", () => setMetaEditorMode("form"));
+    document.getElementById("metaModeRaw").addEventListener("click", () => setMetaEditorMode("raw"));
+
+    document.getElementById("metaSaveBtn").addEventListener("click", () => {
+      if (metaEditorMode === "raw") {
+        localStorage.setItem(
+          `fiveos.carpack.meta.raw.${selectedMetaKind}`,
+          document.getElementById("metaRawEditor").value
+        );
+        applyImportedMeta(selectedMetaKind, document.getElementById("metaRawEditor").value, selectedMetaName);
+        saveMetaForm(selectedMetaKind);
+      } else {
+        saveMetaForm(selectedMetaKind);
+        localStorage.setItem(
+          `fiveos.carpack.meta.raw.${selectedMetaKind}`,
+          buildSampleXml(selectedMetaKind)
+        );
+      }
+      document.getElementById("metaSaveNote").textContent =
+        `Saved changes into ${selectedMetaName}.`;
+      document.getElementById("metaSaveNote").classList.remove("hidden");
+      document.getElementById("metaImportNote").classList.add("hidden");
+    });
+
+    document.getElementById("metaResetBtn").addEventListener("click", () => {
+      resetMetaForm(selectedMetaKind);
+      document.getElementById("metaImportNote").classList.add("hidden");
+      document.getElementById("metaSaveNote").classList.add("hidden");
+    });
+
+    function panelInputs(kind) {
+      const panel = metaPanels[kind];
+      return panel ? [...panel.querySelectorAll("input, select")] : [];
+    }
+
+    function resetMetaForm(kind) {
+      const defaults = {
+        vehicles: ["sultan", "SULTAN", "KARIN", "VC_SEDAN", "SULTAN", "100", "FLAG_SPORTS / FLAG_EXTRAS_STRONG"],
+        handling: ["SULTAN", "1400", "0.26", "0.9", "2.35", "2.05", "145", "1.0"],
+        carvariations: ["sultan", "12", "12", "0", "0, 112"],
+      };
+      const vals = defaults[kind] || [];
+      panelInputs(kind).forEach((el, i) => {
+        if (vals[i] != null) el.value = vals[i];
+      });
+    }
+
+    function applyImportedMeta(kind, text, fileName) {
+      const pick = (...keys) => {
+        for (const key of keys) {
+          const re = new RegExp(`<${key}[^>]*>([^<]*)</${key}>`, "i");
+          const m = text.match(re);
+          if (m) return m[1].trim();
+        }
+        return "";
+      };
+      const inputs = panelInputs(kind);
+      if (kind === "vehicles") {
+        const vals = [
+          pick("modelName", "modelname") || "imported",
+          pick("gameName", "gamename") || "IMPORTED",
+          pick("vehicleMakeName", "vehicleMake") || "",
+          pick("vehicleClass") || "VC_SEDAN",
+          pick("handlingId") || "",
+          pick("frequency") || "100",
+          (text.match(/FLAG_[A-Z0-9_]+/g) || []).slice(0, 4).join(" / ") || "",
+        ];
+        inputs.forEach((el, i) => { if (vals[i] != null && vals[i] !== "") el.value = vals[i]; });
+      } else if (kind === "handling") {
+        const vals = [
+          pick("handlingName") || pick("handlingId") || fileName.replace(/\.meta$/i, "").toUpperCase(),
+          pick("fMass", "mass") || "1400",
+          pick("fInitialDriveForce") || "0.3",
+          pick("fBrakeForce") || "0.9",
+          pick("fTractionCurveMax") || "2.2",
+          pick("fTractionCurveMin") || "2.0",
+          pick("fInitialDriveMaxFlatVel") || "140",
+          pick("fDownforceModifier") || "1.0",
+        ];
+        inputs.forEach((el, i) => { if (vals[i] != null && vals[i] !== "") el.value = vals[i]; });
+      } else if (kind === "carvariations") {
+        const vals = [
+          pick("modelName", "modelname") || "imported",
+          pick("color1") || "0",
+          pick("color2") || "0",
+          pick("pearlescentColor", "pearlescent") || "0",
+          pick("kits") || "0",
+        ];
+        inputs.forEach((el, i) => { if (vals[i] != null && vals[i] !== "") el.value = vals[i]; });
+      }
+    }
+
+    const LAYOUT_KEY = "fiveos.carpack.layout.v1";
+    const layoutDefaults = {
+      layersW: 260,
+      paintW: 240,
+      stageHRatio: 0.48,
+      expanded: false,
+      multi: false,
+    };
+
+    function loadLayout() {
+      try {
+        const raw = localStorage.getItem(LAYOUT_KEY);
+        if (!raw) return { ...layoutDefaults };
+        return { ...layoutDefaults, ...JSON.parse(raw) };
+      } catch {
+        return { ...layoutDefaults };
+      }
+    }
+
+    function saveLayout(patch) {
+      const next = { ...loadLayout(), ...patch };
+      localStorage.setItem(LAYOUT_KEY, JSON.stringify(next));
+      return next;
+    }
+
+    function applyLayout(state) {
+      const layers = document.getElementById("panelLayers");
+      const paint = document.getElementById("panelPaint");
+      const stage = document.getElementById("panelStage");
+      if (layers) layers.style.width = `${state.layersW}px`;
+      if (paint) paint.style.width = `${state.paintW}px`;
+      if (stage) stage.style.height = `${Math.round(state.stageHRatio * 100)}%`;
+      expanded = !!state.expanded;
+      ws.classList.toggle("expanded", expanded);
+      btn.title = expanded ? "Exit expand" : "Expand viewport";
+      multi.checked = !!state.multi;
+      syncMode();
+    }
+
+    function bindSplit(el, onMove) {
+      if (!el) return;
+      el.addEventListener("mousedown", (e) => {
+        e.preventDefault();
+        el.classList.add("dragging");
+        const vertical = el.classList.contains("split-v");
+        document.body.classList.add(vertical ? "resizing-col" : "resizing-row");
+        const move = (ev) => onMove(ev);
+        const up = () => {
+          el.classList.remove("dragging");
+          document.body.classList.remove("resizing-col", "resizing-row");
+          window.removeEventListener("mousemove", move);
+          window.removeEventListener("mouseup", up);
+          saveLayout({
+            layersW: document.getElementById("panelLayers").offsetWidth,
+            paintW: document.getElementById("panelPaint").offsetWidth,
+            stageHRatio: document.getElementById("panelStage").offsetHeight /
+              Math.max(1, document.getElementById("workspace").clientHeight - 24),
+            expanded,
+            multi: multi.checked,
+          });
+        };
+        window.addEventListener("mousemove", move);
+        window.addEventListener("mouseup", up);
+      });
+    }
+
+    bindSplit(document.getElementById("splitLayers"), (ev) => {
+      const main = document.getElementById("mainSplit");
+      const rect = main.getBoundingClientRect();
+      const w = Math.min(Math.max(ev.clientX - rect.left, 180), rect.width * 0.55);
+      document.getElementById("panelLayers").style.width = `${w}px`;
+    });
+
+    bindSplit(document.getElementById("splitViewportPaint"), (ev) => {
+      const stage = document.getElementById("panelStage");
+      const rect = stage.getBoundingClientRect();
+      const fromRight = rect.right - ev.clientX;
+      const w = Math.min(Math.max(fromRight, 160), rect.width * 0.55);
+      document.getElementById("panelPaint").style.width = `${w}px`;
+    });
+
+    bindSplit(document.getElementById("splitStageDetails"), (ev) => {
+      const wsEl = document.getElementById("workspace");
+      const rect = wsEl.getBoundingClientRect();
+      const topPad = 12;
+      const h = Math.min(Math.max(ev.clientY - rect.top - topPad, 160), rect.height - 140);
+      document.getElementById("panelStage").style.height = `${h}px`;
+    });
+
+    multi.addEventListener("change", () => {
+      saveLayout({ multi: multi.checked });
+    });
+
+    renderSamplePack();
+    applyLayout(loadLayout());
+  </script>
+</body>
+</html>

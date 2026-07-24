@@ -1,0 +1,227 @@
+<ResourceDictionary xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+                    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+                    xmlns:ui="http://schemas.lepo.co/wpfui/2022/xaml">
+
+    <!--
+        Cinema 4D–inspired menu chrome: gold accent top-levels, dark popups,
+        ALL-CAPS section headers, icon + shortcut rows.
+    -->
+
+    <SolidColorBrush x:Key="C4DMenuGoldBrush" Color="#FFE0C070" />
+    <SolidColorBrush x:Key="C4DMenuMutedBrush" Color="#FFA6A6A6" />
+    <SolidColorBrush x:Key="C4DMenuTextBrush" Color="#FFE0E0E0" />
+    <SolidColorBrush x:Key="C4DMenuHeaderBrush" Color="#FF888888" />
+    <SolidColorBrush x:Key="C4DMenuPopupBgBrush" Color="#FF1A1A1A" />
+    <SolidColorBrush x:Key="C4DMenuPopupBorderBrush" Color="#FF363636" />
+    <SolidColorBrush x:Key="C4DMenuHoverBrush" Color="#FF4D4D4D" />
+    <SolidColorBrush x:Key="C4DMenuGestureBrush" Color="#FF888888" />
+
+    <!-- Shared popup for any submenu. -->
+    <ControlTemplate x:Key="C4DSubmenuPopup" TargetType="Popup">
+        <Border Background="{StaticResource C4DMenuPopupBgBrush}"
+                BorderBrush="{StaticResource C4DMenuPopupBorderBrush}"
+                BorderThickness="1"
+                Padding="0,4"
+                MinWidth="220"
+                SnapsToDevicePixels="True">
+            <ScrollViewer CanContentScroll="True"
+                          MaxHeight="520"
+                          VerticalScrollBarVisibility="Auto">
+                <ItemsPresenter KeyboardNavigation.DirectionalNavigation="Cycle" />
+            </ScrollViewer>
+        </Border>
+    </ControlTemplate>
+
+    <!-- Top-level gold label (File / Edit / Help). -->
+    <Style x:Key="C4DTopLevelGold" TargetType="MenuItem">
+        <Setter Property="Foreground" Value="{StaticResource C4DMenuGoldBrush}" />
+        <Setter Property="Background" Value="Transparent" />
+        <Setter Property="Padding" Value="8,3" />
+        <Setter Property="FontSize" Value="12" />
+        <Setter Property="VerticalAlignment" Value="Center" />
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="MenuItem">
+                    <Border x:Name="Bd"
+                            Background="{TemplateBinding Background}"
+                            Padding="{TemplateBinding Padding}"
+                            SnapsToDevicePixels="True">
+                        <Grid>
+                            <ContentPresenter ContentSource="Header"
+                                              RecognizesAccessKey="True"
+                                              VerticalAlignment="Center" />
+                            <Popup x:Name="PART_Popup"
+                                   AllowsTransparency="True"
+                                   Focusable="False"
+                                   HorizontalOffset="0"
+                                   IsOpen="{Binding IsSubmenuOpen, RelativeSource={RelativeSource TemplatedParent}}"
+                                   Placement="Bottom"
+                                   PopupAnimation="Fade"
+                                   VerticalOffset="1">
+                                <Border Background="{StaticResource C4DMenuPopupBgBrush}"
+                                        BorderBrush="{StaticResource C4DMenuPopupBorderBrush}"
+                                        BorderThickness="1"
+                                        Padding="0,4"
+                                        MinWidth="240"
+                                        SnapsToDevicePixels="True">
+                                    <ScrollViewer MaxHeight="520" VerticalScrollBarVisibility="Auto">
+                                        <StackPanel IsItemsHost="True"
+                                                    KeyboardNavigation.DirectionalNavigation="Cycle" />
+                                    </ScrollViewer>
+                                </Border>
+                            </Popup>
+                        </Grid>
+                    </Border>
+                    <ControlTemplate.Triggers>
+                        <Trigger Property="IsHighlighted" Value="True">
+                            <Setter TargetName="Bd" Property="Background" Value="{StaticResource C4DMenuHoverBrush}" />
+                        </Trigger>
+                        <Trigger Property="IsSubmenuOpen" Value="True">
+                            <Setter TargetName="Bd" Property="Background" Value="{StaticResource C4DMenuHoverBrush}" />
+                        </Trigger>
+                        <Trigger Property="IsEnabled" Value="False">
+                            <Setter Property="Foreground" Value="#FF666666" />
+                        </Trigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
+    <!-- Top-level muted label (View). -->
+    <Style x:Key="C4DTopLevelMuted" TargetType="MenuItem" BasedOn="{StaticResource C4DTopLevelGold}">
+        <Setter Property="Foreground" Value="{StaticResource C4DMenuMutedBrush}" />
+    </Style>
+
+    <!-- ALL-CAPS section header inside a popup (OPEN / HISTORY / …). -->
+    <Style x:Key="C4DMenuSectionHeader" TargetType="MenuItem">
+        <Setter Property="IsEnabled" Value="False" />
+        <Setter Property="Focusable" Value="False" />
+        <Setter Property="Foreground" Value="{StaticResource C4DMenuHeaderBrush}" />
+        <Setter Property="FontSize" Value="10" />
+        <Setter Property="FontWeight" Value="SemiBold" />
+        <Setter Property="Padding" Value="12,8,12,2" />
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="MenuItem">
+                    <Border Background="Transparent" Padding="{TemplateBinding Padding}">
+                        <ContentPresenter ContentSource="Header"
+                                          RecognizesAccessKey="False"
+                                          VerticalAlignment="Center" />
+                    </Border>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
+    <!-- Command row inside popup: icon | label | gesture. -->
+    <Style x:Key="C4DMenuCommand" TargetType="MenuItem">
+        <Setter Property="Foreground" Value="{StaticResource C4DMenuTextBrush}" />
+        <Setter Property="Background" Value="Transparent" />
+        <Setter Property="Padding" Value="4,4" />
+        <Setter Property="FontSize" Value="12" />
+        <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="MenuItem">
+                    <Border x:Name="Bd"
+                            Background="{TemplateBinding Background}"
+                            Padding="{TemplateBinding Padding}"
+                            SnapsToDevicePixels="True"
+                            MinWidth="220">
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="28" />
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" MinWidth="56" />
+                                <ColumnDefinition Width="16" />
+                            </Grid.ColumnDefinitions>
+                            <ContentPresenter x:Name="Icon"
+                                              Grid.Column="0"
+                                              ContentSource="Icon"
+                                              Width="16" Height="16"
+                                              VerticalAlignment="Center"
+                                              HorizontalAlignment="Center"
+                                              Margin="6,0,0,0" />
+                            <ContentPresenter x:Name="HeaderHost"
+                                              Grid.Column="1"
+                                              ContentSource="Header"
+                                              RecognizesAccessKey="True"
+                                              VerticalAlignment="Center"
+                                              Margin="4,0,8,0"
+                                              TextElement.Foreground="{TemplateBinding Foreground}" />
+                            <TextBlock Grid.Column="2"
+                                       Text="{TemplateBinding InputGestureText}"
+                                       Foreground="{StaticResource C4DMenuGestureBrush}"
+                                       FontSize="11"
+                                       VerticalAlignment="Center"
+                                       Margin="8,0,4,0" />
+                            <Path x:Name="Arrow"
+                                  Grid.Column="3"
+                                  Data="M0,0 L4,3.5 L0,7 Z"
+                                  Fill="{StaticResource C4DMenuMutedBrush}"
+                                  HorizontalAlignment="Center"
+                                  VerticalAlignment="Center"
+                                  Visibility="Collapsed"
+                                  Margin="0,0,6,0" />
+                            <Popup x:Name="PART_Popup"
+                                   AllowsTransparency="True"
+                                   Focusable="False"
+                                   HorizontalOffset="-2"
+                                   IsOpen="{Binding IsSubmenuOpen, RelativeSource={RelativeSource TemplatedParent}}"
+                                   Placement="Right"
+                                   PopupAnimation="Fade"
+                                   VerticalOffset="-4">
+                                <Border Background="{StaticResource C4DMenuPopupBgBrush}"
+                                        BorderBrush="{StaticResource C4DMenuPopupBorderBrush}"
+                                        BorderThickness="1"
+                                        Padding="0,4"
+                                        MinWidth="180">
+                                    <StackPanel IsItemsHost="True" />
+                                </Border>
+                            </Popup>
+                        </Grid>
+                    </Border>
+                    <ControlTemplate.Triggers>
+                        <Trigger Property="Icon" Value="{x:Null}">
+                            <Setter TargetName="Icon" Property="Visibility" Value="Hidden" />
+                        </Trigger>
+                        <Trigger Property="HasItems" Value="True">
+                            <Setter TargetName="Arrow" Property="Visibility" Value="Visible" />
+                        </Trigger>
+                        <Trigger Property="IsHighlighted" Value="True">
+                            <Setter TargetName="Bd" Property="Background" Value="{StaticResource C4DMenuHoverBrush}" />
+                        </Trigger>
+                        <Trigger Property="IsEnabled" Value="False">
+                            <Setter Property="Foreground" Value="#FF666666" />
+                            <Setter Property="Opacity" Value="0.55" />
+                        </Trigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
+    <!-- Gold label — same as C4D “new feature” / highlighted command rows. -->
+    <Style x:Key="C4DMenuCommandNew" TargetType="MenuItem" BasedOn="{StaticResource C4DMenuCommand}">
+        <Setter Property="Foreground" Value="{StaticResource C4DMenuGoldBrush}" />
+        <Setter Property="ToolTipService.ShowDuration" Value="20000" />
+    </Style>
+
+    <Style x:Key="C4DMenuSeparator" TargetType="Separator">
+        <Setter Property="Background" Value="#FF363636" />
+        <Setter Property="Height" Value="1" />
+        <Setter Property="Margin" Value="28,4,8,4" />
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="Separator">
+                    <Border Background="{TemplateBinding Background}"
+                            Height="{TemplateBinding Height}"
+                            Margin="{TemplateBinding Margin}"
+                            SnapsToDevicePixels="True" />
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
+</ResourceDictionary>

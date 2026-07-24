@@ -4,7 +4,6 @@
 using System.Globalization;
 using System.Windows;
 using System.Windows.Data;
-using System.Windows.Media;
 
 namespace FiveOS.Converters;
 
@@ -33,6 +32,16 @@ public sealed class InverseBooleanConverter : IValueConverter
 
     public object ConvertBack(object? value, Type targetType, object? parameter, CultureInfo culture)
         => value is bool b ? !b : true;
+}
+
+/// <summary>Visible when the bound value is non-null; collapsed when null.</summary>
+public sealed class NullToVisibilityConverter : IValueConverter
+{
+    public object Convert(object? value, Type targetType, object? parameter, CultureInfo culture)
+        => value is null ? Visibility.Collapsed : Visibility.Visible;
+
+    public object ConvertBack(object? value, Type targetType, object? parameter, CultureInfo culture)
+        => Binding.DoNothing;
 }
 
 /// <summary>
@@ -71,6 +80,12 @@ public sealed class PathToImageSourceConverter : IValueConverter
             var img = new System.Windows.Media.Imaging.BitmapImage();
             img.BeginInit();
             img.CacheOption = System.Windows.Media.Imaging.BitmapCacheOption.OnLoad;
+            // Optional ConverterParameter = max decode width (e.g. "96") so list
+            // thumbnails don't keep full-res bitmaps in memory.
+            if (parameter is string ps && int.TryParse(ps, out var w) && w > 0)
+                img.DecodePixelWidth = w;
+            else if (parameter is int iw && iw > 0)
+                img.DecodePixelWidth = iw;
             img.UriSource = new Uri(path, UriKind.Absolute);
             img.EndInit();
             img.Freeze();
@@ -150,26 +165,4 @@ public sealed class MaterialPresetIsConverter : IValueConverter
 
     public object ConvertBack(object? value, Type targetType, object? parameter, CultureInfo culture)
         => System.Windows.Data.Binding.DoNothing;
-}
-
-/// <summary>
-/// Parses a "#rrggbb" / "#aarrggbb" string to a <see cref="Color"/>. Returns
-/// Colors.Transparent for null/invalid input — callers should pair the
-/// gradient with a Visibility-bound toggle so the transparent fallback
-/// never shows.
-/// </summary>
-public sealed class HexToColorConverter : IValueConverter
-{
-    public object Convert(object? value, Type targetType, object? parameter, CultureInfo culture)
-    {
-        if (value is string s && !string.IsNullOrWhiteSpace(s))
-        {
-            try { return (Color)ColorConverter.ConvertFromString(s); }
-            catch { /* fall through */ }
-        }
-        return Colors.Transparent;
-    }
-
-    public object ConvertBack(object? value, Type targetType, object? parameter, CultureInfo culture)
-        => value is Color c ? c.ToString() : "#00000000";
 }

@@ -74,7 +74,13 @@
                                FontSize="11"
                                Foreground="{DynamicResource TextFillColorSecondaryBrush}"
                                LineHeight="17"
-                               Text="All in One FiveM Modding Tool. Free to use." />
+                               Text="All-in-one FiveM modding tool. Free to use." />
+                    <TextBlock TextWrapping="Wrap"
+                               FontSize="10"
+                               Foreground="{DynamicResource TextFillColorTertiaryBrush}"
+                               LineHeight="15"
+                               Margin="0,10,0,0"
+                               Text="Not approved, endorsed, or sponsored by Rockstar Games, Take-Two Interactive, or Cfx.re / FiveM. Grand Theft Auto and related marks are property of their respective owners." />
                 </StackPanel>
             </Grid>
 

@@ -1,16 +1,13 @@
 // Copyright (c) 2026 FiveOS. All rights reserved.
 // https://github.com/w3bportal/FiveOS
 
+using System;
 using System.Windows;
 using System.Windows.Media;
 using SymbolRegular = Wpf.Ui.Controls.SymbolRegular;
 
 namespace FiveOS.Views;
 
-/// <summary>App-themed replacement for <see cref="System.Windows.MessageBox"/>.
-/// A FluentWindow (Mica, accent buttons, dark/light aware) shown modally so it
-/// behaves like the Win32 MessageBox it replaces. Use via <see cref="AppDialog"/>.
-/// </summary>
 public partial class ThemedDialog : Wpf.Ui.Controls.FluentWindow
 {
     public MessageBoxResult Result { get; private set; } = MessageBoxResult.None;
@@ -18,16 +15,41 @@ public partial class ThemedDialog : Wpf.Ui.Controls.FluentWindow
     public ThemedDialog(string message, string title, MessageBoxButton buttons, MessageBoxImage icon)
     {
         InitializeComponent();
+        Background = new SolidColorBrush(Color.FromRgb(0x2B, 0x2B, 0x2B));
         Title = title;
         TitleBarCtl.Title = title;
         MessageCtl.Text = message;
         ConfigureIcon(icon);
         ConfigureButtons(buttons);
+        SourceInitialized += OnSourceInitialized;
+        ContentRendered += OnContentRendered;
+    }
+
+    private void OnSourceInitialized(object? sender, EventArgs e)
+    {
+        SourceInitialized -= OnSourceInitialized;
+        FitToContent();
+    }
+
+    private void OnContentRendered(object? sender, EventArgs e)
+    {
+        ContentRendered -= OnContentRendered;
+        FitToContent();
+    }
+
+    private void FitToContent()
+    {
+        if (RootBorder is null) return;
+        RootBorder.UpdateLayout();
+        RootBorder.Measure(new Size(Width, double.PositiveInfinity));
+        var contentH = RootBorder.DesiredSize.Height;
+        if (contentH <= 1) return;
+        SizeToContent = SizeToContent.Manual;
+        Height = Math.Ceiling(contentH);
     }
 
     private void ConfigureIcon(MessageBoxImage icon)
     {
-        // Map to a Fluent symbol + a status colour. None hides the icon.
         (SymbolRegular sym, Color col) = icon switch
         {
             MessageBoxImage.Error       => (SymbolRegular.ErrorCircle24,    Color.FromRgb(0xE8, 0x11, 0x23)),
@@ -67,22 +89,19 @@ public partial class ThemedDialog : Wpf.Ui.Controls.FluentWindow
 
     private MessageBoxButton _buttons;
 
-    // Primary = OK / Yes.
     private void OnPrimary(object sender, RoutedEventArgs e)
         => Finish(_buttons is MessageBoxButton.YesNo or MessageBoxButton.YesNoCancel
             ? MessageBoxResult.Yes : MessageBoxResult.OK);
 
-    // Secondary = No (only in Yes/No/Cancel).
     private void OnSecondary(object sender, RoutedEventArgs e) => Finish(MessageBoxResult.No);
 
-    // Close button = No (Yes/No) or Cancel (everything else).
     private void OnClose(object sender, RoutedEventArgs e)
         => Finish(_buttons == MessageBoxButton.YesNo ? MessageBoxResult.No : MessageBoxResult.Cancel);
 
     private void Finish(MessageBoxResult r)
     {
         Result = r;
-        try { DialogResult = r is MessageBoxResult.OK or MessageBoxResult.Yes; } catch { /* not shown modally */ }
+        try { DialogResult = r is MessageBoxResult.OK or MessageBoxResult.Yes; } catch { }
         Close();
     }
 }
