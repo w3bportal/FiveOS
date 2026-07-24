@@ -1111,8 +1111,8 @@
                             Visibility="{Binding MotionFeatureEnabled, Converter={StaticResource BooleanToVisibility}}">
                         <Button.Template>
                             <ControlTemplate TargetType="Button">
-                                <Border x:Name="Tb" Background="#FF363636" CornerRadius="4,0,0,4" Padding="4,14">
-                                    <TextBlock Text="Motion" FontSize="11" FontWeight="SemiBold" Foreground="#FFC8C8C8"
+                                <Border x:Name="Tb" Background="{DynamicResource AccentFillColorDefaultBrush}" CornerRadius="4,0,0,4" Padding="4,14">
+                                    <TextBlock Text="Motion" FontSize="11" FontWeight="Bold" Foreground="#FFFFFFFF"
                                                HorizontalAlignment="Center">
                                         <TextBlock.LayoutTransform>
                                             <RotateTransform Angle="-90" />
@@ -1121,10 +1121,10 @@
                                 </Border>
                                 <ControlTemplate.Triggers>
                                     <Trigger Property="IsMouseOver" Value="True">
-                                        <Setter TargetName="Tb" Property="Background" Value="#FF3A3A3A" />
+                                        <Setter TargetName="Tb" Property="Background" Value="{DynamicResource AccentFillColorSecondaryBrush}" />
                                     </Trigger>
                                     <DataTrigger Binding="{Binding TabIsMotion}" Value="True">
-                                        <Setter TargetName="Tb" Property="Background" Value="{DynamicResource AccentFillColorDefaultBrush}" />
+                                        <Setter TargetName="Tb" Property="Background" Value="{DynamicResource AccentFillColorSecondaryBrush}" />
                                     </DataTrigger>
                                 </ControlTemplate.Triggers>
                             </ControlTemplate>
