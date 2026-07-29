@@ -42,7 +42,7 @@ public static class UserSettings
     /// <see cref="Migrate"/> before the blob is handed back. Unknown
     /// (higher) versions are accepted as-is to avoid clobbering a
     /// future install's settings if the user downgrades.</summary>
-    private const int CurrentSchemaVersion = 2;
+    private const int CurrentSchemaVersion = 3;
 
     internal sealed class Blob
     {
@@ -91,6 +91,11 @@ public static class UserSettings
 
         public string? ReferenceModelPath { get; set; }
         public bool ShowReferencePed { get; set; } = true;
+
+        /// <summary>Freemode ped used when FiveOS starts a fresh Emotes
+        /// session. Stored as <c>male</c> or <c>female</c>; male remains the
+        /// backwards-compatible default for existing settings files.</summary>
+        public string DefaultEmotePed { get; set; } = "male";
 
         /// <summary>UI complexity tier: 0=Beginner, 1=Standard, 2=Advanced.
         /// Defaults to Beginner (bare-minimum UI) for new users.</summary>
@@ -285,6 +290,12 @@ public static class UserSettings
         {
             b.GlobalUpdate = true;
             b.SchemaVersion = 2;
+        }
+
+        if (b.SchemaVersion < 3)
+        {
+            b.DefaultEmotePed = NormalizeEmotePed(b.DefaultEmotePed);
+            b.SchemaVersion = 3;
         }
     }
 
@@ -652,6 +663,23 @@ public static class UserSettings
         b.ShowReferencePed = show;
         Write(b);
     }
+
+    /// <summary>Return the preferred GTA freemode skeleton for new Emotes
+    /// sessions. Only the bundled <c>male</c> and <c>female</c> variants are
+    /// allowed through to the viewer.</summary>
+    public static string LoadDefaultEmotePed() => NormalizeEmotePed(Read().DefaultEmotePed);
+
+    public static void SaveDefaultEmotePed(string? variant)
+    {
+        var b = Read();
+        b.DefaultEmotePed = NormalizeEmotePed(variant);
+        Write(b);
+    }
+
+    private static string NormalizeEmotePed(string? variant)
+        => string.Equals(variant, "female", StringComparison.OrdinalIgnoreCase)
+            ? "female"
+            : "male";
 
     // ─── Experience level (UI complexity tier) ───────────────────────
 

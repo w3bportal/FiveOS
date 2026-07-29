@@ -51,6 +51,7 @@ public partial class SettingsView : UserControl
         _ = RefreshCacheStatusAsync();
         RefreshAbout();
         RefreshLanguage();
+        RefreshDefaultEmotePed();
         RefreshAccentSwatches();
         RefreshAddons();
     }
@@ -155,6 +156,22 @@ public partial class SettingsView : UserControl
     }
 
     // ─────────────── Output ───────────────
+
+    private bool _suppressDefaultEmotePedPicker;
+
+    private void RefreshDefaultEmotePed()
+    {
+        _suppressDefaultEmotePedPicker = true;
+        DefaultEmotePedPicker.SelectedValue = UserSettings.LoadDefaultEmotePed();
+        _suppressDefaultEmotePedPicker = false;
+    }
+
+    private void OnDefaultEmotePedChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (_suppressDefaultEmotePedPicker) return;
+        if (DefaultEmotePedPicker.SelectedValue is string variant)
+            UserSettings.SaveDefaultEmotePed(variant);
+    }
 
     private void RefreshOutput()
     {

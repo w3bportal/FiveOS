@@ -400,7 +400,7 @@ public partial class PoseToEmoteView : UserControl
     /// default after warming Emotes off-screen during startup.</summary>
     public event Action? ViewerFirstReady;
     private bool _firstReadyFired;
-    /// <summary>One-shot: auto-load GTA male only on first Emotes boot.
+    /// <summary>One-shot: auto-load the configured GTA freemode ped only on first Emotes boot.
     /// Must not re-fire when a new Untitled tab clears HasRig, or + would
     /// immediately refill the viewport with the default ped.</summary>
     private bool _defaultEmoteRigBootstrapped;
@@ -602,17 +602,18 @@ public partial class PoseToEmoteView : UserControl
                     }
                     else if (!_vm.HasRig && !_defaultEmoteRigBootstrapped)
                     {
-                        // Default-load the synthetic male freemode rig on
+                        // Default-load the user's chosen synthetic freemode rig on
                         // first viewer ready, so the Pose tab opens onto a
                         // posable model instead of the empty state. Skipped
                         // on later clears (new Untitled tab) — those stay
                         // empty until the user picks a rig.
+                        var variant = DefaultEmotePedVariant();
                         _defaultEmoteRigBootstrapped = true;
-                        _vm.LoadedModelPath = "GTA Male (synthetic skeleton)";
-                        _vm.StatusText = "Loading synthetic GTA male skeleton...";
+                        _vm.LoadedModelPath = $"GTA {PedDisplayName(variant)} (synthetic skeleton)";
+                        _vm.StatusText = $"Loading synthetic GTA {variant} skeleton...";
                         _vm.ViewerLoadingCaption = "Loading default skeleton...";
                         _ = Viewport.CoreWebView2.ExecuteScriptAsync(
-                            "window.loadGtaSkeleton && window.loadGtaSkeleton('male')");
+                            $"window.loadGtaSkeleton && window.loadGtaSkeleton('{variant}')");
                     }
                     else if (!_vm.HasRig)
                     {
@@ -1880,6 +1881,11 @@ case "prop-loaded":
             _pendingModelUrl = "gta:" + variant;
         }
     }
+
+    private static string DefaultEmotePedVariant() => UserSettings.LoadDefaultEmotePed();
+
+    private static string PedDisplayName(string variant)
+        => string.Equals(variant, "female", StringComparison.OrdinalIgnoreCase) ? "Female" : "Male";
 
     private async void OnMirrorPose(object sender, RoutedEventArgs e)
     {
@@ -8119,7 +8125,7 @@ case "prop-loaded":
         else if (_vm.EmoteDocs.Documents.Count == 1 && !next.HasContent)
         {
             await ClearEmoteSessionAsync();
-            await LoadGtaPresetAsync("male");
+            await LoadGtaPresetAsync(DefaultEmotePedVariant());
             next.Title = "Untitled";
             next.IsDirty = false;
         }
@@ -8172,15 +8178,16 @@ case "prop-loaded":
 
             if (!target.HasContent)
             {
-                // New / empty tab: always land on MP male so posing and
+                // New / empty tab: load the user's preferred MP freemode ped so posing and
                 // imports have a ped selected (empty grid was the "new
                 // tab bug"). Keep the tab title Untitled until the user
                 // renames or loads something else.
                 await ClearEmoteSessionAsync();
-                await LoadGtaPresetAsync("male");
+                var variant = DefaultEmotePedVariant();
+                await LoadGtaPresetAsync(variant);
                 target.SetDefaultTitleIfEmpty();
                 target.IsDirty = false;
-                _vm.StatusText = "New emote — MP male skeleton loaded.";
+                _vm.StatusText = $"New emote — MP {variant} skeleton loaded.";
                 return;
             }
 
@@ -8822,13 +8829,14 @@ case "prop-loaded":
             if (!_webViewReady) await InitWebViewAsync();
             if (!_vm.HasRig)
             {
-                _vm.StatusText = "Loading GTA Male for preview…";
-                await LoadGtaPresetAsync("male");
+                var variant = DefaultEmotePedVariant();
+                _vm.StatusText = $"Loading GTA {PedDisplayName(variant)} for preview…";
+                await LoadGtaPresetAsync(variant);
                 for (int i = 0; i < 80 && !_vm.HasRig; i++)
                     await Task.Delay(100);
                 if (!_vm.HasRig)
                 {
-                    _vm.StatusText = "Rig didn't load — try GTA Male from Pose / Import first.";
+                    _vm.StatusText = "Rig didn't load — try a GTA Male or Female preset from Pose / Import first.";
                     return;
                 }
             }
