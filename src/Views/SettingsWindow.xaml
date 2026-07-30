@@ -6,9 +6,10 @@
                  xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
                  mc:Ignorable="d"
                  Title="Settings"
-                 Width="880" Height="620"
-                 MinWidth="700" MinHeight="480"
+                 Width="1120" Height="920"
+                 MinWidth="820" MinHeight="560"
                  ResizeMode="CanResize"
+                 SizeToContent="Manual"
                  WindowStartupLocation="CenterOwner"
                  WindowBackdropType="None"
                  ExtendsContentIntoTitleBar="True">
@@ -20,7 +21,7 @@
 
         <ui:TitleBar Grid.Row="0"
                      Title="Settings"
-                     ShowMaximize="False"
+                     ShowMaximize="True"
                      ShowMinimize="False" />
 
         <!-- The existing SettingsView (nav + pages) is injected here in

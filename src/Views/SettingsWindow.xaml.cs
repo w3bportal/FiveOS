@@ -1,6 +1,8 @@
 // Copyright (c) 2026 FiveOS. All rights reserved.
 // https://github.com/w3bportal/FiveOS
 
+using System;
+using System.Windows;
 using System.Windows.Input;
 
 namespace FiveOS.Views;
@@ -20,6 +22,14 @@ public partial class SettingsWindow
         InitializeComponent();
         SettingsView = view;
         Host.Content = view;
+
+        // Default size is chosen so a whole settings page fits with no
+        // scrollbar (240px nav + the content column's 780px MaxWidth). Clamp to
+        // the work area so it still fits on a small display — 920px tall does
+        // not fit a 1366x768 laptop.
+        var work = SystemParameters.WorkArea;
+        Width = Math.Min(Width, work.Width * 0.95);
+        Height = Math.Min(Height, work.Height * 0.95);
     }
 
     protected override void OnKeyDown(KeyEventArgs e)
