@@ -783,6 +783,21 @@ let poseLoop = true;
 // stays inside this range; the full poseDuration is still the clip length.
 let posePreviewStart = 0;
 let posePreviewEnd = 0;
+// FINGER RETARGET. Fingers were skipped outright in the Assimp→three rebase
+// because early imports had no glb bind for them, and applying raw
+// foreign-space quats exploded the freemode hands. YcdBoneSpaceConverter now
+// derives binds by walking the reference freemode glb, which resolves all 30
+// SKEL_[LR]_FingerDJ tags, so fingers rebase like any other bone — and the
+// bind-presence check that follows each skip still drops anything unmapped.
+// The old failure was ugly enough to keep an escape hatch: run
+// window.setFingerRetarget(false) to restore hands-at-rest with no rebuild.
+// `var` so the import paths can read it regardless of init order.
+var poseFingerRetarget = true;
+window.setFingerRetarget = function (on) {
+  poseFingerRetarget = on !== false;
+  return poseFingerRetarget;
+};
+
 let poseLastTickMs = 0;
 // Throttle for host tick messages during playback (see poseTimelineTick).
 let poseLastHostTickMs = 0;
@@ -10717,7 +10732,10 @@ window.setKeyframes = function (payloadOrJson, options) {
           //    glb bind, so raw foreign-space rotations hit the hands);
           //  • degenerate quats (NaN / near-zero) spike the mesh — drop them.
           const baseName = String(b.name).replace(/_\d+$/, '');
-          if (/Foot|Toe|Finger/i.test(baseName)) continue;
+          if (/Foot|Toe/i.test(baseName)) continue;
+          // Fingers now rebase (they have reference-glb binds); the bind check
+          // below still parks any digit the source didn't drive.
+          if (/Finger/i.test(baseName) && !poseFingerRetarget) continue;
           const bind = kfAssimpBind[b.name] || kfAssimpBind[baseName];
           if (!Array.isArray(bind) || bind.length < 4) { droppedBones++; continue; }
           const len = Math.hypot(q[0], q[1], q[2], q[3]);
@@ -10880,9 +10898,12 @@ window.importBoneTracksAsClip = function (payloadOrJson, clipName) {
         if (!tr?.name || !Array.isArray(tr.q) || tr.q.length < 1) continue;
         const idx = nameMap.get(tr.name);
         if (idx == null || !poseInitialQuats[idx]) continue;
-        // Never drive feet/toes/fingers from Assimp retarget — freemode skin spikes.
+        // Never drive feet/toes from Assimp retarget — freemode skin spikes.
         const baseName = tr.name.replace(/_\d+$/, '');
-        if (/Foot|Toe|Finger/i.test(baseName)) continue;
+        if (/Foot|Toe/i.test(baseName)) continue;
+        // Fingers do rebase now — see poseFingerRetarget. The bind check below
+        // still leaves undriven digits at THREE rest.
+        if (/Finger/i.test(baseName) && !poseFingerRetarget) continue;
         const bind = payload.assimpBind[tr.name] || payload.assimpBind[baseName];
         // No Assimp bind → leave bone at THREE rest (do NOT apply Assimp raw).
         if (!Array.isArray(bind) || bind.length < 4) continue;

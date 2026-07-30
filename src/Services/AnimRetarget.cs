@@ -27,6 +27,34 @@ internal static class AnimRetarget
     /// When present, FootLock uses these instead of DetectPlantedFrames.</summary>
     internal sealed record FootPlants(bool[]? Left, bool[]? Right);
 
+    /// <summary>Distinct animated source joints needed before a hand counts as
+    /// finger-tracked. A rig that collapses all 15 finger tags onto one or two
+    /// bones has no real articulation; three or more distinct joints does.</summary>
+    private const int MinFingerSources = 3;
+
+    /// <summary>How many DISTINCT, ANIMATED source bones back one hand's finger
+    /// tags. Distinctness matters because several GTA finger tags can resolve to
+    /// the same source bone; the channel check matters because a rig can carry
+    /// finger bones that no clip actually keys.</summary>
+    private static int FingerSourceCount(
+        Dictionary<string, Bone> gtaBones,
+        Dictionary<ushort, string> srcByTag,
+        Dictionary<string, NodeAnimationChannel> chan,
+        string prefix)
+    {
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var kv in gtaBones)
+        {
+            if (!kv.Key.StartsWith(prefix, StringComparison.OrdinalIgnoreCase)) continue;
+            var b = kv.Value;
+            if (!b.HasTag || b.Tag == 0) continue;
+            if (!srcByTag.TryGetValue(b.Tag, out var src) || string.IsNullOrEmpty(src)) continue;
+            if (!chan.ContainsKey(src)) continue;
+            seen.Add(src);
+        }
+        return seen.Count;
+    }
+
     public static List<PosedBoneTrack>? Retarget(
         Scene srcScene, Animation anim, double tps, int frames, int fps,
         out List<string> mapped, out List<string> unmapped, out V[] rootMotion, List<string> warnings,
@@ -206,18 +234,47 @@ internal static class AnimRetarget
         // reaction-force plants the feet must be driven so the leg IK + sole
         // alignment can bake exact contacts into the clip.
         bool emitFeet = plants?.Left != null || plants?.Right != null;
+
+        // Fingers used to be dropped wholesale, so imported clips never carried
+        // hand motion however well the names mapped. Emit them per-hand, but ONLY
+        // when the source genuinely articulates fingers: most body mocap
+        // (CMU/BVH, Kinect-style) has no finger channels, and some rigs collapse
+        // every finger onto one hand bone — driving those splays the hand into a
+        // claw, which is what the blanket skip was really protecting against.
+        // Per-side so one tracked hand isn't held back by an untracked one.
+        int fingerSrcL = FingerSourceCount(gtaBones, srcByTag, chan, "SKEL_L_Finger");
+        int fingerSrcR = FingerSourceCount(gtaBones, srcByTag, chan, "SKEL_R_Finger");
+        bool emitFingersL = fingerSrcL >= MinFingerSources;
+        bool emitFingersR = fingerSrcR >= MinFingerSources;
+
         foreach (var name in Ordered(gtaBones))
         {
             var b = gtaBones[name];
             if (noPelvis && b.Tag == tPelvis) continue;
+            bool isFinger = name.Contains("Finger", StringComparison.OrdinalIgnoreCase);
+            // Digits with no animated source bone simply never satisfy the
+            // srcByTag check below, so they stay at bind rest rather than being
+            // driven to identity — a partially-tracked hand keeps its natural
+            // shape on the untracked digits.
+            bool fingerAllowed = isFinger
+                && (name.StartsWith("SKEL_L_", StringComparison.OrdinalIgnoreCase)
+                    ? emitFingersL
+                    : emitFingersR);
             if ((name.Contains("Foot", StringComparison.OrdinalIgnoreCase) && !emitFeet)
                 || name.Contains("Toe", StringComparison.OrdinalIgnoreCase)
-                || name.Contains("Finger", StringComparison.OrdinalIgnoreCase))
+                || (isFinger && !fingerAllowed))
                 continue;
 
             if (b.HasTag && b.Tag != 0 && srcByTag.ContainsKey(b.Tag) && seenTags.Add(b.Tag))
             { driveNames.Add(name); emit.Add((b.Tag, name)); }
         }
+
+        if (emitFingersL || emitFingersR)
+            warnings.Add($"Fingers: retargeted from {fingerSrcL} left / {fingerSrcR} right animated source joints "
+                       + "(untracked digits stay at rest).");
+        else
+            warnings.Add("Fingers: source has no articulated finger bones — hands left at rest. "
+                       + "Pose them by hand, or import from a rig with per-joint fingers (Rokoko, Mixamo).");
         if (emit.Count == 0) return new List<PosedBoneTrack>();
 
         var perFrame = emit.ToDictionary(e => e.tag, _ => new Q[frames]);
