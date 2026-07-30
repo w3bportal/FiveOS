@@ -274,6 +274,12 @@ internal static class AnimRetarget
         }
 
         bool sourceHasFingers = fingerSrcL >= MinFingerSources || fingerSrcR >= MinFingerSources;
+        // Logged because "fingers are stiff" is otherwise indistinguishable
+        // between: source has none, names didn't resolve, or the Motion gate is
+        // shut. This line says which.
+        FosLogger.Info("retarget",
+            $"fingers: entitled={fingersEntitled} srcJointsL={fingerSrcL} srcJointsR={fingerSrcR} "
+            + $"emitL={emitFingersL} emitR={emitFingersR} (min={MinFingerSources})");
         if (emitFingersL || emitFingersR)
             warnings.Add($"Fingers: retargeted from {fingerSrcL} left / {fingerSrcR} right animated source joints "
                        + "(untracked digits stay at rest).");
