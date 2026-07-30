@@ -7650,6 +7650,21 @@ case "prop-loaded":
             };
             AppendDebug(applied > 0 ? "info" : "warn", "pose",
                 $"Applied pose '{slug}'", $"bones={applied}");
+
+            if (applied > 0)
+            {
+                // A saved pose is a single static pose. Without a key on the
+                // timeline it shows nothing in the Keys lane AND gets wiped the
+                // moment the user scrubs, because poseEvaluate re-runs against
+                // an empty keyframe list. Drop a full-pose key at the playhead
+                // so it's visible and sticks — same path as the Key button.
+                await SendTimelineCommandAsync("addKey", new[] { "track-pose-keys" },
+                    new { time = _vm.TimelineTime, fullPose = true });
+                await SendTimelineCommandAsync("requestSnapshot");
+                ScheduleRedrawTimeline();
+                _vm.StatusText =
+                    $"Applied saved pose ({applied} bones) — keyed at {_vm.TimelineTimecodeLabel}.";
+            }
         }
         catch (Exception ex)
         {
