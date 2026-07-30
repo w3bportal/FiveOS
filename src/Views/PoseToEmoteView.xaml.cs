@@ -2020,16 +2020,48 @@ case "prop-loaded":
         if (loaded.Contains(PedDisplayName(variant), StringComparison.OrdinalIgnoreCase))
             return;                                 // already previewing this one
 
+        // NB: do NOT gate on doc.HasContent / doc.IsDirty. HasContent is just
+        // `LoadedModelPath is set || TimelineCaptureJson is set`, so it's true
+        // the instant the default ped loads — gating on it meant the swap never
+        // fired at all. Test for actual authored work instead: keys, strips, a
+        // stored timeline, or any entry on the viewer's undo stack (which also
+        // catches a ped posed by hand with no keyframes yet).
         var doc = _vm.EmoteDocs.ActiveDocument;
-        if (doc is not null && (doc.IsDirty || doc.HasContent))
+        var hasWork = _vm.TimelineKeyframes.Count > 0
+                      || _vm.Strips.Count > 0
+                      || !string.IsNullOrEmpty(doc?.TimelineCaptureJson)
+                      || await ViewerHasPoseEditsAsync();
+        if (hasWork)
         {
             _vm.StatusText =
-                $"Default ped set to GTA {PedDisplayName(variant)} — this tab has unsaved work, "
+                $"Default ped set to GTA {PedDisplayName(variant)} — this tab has work in it, "
                 + "so it'll apply to the next new tab.";
             return;
         }
 
         await LoadGtaPresetAsync(variant);
+    }
+
+    /// <summary>True when the viewer's pose undo stack has anything on it, i.e.
+    /// the user has actually edited this ped.</summary>
+    private async Task<bool> ViewerHasPoseEditsAsync()
+    {
+        if (Viewport?.CoreWebView2 is null) return false;
+        try
+        {
+            var raw = await Viewport.CoreWebView2.ExecuteScriptAsync(
+                "window.poseHistoryDepth ? JSON.stringify(window.poseHistoryDepth()) : ''");
+            var inner = JsonSerializer.Deserialize<string>(raw);
+            if (string.IsNullOrWhiteSpace(inner)) return false;
+            using var depth = JsonDocument.Parse(inner);
+            return depth.RootElement.TryGetProperty("undo", out var u)
+                   && u.TryGetInt32(out var n)
+                   && n > 0;
+        }
+        catch
+        {
+            return false;   // can't tell — don't block the swap on a probe failure
+        }
     }
 
     /// <summary>Push the user's control-rig opacity/thickness into the viewer.
