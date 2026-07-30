@@ -104,6 +104,10 @@ public partial class PoseToEmoteView : UserControl
         DataContext = _vm;
         Focusable = true;
         ThemeAccent.Changed += OnThemeAccentChanged;
+        // Control-rig weight lives in Settings; push it live so the rig
+        // updates while the Settings dialog is still open. This view is a
+        // singleton for the app's lifetime, so there's no matching unsubscribe.
+        UserSettings.ControlRigStyleChanged += OnControlRigStyleSettingChanged;
         SyncTimelineAccentBrushes();
         SyncTrimRangeToDuration();
 #if FIVEOS_MOTION
@@ -646,6 +650,9 @@ public partial class PoseToEmoteView : UserControl
                 case "pose-mode-entered":
                     Services.FosLogger.Info("pose", "viewer: pose-mode-entered (rig ready) — Emotes tab now opens instantly");
                     PushPreviewRangeToViewer();
+                    // Rig handles only exist once pose mode is up, so this is
+                    // the earliest point the weight setting can apply.
+                    _ = PushControlRigStyleAsync();
                     if (!_firstReadyFired)
                     {
                         _firstReadyFired = true;
@@ -1987,6 +1994,26 @@ case "prop-loaded":
     }
 
     private static string DefaultEmotePedVariant() => UserSettings.LoadDefaultEmotePed();
+
+    private void OnControlRigStyleSettingChanged(object? sender, EventArgs e)
+        => Dispatcher.Invoke(() => _ = PushControlRigStyleAsync());
+
+    /// <summary>Push the user's control-rig opacity/thickness into the viewer.
+    /// Invariant culture on purpose — a comma decimal separator would produce
+    /// <c>setControlRigStyle(0,75, 1)</c> and shift the arguments.</summary>
+    private async Task PushControlRigStyleAsync()
+    {
+        if (!_webViewReady || Viewport?.CoreWebView2 is null) return;
+        var inv = System.Globalization.CultureInfo.InvariantCulture;
+        var opacity = UserSettings.LoadControlRigOpacity().ToString("0.###", inv);
+        var thickness = UserSettings.LoadControlRigThickness().ToString("0.###", inv);
+        try
+        {
+            await Viewport.CoreWebView2.ExecuteScriptAsync(
+                $"window.setControlRigStyle && window.setControlRigStyle({opacity},{thickness})");
+        }
+        catch { /* viewer torn down mid-push */ }
+    }
 
     private static string PedDisplayName(string variant)
         => string.Equals(variant, "female", StringComparison.OrdinalIgnoreCase) ? "Female" : "Male";
@@ -7404,9 +7431,21 @@ case "prop-loaded":
             // JS side. window.applyPose accepts either a string or an
             // object, so JS.parse round-trip is unnecessary.
             var encoded = JsonSerializer.Serialize(json);
-            await Viewport.CoreWebView2.ExecuteScriptAsync($"window.applyPose && window.applyPose({encoded})");
-            _vm.StatusText = $"Applied saved pose: {slug}";
-            AppendDebug("info", "pose", $"Applied pose '{slug}'");
+            // Report what actually landed. This used to be a fire-and-forget
+            // `window.applyPose && …` that claimed success even when the
+            // function was missing entirely — which is exactly how the
+            // "saving a pose does nothing" bug stayed invisible.
+            var raw = await Viewport.CoreWebView2.ExecuteScriptAsync(
+                $"window.applyPose ? window.applyPose({encoded}) : -1");
+            var applied = int.TryParse(raw, out var n) ? n : 0;
+            _vm.StatusText = applied switch
+            {
+                < 0 => "This viewer build can't apply saved poses.",
+                0 => "Pose didn't apply — no bones matched this rig.",
+                _ => $"Applied saved pose ({applied} bones).",
+            };
+            AppendDebug(applied > 0 ? "info" : "warn", "pose",
+                $"Applied pose '{slug}'", $"bones={applied}");
         }
         catch (Exception ex)
         {

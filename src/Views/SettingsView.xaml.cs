@@ -52,6 +52,7 @@ public partial class SettingsView : UserControl
         RefreshAbout();
         RefreshLanguage();
         RefreshDefaultEmotePed();
+        RefreshControlRigStyle();
         RefreshAccentSwatches();
         RefreshAddons();
     }
@@ -164,6 +165,35 @@ public partial class SettingsView : UserControl
         _suppressDefaultEmotePedPicker = true;
         DefaultEmotePedPicker.SelectedValue = UserSettings.LoadDefaultEmotePed();
         _suppressDefaultEmotePedPicker = false;
+    }
+
+    private bool _suppressRigStyleSliders;
+
+    private void RefreshControlRigStyle()
+    {
+        _suppressRigStyleSliders = true;
+        RigOpacitySlider.Value = UserSettings.LoadControlRigOpacity();
+        RigThicknessSlider.Value = UserSettings.LoadControlRigThickness();
+        _suppressRigStyleSliders = false;
+        UpdateRigStyleLabels();
+    }
+
+    private void UpdateRigStyleLabels()
+    {
+        RigOpacityValue.Text = $"{RigOpacitySlider.Value * 100:0}%";
+        RigThicknessValue.Text = $"{RigThicknessSlider.Value * 100:0}%";
+    }
+
+    private void OnControlRigStyleChanged(object sender, RoutedPropertyChangedEventArgs<double> e)
+    {
+        // ValueChanged fires during InitializeComponent before the sibling
+        // slider exists, so bail until both are up.
+        if (RigOpacitySlider is null || RigThicknessSlider is null) return;
+        UpdateRigStyleLabels();
+        if (_suppressRigStyleSliders) return;
+        // Saving raises ControlRigStyleChanged, which the Emotes viewport
+        // listens for so the rig updates live while this dialog is open.
+        UserSettings.SaveControlRigStyle(RigOpacitySlider.Value, RigThicknessSlider.Value);
     }
 
     private void OnDefaultEmotePedChanged(object sender, SelectionChangedEventArgs e)

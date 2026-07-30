@@ -97,6 +97,13 @@ public static class UserSettings
         /// backwards-compatible default for existing settings files.</summary>
         public string DefaultEmotePed { get; set; } = "male";
 
+        /// <summary>Control-rig line opacity multiplier (0.15–1). 1 = the
+        /// original heavy rig.</summary>
+        public double ControlRigOpacity { get; set; } = 1.0;
+
+        /// <summary>Control-rig line thickness multiplier (0.4–1.6).</summary>
+        public double ControlRigThickness { get; set; } = 1.0;
+
         /// <summary>UI complexity tier: 0=Beginner, 1=Standard, 2=Advanced.
         /// Defaults to Beginner (bare-minimum UI) for new users.</summary>
         public int ExperienceLevel { get; set; }
@@ -680,6 +687,45 @@ public static class UserSettings
         => string.Equals(variant, "female", StringComparison.OrdinalIgnoreCase)
             ? "female"
             : "male";
+
+    // ─── Control-rig weight (Emotes posing handles) ───────────────────
+    //
+    // Multipliers on the control rig's line opacity and thickness. The rig is
+    // built deliberately heavy so it reads over the clay ped; these let the
+    // user fade/thin it when it buries the mesh. Both are applied viewer-side
+    // in refreshPoseJointDots.
+
+    public const double ControlRigOpacityMin = 0.15;
+    public const double ControlRigOpacityMax = 1.0;
+    public const double ControlRigThicknessMin = 0.4;
+    public const double ControlRigThicknessMax = 1.6;
+
+    /// <summary>Raised when the rig weight changes so an open Emotes viewport
+    /// can update without waiting for a reload.</summary>
+    public static event EventHandler? ControlRigStyleChanged;
+
+    public static double LoadControlRigOpacity()
+        => Clamp(Read().ControlRigOpacity, ControlRigOpacityMin, ControlRigOpacityMax, 1.0);
+
+    public static double LoadControlRigThickness()
+        => Clamp(Read().ControlRigThickness, ControlRigThicknessMin, ControlRigThicknessMax, 1.0);
+
+    public static void SaveControlRigStyle(double opacity, double thickness)
+    {
+        var b = Read();
+        b.ControlRigOpacity = Clamp(opacity, ControlRigOpacityMin, ControlRigOpacityMax, 1.0);
+        b.ControlRigThickness = Clamp(thickness, ControlRigThicknessMin, ControlRigThicknessMax, 1.0);
+        Write(b);
+        ControlRigStyleChanged?.Invoke(null, EventArgs.Empty);
+    }
+
+    /// <summary>Clamp, treating NaN/Inf as <paramref name="fallback"/> so a
+    /// corrupt settings file can't push a non-finite value into the viewer.</summary>
+    private static double Clamp(double value, double min, double max, double fallback)
+    {
+        if (double.IsNaN(value) || double.IsInfinity(value)) return fallback;
+        return Math.Min(max, Math.Max(min, value));
+    }
 
     // ─── Experience level (UI complexity tier) ───────────────────────
 

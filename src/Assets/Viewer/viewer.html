@@ -1220,6 +1220,7 @@ function applyHistoryEntry(entry, direction /* 'undo' | 'redo' */) {
       break;
     }
     case 'mirror':
+    case 'apply-pose':
     case 'reset': {
       const snap = direction === 'undo' ? entry.payload.before : entry.payload.after;
       for (const it of snap) applySnapItem(it, 'q');
@@ -6900,9 +6901,55 @@ function refreshSkeletonHelperVisibility() {
   for (const h of poseExtraSkeletonHelpers) apply(h);
 }
 
+// ─── Control-rig weight (Settings → General) ─────────────────────────
+// The control rig is deliberately fat and near-opaque so it reads over the
+// clay ped, but on a dense pose it buries the mesh. These two knobs thin it
+// out / fade it back without hiding it — the Rig toggle is all-or-nothing.
+// Multipliers, not absolutes, so per-kind widths (finger 2.0 vs limb 2.6) and
+// the casing/colour split keep their relative weighting.
+// `var`, not `let`: refreshPoseJointDots reads these and is reachable from
+// tick() during module init, before this line would run — a `let` would throw
+// on its TDZ the moment a rig existed that early.
+var ctrlRigOpacity = 1;     // 0.15 … 1
+var ctrlRigThickness = 1;   // 0.4  … 1.6
+
+// var for the same TDZ reason as the two above.
+var CTRL_COLOR_ALPHA = 0.98;    // base alphas from buildFatWire
+var CTRL_CASING_ALPHA = 0.90;
+var CTRL_CASING_EXTRA = 1.6;    // casing is baseWidth + this
+
+function applyControlRigStyle() {
+  for (const h of poseJointHandles) {
+    const ud = h && h.userData;
+    if (!ud) continue;
+    const cm = ud.colorMat, km = ud.casingMat, bw = ud.baseWidth;
+    if (!cm || !km || !bw) continue;          // pickers have none of these
+    cm.opacity = CTRL_COLOR_ALPHA * ctrlRigOpacity;
+    km.opacity = CTRL_CASING_ALPHA * ctrlRigOpacity;
+    cm.linewidth = bw * ctrlRigThickness;
+    km.linewidth = (bw + CTRL_CASING_EXTRA) * ctrlRigThickness;
+    cm.needsUpdate = true;
+    km.needsUpdate = true;
+  }
+  requestRender();
+}
+
+/// Host entry point. Either arg may be omitted to leave that knob alone.
+window.setControlRigStyle = function (opacity, thickness) {
+  const o = Number(opacity);
+  const t = Number(thickness);
+  if (isFinite(o)) ctrlRigOpacity = Math.max(0.15, Math.min(1, o));
+  if (isFinite(t)) ctrlRigThickness = Math.max(0.4, Math.min(1.6, t));
+  applyControlRigStyle();
+  return 1;
+};
+
 function applyPoseRigDisplay() {
   poseJointDotsEnabled = (poseRigDisplayMode === 'fiveos' || poseRigDisplayMode === 'markers');
   refreshPoseJointDots();
+  // Re-assert the user's weight: this runs after every rig (re)build, so a
+  // freshly built rig inherits the setting instead of snapping back to fat.
+  applyControlRigStyle();
   refreshIkHandleVisibility();
   refreshSkeletonHelperVisibility();
   syncIkHandleTransforms(true);
@@ -6946,12 +6993,20 @@ function refreshPoseJointDots() {
         cm.visible = true;
         if (h.userData.casingMat) h.userData.casingMat.visible = true;
         cm.color.setHex(isOn ? 0xFFFFFF : (h.userData.regionColor ?? POSE_JOINT_COLOR));
-        cm.linewidth = isOn ? bw + 2.0 : bw;
-        cm.opacity = isOn ? 1.0 : (anySelected ? 0.25 : 0.98);
+        // Scale by the user's rig-weight knobs. This function owns linewidth
+        // and opacity and re-runs on every selection change (and every painted
+        // frame while posing), so the multipliers have to be applied HERE —
+        // setting them anywhere else gets stomped on the next refresh.
+        cm.linewidth = (isOn ? bw + 2.0 : bw) * ctrlRigThickness;
+        cm.opacity = (isOn ? 1.0 : (anySelected ? 0.25 : 0.98)) * ctrlRigOpacity;
+        if (h.userData.casingMat) {
+          h.userData.casingMat.linewidth = ((isOn ? bw + 2.0 : bw) + CTRL_CASING_EXTRA) * ctrlRigThickness;
+          h.userData.casingMat.opacity = CTRL_CASING_ALPHA * ctrlRigOpacity;
+        }
       } else if (h.material) {
         h.material.visible = true;
         const isOn = selectedBones.has(bone);
-        h.material.opacity = isOn ? 0.95 : (anySelected ? 0.3 : 0.92);
+        h.material.opacity = (isOn ? 0.95 : (anySelected ? 0.3 : 0.92)) * ctrlRigOpacity;
         h.material.color.setHex(isOn ? POSE_JOINT_COLOR_ACTIVE : (h.userData.regionColor ?? POSE_JOINT_COLOR));
         h.material.needsUpdate = true;
       }
@@ -7648,6 +7703,91 @@ window.getPose = function () {
   });
 };
 
+// Restore a pose captured by window.getPose (schema v2: { bones: [...] }).
+//
+// This is what the host's saved-pose library calls. It was referenced from C#
+// (OnApplyCustomPose) and the comment further down claimed it was "defined
+// further down", but it never existed — and because the call site is guarded
+// with `window.applyPose && …`, clicking a saved pose silently did nothing
+// while the host still reported success.
+//
+// Bones are matched by NAME first so a saved pose survives a bone reorder and
+// transfers between the male/female freemode rigs, falling back to the recorded
+// index. Only the LOCAL rot/pos are authoritative here; the world_* fields in
+// the payload are diagnostics for the aim/retarget paths.
+window.applyPose = function (payloadOrJson) {
+  if (!poseMode) {
+    fosTelemetry.warn('pose', 'applyPose: pose mode not active');
+    return 0;
+  }
+  let payload = payloadOrJson;
+  if (typeof payload === 'string') {
+    try { payload = JSON.parse(payload); }
+    catch (e) {
+      fosTelemetry.err('error', 'applyPose: bad JSON', { msg: String(e) });
+      return 0;
+    }
+  }
+  const list = payload && Array.isArray(payload.bones) ? payload.bones : null;
+  if (!list || !list.length) {
+    fosTelemetry.warn('pose', 'applyPose: payload has no bones[]');
+    return 0;
+  }
+
+  const before = snapshotAllPoseQuats();
+  const beforeAux = snapshotAuxBones();
+  const byName = poseBuildBoneNameMap();   // name -> index into poseBones
+  let applied = 0;
+  let missed = 0;
+
+  for (const entry of list) {
+    if (!entry) continue;
+    let bone = null;
+    const nm = entry.name || '';
+    if (nm && byName.has(nm)) bone = poseBones[byName.get(nm)];
+    if (!bone && Number.isInteger(entry.index) && entry.index >= 0 && entry.index < poseBones.length)
+      bone = poseBones[entry.index];
+    if (!bone) { missed++; continue; }
+
+    const q = entry.rot_xyzw;
+    if (Array.isArray(q) && q.length === 4 && q.every(Number.isFinite)) {
+      bone.quaternion.set(q[0], q[1], q[2], q[3]);
+      if (bone.quaternion.lengthSq() > 1e-8) bone.quaternion.normalize();
+      applied++;
+    }
+    // Local translation matters for pelvis height / root offset. Reject
+    // non-finite values so one bad entry can't NaN the whole rig.
+    const p = entry.pos_xyz;
+    if (Array.isArray(p) && p.length === 3 && p.every(Number.isFinite)) {
+      bone.position.set(p[0], p[1], p[2]);
+    }
+  }
+
+  // Undoable, reusing the whole-body snapshot shape that mirror/reset use.
+  if (applied > 0) {
+    pushHistory({
+      kind: 'apply-pose',
+      payload: {
+        before, beforeAux,
+        after: snapshotAllPoseQuats(),
+        afterAux: snapshotAuxBones(),
+      },
+    });
+  }
+
+  // Derived state has to chase the restored bones or the skinned mesh keeps
+  // the old shape and the IK rings float at their pre-apply positions.
+  poseSyncSkeletonMeshes();
+  refreshPoseJointDots();
+  try { if (typeof syncIkHandleTransforms === 'function') syncIkHandleTransforms(true); } catch (e) {}
+  requestRender();
+
+  fosTelemetry.info('pose', `applyPose: ${applied} bones applied`,
+    { missed, total: list.length });
+  postToHost({ kind: 'pose-applied', applied, missed, total: list.length });
+  return applied;
+};
+
 // Host multi-select: replace selection with these bone indices.
 // Empty array clears selection (Deselect All).
 window.selectPoseBones = function (indicesJson) {
@@ -8103,10 +8243,10 @@ window.poseSetFootPlant = function (enabled, intensity) {
   return { enabled: posePreviewFootIk, intensity: poseFootPlantIntensity };
 };
 
-// Pose save / apply use window.getPose + window.applyPose (defined
-// further down — schema includes rest_xyzw + parent name + version
-// stamp). The shorter snapshot helpers that briefly lived here were a
-// duplicate; the host now uses the richer pair exclusively.
+// Pose save / apply use window.getPose + window.applyPose, both defined
+// ABOVE (search "fiveos_pose_version") — schema includes rest_xyzw + parent
+// name + version stamp. The shorter snapshot helpers that briefly lived here
+// were a duplicate; the host now uses the richer pair exclusively.
 
 
 // ─── Clip library ────────────────────────────────────────────────────

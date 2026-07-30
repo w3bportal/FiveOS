@@ -237,6 +237,65 @@
                         </StackPanel>
                     </Border>
 
+                    <!-- Control-rig weight. The posing handles are drawn heavy
+                         so they read over the clay ped; these fade / thin them
+                         when they bury the mesh. -->
+                    <Border CornerRadius="6"
+                            Padding="18,16"
+                            Margin="0,12,0,0"
+                            Background="{DynamicResource ControlFillColorSecondaryBrush}"
+                            BorderThickness="1"
+                            BorderBrush="{DynamicResource ControlElevationBorderBrush}">
+                        <StackPanel>
+                            <StackPanel Orientation="Horizontal">
+                                <ui:SymbolIcon Symbol="Accessibility24" FontSize="20"
+                                               VerticalAlignment="Center" Opacity="0.85" />
+                                <TextBlock Text="Control rig appearance"
+                                           Style="{StaticResource ProviderTitle}"
+                                           Margin="10,0,0,0"
+                                           VerticalAlignment="Center" />
+                            </StackPanel>
+                            <TextBlock Style="{StaticResource ProviderHelp}"
+                                       Text="How heavy the coloured posing handles look on the ped in Emotes. Turn these down when the rig covers too much of the body — it stays clickable either way." />
+
+                            <Grid Margin="0,12,0,0">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="Auto" />
+                                </Grid.ColumnDefinitions>
+                                <TextBlock Grid.Column="0" Text="Opacity" FontSize="11" VerticalAlignment="Center" />
+                                <TextBlock Grid.Column="1" x:Name="RigOpacityValue"
+                                           FontFamily="Consolas" FontSize="10" Opacity="0.7"
+                                           VerticalAlignment="Center" Text="100%" />
+                            </Grid>
+                            <Slider x:Name="RigOpacitySlider"
+                                    Minimum="0.15" Maximum="1.0"
+                                    SmallChange="0.05" LargeChange="0.1"
+                                    TickFrequency="0.05" IsSnapToTickEnabled="True"
+                                    Margin="0,2,0,0"
+                                    ValueChanged="OnControlRigStyleChanged"
+                                    ToolTip="Fade the posing handles back so you can see the ped underneath." />
+
+                            <Grid Margin="0,10,0,0">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="Auto" />
+                                </Grid.ColumnDefinitions>
+                                <TextBlock Grid.Column="0" Text="Thickness" FontSize="11" VerticalAlignment="Center" />
+                                <TextBlock Grid.Column="1" x:Name="RigThicknessValue"
+                                           FontFamily="Consolas" FontSize="10" Opacity="0.7"
+                                           VerticalAlignment="Center" Text="100%" />
+                            </Grid>
+                            <Slider x:Name="RigThicknessSlider"
+                                    Minimum="0.4" Maximum="1.6"
+                                    SmallChange="0.05" LargeChange="0.1"
+                                    TickFrequency="0.05" IsSnapToTickEnabled="True"
+                                    Margin="0,2,0,0"
+                                    ValueChanged="OnControlRigStyleChanged"
+                                    ToolTip="Thin down the handle outlines." />
+                        </StackPanel>
+                    </Border>
+
                     <Border CornerRadius="6"
                             Padding="18,16"
                             Margin="0,12,0,0"
