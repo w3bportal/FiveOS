@@ -738,6 +738,7 @@
     </div>
     <div class="ref-btns">
       <button type="button" class="ref-btn" id="ref-fit" title="Stretch the video across the whole clip instead of matching it second-for-second">Fit clip</button>
+      <button type="button" class="ref-btn" id="ref-replace" title="Swap in a different photo or video, keeping this panel open">Replace</button>
       <button type="button" class="ref-btn danger" id="ref-remove" title="Remove the reference plane">Remove</button>
     </div>
     <div class="ref-note" id="ref-note"></div>
@@ -12509,8 +12510,15 @@ function refDefaultHeight() {
   return 1.8;
 }
 
+// Placement carried across a Replace so swapping the media doesn't dump the
+// plane back at its default spot. Height is kept and width re-derived, since
+// scale encodes the media's aspect.
+var refPendingTransform = null;
+
 function refBuildPlane(texture, aspect) {
-  const h = refDefaultHeight();
+  const keep = refPendingTransform;
+  refPendingTransform = null;
+  const h = (keep && isFinite(keep.height) && keep.height > 0.01) ? keep.height : refDefaultHeight();
   const w = Math.max(0.05, h * (isFinite(aspect) && aspect > 0 ? aspect : 1));
   // Unit geometry + scale, so the user's own gizmo scaling composes cleanly.
   const mesh = new THREE.Mesh(
@@ -12529,9 +12537,15 @@ function refBuildPlane(texture, aspect) {
   mesh.name = 'FiveOS_ReferenceMedia';
   mesh.userData.fiveosRefPlane = true;
   mesh.scale.set(w, h, 1);
-  // Standing on the grid, just off the ped's left, facing the default camera
-  // (PlaneGeometry's front face is +Z, which is where the camera starts).
-  mesh.position.set(-(w / 2 + h * 0.2), h / 2, 0);
+  if (keep) {
+    mesh.position.copy(keep.position);
+    mesh.quaternion.copy(keep.quaternion);
+    if (isFinite(keep.opacity)) mesh.material.opacity = keep.opacity;
+  } else {
+    // Standing on the grid, just off the ped's left, facing the default camera
+    // (PlaneGeometry's front face is +Z, which is where the camera starts).
+    mesh.position.set(-(w / 2 + h * 0.2), h / 2, 0);
+  }
   scene.add(mesh);
   return mesh;
 }
@@ -12713,7 +12727,9 @@ function refLoadImage(url, label) {
       refMedia = {
         mesh, material: mesh.material, texture: tex, video: null,
         kind: 'photo', label: label || 'Reference',
-        opacity: REF_DEFAULT_OPACITY, flipped: false, visible: true,
+        // Read back off the material: a Replace may have carried the previous
+      // opacity over, and the slider reads this field.
+      opacity: mesh.material.opacity, flipped: false, visible: true,
         offset: 0, fitClip: false, duration: 0,
       };
       refShowBar();
@@ -12781,7 +12797,9 @@ function refLoadVideo(url, label) {
     refMedia = {
       mesh, material: mesh.material, texture: tex, video: v,
       kind: 'video', label: label || 'Reference',
-      opacity: REF_DEFAULT_OPACITY, flipped: false, visible: true,
+      // Read back off the material: a Replace may have carried the previous
+      // opacity over, and the slider reads this field.
+      opacity: mesh.material.opacity, flipped: false, visible: true,
       offset: 0, fitClip: false,
       duration: isFinite(v.duration) ? v.duration : 0,
       blobUrl,
@@ -12832,6 +12850,14 @@ function refLoadVideo(url, label) {
 
 window.setReferenceMedia = function (url, kind, label) {
   if (!refIsEmotesPage()) return;
+  // Replacing: remember where the user put the plane (and how faded it was) so
+  // the new media lands in the same spot instead of jumping back to default.
+  refPendingTransform = (refMedia && refMedia.mesh) ? {
+    position: refMedia.mesh.position.clone(),
+    quaternion: refMedia.mesh.quaternion.clone(),
+    height: refMedia.mesh.scale.y,
+    opacity: refMedia.opacity,
+  } : null;
   refDispose();
   if (String(kind || '').toLowerCase() === 'video') refLoadVideo(url, label);
   else refLoadImage(url, label);
@@ -12901,6 +12927,12 @@ window.removeReferenceMedia = function () {
     refSyncBarToState();
     refSyncVideo(true);
   });
+
+  // The file picker lives host-side, so ask C# to open it. setReferenceMedia
+  // disposes whatever is loaded first, so this is a straight swap — no need to
+  // Remove first, and the plane's transform is rebuilt for the new aspect.
+  refEl('ref-replace')?.addEventListener('click',
+    () => postToHost({ kind: 'reference-media-replace' }));
 
   refEl('ref-remove')?.addEventListener('click', () => window.removeReferenceMedia());
   refEl('ref-hide-bar')?.addEventListener('click', () => bar.classList.add('hidden'));

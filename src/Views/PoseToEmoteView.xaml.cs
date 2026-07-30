@@ -1132,6 +1132,13 @@ public partial class PoseToEmoteView : UserControl
                     });
                     break;
 
+                case "reference-media-replace":
+                    // Replace button in the viewer's reference panel — the file
+                    // dialog is ours, so re-open the combined picker (lets the
+                    // user swap a photo for a video and vice versa).
+                    Dispatcher.Invoke(() => RunImportReference());
+                    break;
+
                 case "reference-media":
                 {
                     // Decode failures happen in the browser, not in our copy
