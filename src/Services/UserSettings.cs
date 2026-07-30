@@ -676,11 +676,19 @@ public static class UserSettings
     /// allowed through to the viewer.</summary>
     public static string LoadDefaultEmotePed() => NormalizeEmotePed(Read().DefaultEmotePed);
 
+    /// <summary>Raised when the default ped changes so an open Emotes viewport
+    /// can swap the previewed skeleton immediately instead of waiting for the
+    /// next new tab.</summary>
+    public static event EventHandler? DefaultEmotePedChanged;
+
     public static void SaveDefaultEmotePed(string? variant)
     {
         var b = Read();
-        b.DefaultEmotePed = NormalizeEmotePed(variant);
+        var next = NormalizeEmotePed(variant);
+        var changed = !string.Equals(b.DefaultEmotePed, next, StringComparison.Ordinal);
+        b.DefaultEmotePed = next;
         Write(b);
+        if (changed) DefaultEmotePedChanged?.Invoke(null, EventArgs.Empty);
     }
 
     private static string NormalizeEmotePed(string? variant)

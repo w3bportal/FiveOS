@@ -108,6 +108,7 @@ public partial class PoseToEmoteView : UserControl
         // updates while the Settings dialog is still open. This view is a
         // singleton for the app's lifetime, so there's no matching unsubscribe.
         UserSettings.ControlRigStyleChanged += OnControlRigStyleSettingChanged;
+        UserSettings.DefaultEmotePedChanged += OnDefaultEmotePedSettingChanged;
         SyncTimelineAccentBrushes();
         SyncTrimRangeToDuration();
 #if FIVEOS_MOTION
@@ -1997,6 +1998,39 @@ case "prop-loaded":
 
     private void OnControlRigStyleSettingChanged(object? sender, EventArgs e)
         => Dispatcher.Invoke(() => _ = PushControlRigStyleAsync());
+
+    private void OnDefaultEmotePedSettingChanged(object? sender, EventArgs e)
+        => Dispatcher.Invoke(() => _ = ApplyDefaultEmotePedLiveAsync());
+
+    /// <summary>Swap the previewed freemode skeleton the moment the Settings
+    /// picker changes. Only a PRISTINE synthetic preset is swapped: a
+    /// user-loaded rig, or a tab with a pose / keyframes in it, would be torn
+    /// down by the reload, and a preference change must never discard work.
+    /// In that case the setting still saves and applies to the next new tab.</summary>
+    private async Task ApplyDefaultEmotePedLiveAsync()
+    {
+        if (!_webViewReady) return;                 // nothing loaded yet; next load picks it up
+        var variant = DefaultEmotePedVariant();
+        var loaded = _vm.LoadedModelPath ?? "";
+
+        // Synthetic presets are stamped "GTA <Male|Female> (synthetic skeleton)"
+        // by LoadGtaPresetAsync — that's how we tell a preset from a real rig.
+        if (!loaded.Contains("(synthetic skeleton)", StringComparison.OrdinalIgnoreCase))
+            return;
+        if (loaded.Contains(PedDisplayName(variant), StringComparison.OrdinalIgnoreCase))
+            return;                                 // already previewing this one
+
+        var doc = _vm.EmoteDocs.ActiveDocument;
+        if (doc is not null && (doc.IsDirty || doc.HasContent))
+        {
+            _vm.StatusText =
+                $"Default ped set to GTA {PedDisplayName(variant)} — this tab has unsaved work, "
+                + "so it'll apply to the next new tab.";
+            return;
+        }
+
+        await LoadGtaPresetAsync(variant);
+    }
 
     /// <summary>Push the user's control-rig opacity/thickness into the viewer.
     /// Invariant culture on purpose — a comma decimal separator would produce
