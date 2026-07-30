@@ -1009,6 +1009,22 @@
                         </StackPanel>
                     </Border>
                 </Popup>
+                <Border Width="1"
+                        Margin="10,2"
+                        Background="{DynamicResource ControlElevationBorderBrush}" />
+                <!-- Freemode ped switch. Swaps the previewed skeleton straight
+                     away and also becomes the default for new tabs, so this is
+                     the same preference the Settings picker writes. -->
+                <ComboBox x:Name="PedVariantPicker"
+                          MinWidth="118"
+                          Padding="8,4"
+                          VerticalAlignment="Center"
+                          SelectedValuePath="Tag"
+                          SelectionChanged="OnPedVariantPicked"
+                          ToolTip="Swap the freemode skeleton in the viewport. Also becomes the default for new Emotes tabs.">
+                    <ComboBoxItem Tag="male" Content="GTA Male" />
+                    <ComboBoxItem Tag="female" Content="GTA Female" />
+                </ComboBox>
                 </StackPanel>
                 </ScrollViewer>
             </DockPanel>

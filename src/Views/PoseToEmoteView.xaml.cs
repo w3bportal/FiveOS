@@ -654,6 +654,7 @@ public partial class PoseToEmoteView : UserControl
                     // Rig handles only exist once pose mode is up, so this is
                     // the earliest point the weight setting can apply.
                     _ = PushControlRigStyleAsync();
+                    Dispatcher.Invoke(SyncPedVariantPicker);
                     if (!_firstReadyFired)
                     {
                         _firstReadyFired = true;
@@ -1982,6 +1983,7 @@ case "prop-loaded":
         _vm.NotifyBonesChanged();
         _vm.StatusText = "Loading synthetic GTA " + variant + " skeleton...";
         SyncActiveEmoteTitleFromModel();
+        SyncPedVariantPicker();
 
         if (_viewerReady)
         {
@@ -2002,6 +2004,76 @@ case "prop-loaded":
     private void OnDefaultEmotePedSettingChanged(object? sender, EventArgs e)
         => Dispatcher.Invoke(() => _ = ApplyDefaultEmotePedLiveAsync());
 
+    private bool _suppressPedVariantPicker;
+    /// <summary>Set while the toolbar picker drives the swap itself, so the
+    /// DefaultEmotePedChanged handler doesn't load the same preset twice.</summary>
+    private bool _applyingPedVariant;
+
+    /// <summary>"male" / "female" when a synthetic preset is loaded, else null
+    /// (a user-supplied rig, which the picker must never replace silently).</summary>
+    private string? CurrentSyntheticPedVariant()
+    {
+        var loaded = _vm.LoadedModelPath ?? "";
+        if (!loaded.Contains("(synthetic skeleton)", StringComparison.OrdinalIgnoreCase)) return null;
+        if (loaded.Contains("female", StringComparison.OrdinalIgnoreCase)) return "female";
+        if (loaded.Contains("male", StringComparison.OrdinalIgnoreCase)) return "male";
+        return null;
+    }
+
+    /// <summary>Point the toolbar picker at whatever is actually loaded, without
+    /// re-entering the SelectionChanged handler.</summary>
+    private void SyncPedVariantPicker()
+    {
+        if (PedVariantPicker is null) return;
+        _suppressPedVariantPicker = true;
+        PedVariantPicker.SelectedValue = CurrentSyntheticPedVariant() ?? DefaultEmotePedVariant();
+        _suppressPedVariantPicker = false;
+    }
+
+    private async void OnPedVariantPicked(object sender, SelectionChangedEventArgs e)
+    {
+        if (_suppressPedVariantPicker) return;
+        if (PedVariantPicker.SelectedValue is not string variant) return;
+        if (!_webViewReady) await InitWebViewAsync();
+
+        // Already previewing it — just record the preference for new tabs.
+        if (string.Equals(CurrentSyntheticPedVariant(), variant, StringComparison.Ordinal))
+        {
+            UserSettings.SaveDefaultEmotePed(variant);
+            return;
+        }
+
+        // Reloading the skeleton throws away the pose and keyframes, so confirm
+        // when there's real work here. Pristine ped → swap with no prompt.
+        var hasWork = _vm.TimelineKeyframes.Count > 0
+                      || _vm.Strips.Count > 0
+                      || await ViewerHasPoseEditsAsync();
+        if (hasWork)
+        {
+            var ok = AppDialog.Show(
+                $"Switch to GTA {PedDisplayName(variant)}?\n\nThis reloads the skeleton and clears the pose and keyframes in this tab.",
+                "Switch ped",
+                MessageBoxButton.YesNo, MessageBoxImage.Warning);
+            if (ok != MessageBoxResult.Yes)
+            {
+                SyncPedVariantPicker();   // snap the combo back
+                return;
+            }
+        }
+
+        _applyingPedVariant = true;
+        try
+        {
+            UserSettings.SaveDefaultEmotePed(variant);   // also the new-tab default
+            await LoadGtaPresetAsync(variant);
+        }
+        finally
+        {
+            _applyingPedVariant = false;
+        }
+        SyncPedVariantPicker();
+    }
+
     /// <summary>Swap the previewed freemode skeleton the moment the Settings
     /// picker changes. Only a PRISTINE synthetic preset is swapped: a
     /// user-loaded rig, or a tab with a pose / keyframes in it, would be torn
@@ -2009,6 +2081,7 @@ case "prop-loaded":
     /// In that case the setting still saves and applies to the next new tab.</summary>
     private async Task ApplyDefaultEmotePedLiveAsync()
     {
+        if (_applyingPedVariant) return;            // toolbar picker is driving this swap
         if (!_webViewReady) return;                 // nothing loaded yet; next load picks it up
         var variant = DefaultEmotePedVariant();
         var loaded = _vm.LoadedModelPath ?? "";
