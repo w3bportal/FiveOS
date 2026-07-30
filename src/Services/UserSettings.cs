@@ -104,6 +104,12 @@ public static class UserSettings
         /// <summary>Control-rig line thickness multiplier (0.4–1.6).</summary>
         public double ControlRigThickness { get; set; } = 1.0;
 
+        /// <summary>Opt-in for per-joint finger retargeting on import. Default
+        /// OFF: the retarget maps fingers correctly but the Assimp→three rebase
+        /// still mangles the hands, so it ships disabled. No UI on purpose —
+        /// it's a debugging switch, not a feature toggle yet.</summary>
+        public bool FingerRetarget { get; set; }
+
         /// <summary>UI complexity tier: 0=Beginner, 1=Standard, 2=Advanced.
         /// Defaults to Beginner (bare-minimum UI) for new users.</summary>
         public int ExperienceLevel { get; set; }
@@ -695,6 +701,10 @@ public static class UserSettings
         => string.Equals(variant, "female", StringComparison.OrdinalIgnoreCase)
             ? "female"
             : "male";
+
+    /// <summary>Opt-in switch for the unfinished finger retarget. See
+    /// <see cref="FeatureGate.FingerRetarget"/>.</summary>
+    public static bool LoadFingerRetarget() => Read().FingerRetarget;
 
     // ─── Control-rig weight (Emotes posing handles) ───────────────────
     //
