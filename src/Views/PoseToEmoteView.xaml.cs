@@ -119,6 +119,7 @@ public partial class PoseToEmoteView : UserControl
         // the control is live (non-blocking).
         Loaded += (_, _) =>
         {
+            SyncRigLookToolbar();
             ApplyTimelineBodyRowHeights();
             if (_vm.IsAnimLibraryOpen)
                 _ = EnsureAnimLibraryLoadedAsync();
@@ -1999,7 +2000,46 @@ case "prop-loaded":
     private static string DefaultEmotePedVariant() => UserSettings.LoadDefaultEmotePed();
 
     private void OnControlRigStyleSettingChanged(object? sender, EventArgs e)
-        => Dispatcher.Invoke(() => _ = PushControlRigStyleAsync());
+        => Dispatcher.Invoke(() =>
+        {
+            SyncRigLookToolbar();     // reflect a change made in the Settings dialog
+            _ = PushControlRigStyleAsync();
+        });
+
+    private bool _suppressRigLookToolbar;
+
+    /// <summary>Point the toolbar sliders at the stored values without
+    /// re-entering their ValueChanged handler.</summary>
+    private void SyncRigLookToolbar()
+    {
+        if (RigOpacityToolbarSlider is null || RigThicknessToolbarSlider is null) return;
+        _suppressRigLookToolbar = true;
+        RigOpacityToolbarSlider.Value = UserSettings.LoadControlRigOpacity();
+        RigThicknessToolbarSlider.Value = UserSettings.LoadControlRigThickness();
+        _suppressRigLookToolbar = false;
+        UpdateRigLookToolbarLabels();
+    }
+
+    private void UpdateRigLookToolbarLabels()
+    {
+        if (RigOpacityToolbarValue is not null)
+            RigOpacityToolbarValue.Text = $"{RigOpacityToolbarSlider.Value * 100:0}%";
+        if (RigThicknessToolbarValue is not null)
+            RigThicknessToolbarValue.Text = $"{RigThicknessToolbarSlider.Value * 100:0}%";
+    }
+
+    private void OnRigLookToolbarChanged(object sender, RoutedPropertyChangedEventArgs<double> e)
+    {
+        // ValueChanged fires during InitializeComponent, before the sibling
+        // slider field is assigned.
+        if (RigOpacityToolbarSlider is null || RigThicknessToolbarSlider is null) return;
+        UpdateRigLookToolbarLabels();
+        if (_suppressRigLookToolbar) return;
+        // Saving raises ControlRigStyleChanged, which pushes to the viewer and
+        // (harmlessly, suppressed) syncs these same sliders back.
+        UserSettings.SaveControlRigStyle(
+            RigOpacityToolbarSlider.Value, RigThicknessToolbarSlider.Value);
+    }
 
     private void OnDefaultEmotePedSettingChanged(object? sender, EventArgs e)
         => Dispatcher.Invoke(() => _ = ApplyDefaultEmotePedLiveAsync());

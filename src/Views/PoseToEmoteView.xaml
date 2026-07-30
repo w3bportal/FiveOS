@@ -825,6 +825,78 @@
                         <TextBlock Text="Rig" FontSize="11" />
                     </StackPanel>
                 </ToggleButton>
+                <!-- Rig weight. Same preference as Settings → Control rig
+                     appearance; both write UserSettings and the change event
+                     keeps the two in sync. -->
+                <ToggleButton x:Name="RigLookFlyoutBtn"
+                              Padding="10,5"
+                              Margin="6,0,0,0"
+                              ToolTip="How heavy the posing handles look — fade or thin the control rig when it covers too much of the ped. Click to open the sliders.">
+                    <StackPanel Orientation="Horizontal">
+                        <ui:SymbolIcon Symbol="Eye24" FontSize="13" Margin="0,0,6,0" />
+                        <TextBlock Text="Rig Look" FontSize="11" />
+                        <ui:SymbolIcon Symbol="ChevronDown12" FontSize="9" Margin="5,1,0,0" Opacity="0.6" />
+                    </StackPanel>
+                </ToggleButton>
+                <Popup IsOpen="{Binding IsChecked, ElementName=RigLookFlyoutBtn, Mode=TwoWay}"
+                       PlacementTarget="{Binding ElementName=RigLookFlyoutBtn}"
+                       Placement="Bottom"
+                       StaysOpen="False"
+                       AllowsTransparency="True"
+                       PopupAnimation="Fade">
+                    <Border Background="{DynamicResource ApplicationBackgroundBrush}"
+                            BorderBrush="{DynamicResource ControlElevationBorderBrush}"
+                            BorderThickness="1"
+                            CornerRadius="8"
+                            Padding="14,12"
+                            Width="260"
+                            Margin="0,4,0,0">
+                        <StackPanel>
+                            <Grid Margin="0,0,0,2">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="Auto" />
+                                </Grid.ColumnDefinitions>
+                                <TextBlock Grid.Column="0" Text="Opacity" FontSize="11" VerticalAlignment="Center" />
+                                <TextBlock Grid.Column="1" x:Name="RigOpacityToolbarValue"
+                                           FontFamily="Consolas" FontSize="10" VerticalAlignment="Center"
+                                           Foreground="{DynamicResource TextFillColorSecondaryBrush}" Text="100%" />
+                            </Grid>
+                            <Slider x:Name="RigOpacityToolbarSlider"
+                                    Minimum="0.15" Maximum="1.0"
+                                    SmallChange="0.05" LargeChange="0.1"
+                                    TickFrequency="0.05" IsSnapToTickEnabled="True"
+                                    Margin="0,2,0,8"
+                                    ValueChanged="OnRigLookToolbarChanged"
+                                    ToolTip="Fade the handles back so you can see the ped underneath." />
+                            <Grid Margin="0,0,0,2">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="Auto" />
+                                </Grid.ColumnDefinitions>
+                                <TextBlock Grid.Column="0" Text="Thickness" FontSize="11" VerticalAlignment="Center" />
+                                <TextBlock Grid.Column="1" x:Name="RigThicknessToolbarValue"
+                                           FontFamily="Consolas" FontSize="10" VerticalAlignment="Center"
+                                           Foreground="{DynamicResource TextFillColorSecondaryBrush}" Text="100%" />
+                            </Grid>
+                            <Slider x:Name="RigThicknessToolbarSlider"
+                                    Minimum="0.4" Maximum="1.6"
+                                    SmallChange="0.05" LargeChange="0.1"
+                                    TickFrequency="0.05" IsSnapToTickEnabled="True"
+                                    Margin="0,2,0,0"
+                                    ValueChanged="OnRigLookToolbarChanged"
+                                    ToolTip="Thin down the handle outlines." />
+                            <Grid Margin="0,2,0,0">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="*" />
+                                </Grid.ColumnDefinitions>
+                                <TextBlock Grid.Column="0" Text="subtle" FontSize="9" Opacity="0.5" />
+                                <TextBlock Grid.Column="1" Text="heavy" FontSize="9" Opacity="0.5" HorizontalAlignment="Right" />
+                            </Grid>
+                        </StackPanel>
+                    </Border>
+                </Popup>
                 <ToggleButton IsChecked="{Binding PoseIkMode, Mode=TwoWay}"
                               Padding="10,5"
                               Margin="6,0,0,0"
