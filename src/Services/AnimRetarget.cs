@@ -27,6 +27,170 @@ internal static class AnimRetarget
     /// When present, FootLock uses these instead of DetectPlantedFrames.</summary>
     internal sealed record FootPlants(bool[]? Left, bool[]? Right);
 
+    /// <summary>One GTA finger chain (3 phalanges) and the source bones driving it.</summary>
+    private sealed class FingerChain
+    {
+        public int Digit;                              // 0=thumb … 4=pinky
+        public readonly string[] GtaNames = new string[3];
+        public readonly ushort[] Tags = new ushort[3];
+        public readonly string[] SrcNames = new string[3];
+    }
+
+    /// <summary>Pair each SKEL_{side}_Finger{d}{0,1,2} with its source bone.
+    /// Resolved by TAG, not name, because the rig suffixes duplicates (_1) and
+    /// finger names already end in digits.</summary>
+    private static List<FingerChain> BuildFingerChains(
+        Dictionary<string, Bone> gtaBones, Dictionary<ushort, string> srcByTag, string side)
+    {
+        var byTag = new Dictionary<ushort, string>();
+        foreach (var kv in gtaBones)
+            if (kv.Value.HasTag && kv.Value.Tag != 0 && !byTag.ContainsKey(kv.Value.Tag))
+                byTag[kv.Value.Tag] = kv.Key;
+
+        var list = new List<FingerChain>();
+        for (int d = 0; d < 5; d++)
+        {
+            var fc = new FingerChain { Digit = d };
+            bool ok = true;
+            for (int j = 0; j < 3 && ok; j++)
+            {
+                ok = GtaBoneTags.ByGtaName.TryGetValue($"SKEL_{side}_Finger{d}{j}", out var tag)
+                     && byTag.TryGetValue(tag, out var gName)
+                     && srcByTag.TryGetValue(tag, out var sName);
+                if (!ok) break;
+                fc.Tags[j] = GtaBoneTags.ByGtaName[$"SKEL_{side}_Finger{d}{j}"];
+                fc.GtaNames[j] = byTag[fc.Tags[j]];
+                fc.SrcNames[j] = srcByTag[fc.Tags[j]];
+            }
+            if (ok) list.Add(fc);
+        }
+        return list;
+    }
+
+    /// <summary>Rest (bind) WORLD rotation per GTA bone, parents first.</summary>
+    private static Dictionary<string, Q> BuildRestWorld(
+        Dictionary<string, Bone> gtaBones, Dictionary<string, Q> gtaBindR)
+    {
+        var w = new Dictionary<string, Q>(StringComparer.Ordinal);
+        foreach (var name in Ordered(gtaBones))
+        {
+            var b = gtaBones[name];
+            Q parent = (b.Parent != "" && w.TryGetValue(b.Parent, out var pw)) ? pw : Q.Identity;
+            w[name] = Q.Normalize(parent * (gtaBindR.TryGetValue(name, out var r) ? r : b.RestRot));
+        }
+        return w;
+    }
+
+    /// <summary>Signed angle from <paramref name="u"/> to <paramref name="v"/>
+    /// measured about <paramref name="n"/>. Zero when either is degenerate.</summary>
+    private static float SignedAngleAbout(V u, V v, V n)
+    {
+        if (u.LengthSquared() < 1e-12f || v.LengthSquared() < 1e-12f || n.LengthSquared() < 1e-12f)
+            return 0f;
+        u = V.Normalize(u); v = V.Normalize(v); n = V.Normalize(n);
+        return (float)Math.Atan2(V.Dot(V.Cross(u, v), n), V.Dot(u, v));
+    }
+
+    /// <summary>Palm normal from a hand + its index/middle/pinky knuckles.</summary>
+    private static V PalmNormal(V hand, V indexK, V middleK, V pinkyK)
+        => V.Cross(indexK - pinkyK, middleK - hand);
+
+    // Flexion limits. Fingers curl a long way in but barely extend back, so an
+    // asymmetric clamp keeps a noisy source from hyper-extending the hand.
+    private const float FingerFlexMin = -0.30f;   // ≈ −17°
+    private const float FingerFlexMax = 1.92f;    // ≈ 110°
+    private const float ThumbFlexMax = 1.20f;     // thumb curls about a different
+                                                  // axis; keep it conservative.
+
+    /// <summary>
+    /// Rebuild GTA finger locals as a pure curl about the hand's palm normal,
+    /// with the angle measured from the SOURCE's world joint path. Returns how
+    /// many digits were solved.
+    /// </summary>
+    private static int FingerCurlSolve(
+        Dictionary<string, Bone> gtaBones,
+        Dictionary<string, Q> gtaBindR,
+        Dictionary<string, V> gtaBindP,
+        Dictionary<string, Q> restWorld,
+        Dictionary<ushort, Q[]> perFrame,
+        Dictionary<string, V[]> srcPos,
+        List<FingerChain> chains,
+        string gtaHand,
+        string srcHand,
+        int frames)
+    {
+        // Knuckle references (index / middle / pinky = digits 1 / 2 / 4).
+        FingerChain? Digit(int d) => chains.FirstOrDefault(c => c.Digit == d);
+        var dIdx = Digit(1); var dMid = Digit(2); var dPnk = Digit(4);
+        if (dIdx is null || dMid is null || dPnk is null) return 0;
+        if (!gtaBindP.TryGetValue(gtaHand, out var handRest)) return 0;
+        if (!gtaBindP.TryGetValue(dIdx.GtaNames[0], out var idxRest)
+            || !gtaBindP.TryGetValue(dMid.GtaNames[0], out var midRest)
+            || !gtaBindP.TryGetValue(dPnk.GtaNames[0], out var pnkRest)) return 0;
+
+        // GTA curl axis, in rest world space. Every joint rotates about this, so
+        // the whole hand closes coherently instead of per-joint drifting.
+        var gtaNormal = PalmNormal(handRest, idxRest, midRest, pnkRest);
+        if (gtaNormal.LengthSquared() < 1e-12f) return 0;
+        gtaNormal = V.Normalize(gtaNormal);
+
+        if (!srcPos.TryGetValue(srcHand, out var handPath)) return 0;
+        V[]? SrcPath(FingerChain c, int j) => srcPos.TryGetValue(c.SrcNames[j], out var p) ? p : null;
+        var idxPath = SrcPath(dIdx, 0); var midPath = SrcPath(dMid, 0); var pnkPath = SrcPath(dPnk, 0);
+        if (idxPath is null || midPath is null || pnkPath is null) return 0;
+
+        int solved = 0;
+        foreach (var fc in chains)
+        {
+            var p0 = SrcPath(fc, 0); var p1 = SrcPath(fc, 1); var p2 = SrcPath(fc, 2);
+            if (p0 is null || p1 is null || p2 is null) continue;
+
+            // Axis expressed in each joint's PARENT rest frame. Doing it in the
+            // parent's frame (not world) is what makes the curl follow the hand
+            // once the wrist is animated.
+            var axis = new V[3];
+            bool axesOk = true;
+            for (int j = 0; j < 3; j++)
+            {
+                var parent = gtaBones[fc.GtaNames[j]].Parent;
+                Q wp = (parent != "" && restWorld.TryGetValue(parent, out var q)) ? q : Q.Identity;
+                var a = V.Transform(gtaNormal, Q.Inverse(wp));
+                if (a.LengthSquared() < 1e-12f) { axesOk = false; break; }
+                axis[j] = V.Normalize(a);
+            }
+            if (!axesOk) continue;
+
+            float maxFlex = fc.Digit == 0 ? ThumbFlexMax : FingerFlexMax;
+
+            for (int f = 0; f < frames; f++)
+            {
+                // Source palm normal per frame, so the measurement frame tracks
+                // the hand rather than assuming the bind orientation.
+                var srcNormal = PalmNormal(handPath[f], idxPath[f], midPath[f], pnkPath[f]);
+                if (srcNormal.LengthSquared() < 1e-12f) continue;
+
+                // MCP (hand→j0 vs j0→j1) and PIP (j0→j1 vs j1→j2).
+                float aMcp = SignedAngleAbout(p0[f] - handPath[f], p1[f] - p0[f], srcNormal);
+                float aPip = SignedAngleAbout(p1[f] - p0[f], p2[f] - p1[f], srcNormal);
+                // No 4th joint in the source to measure the distal bend from —
+                // anatomically DIP follows PIP closely, so mirror it.
+                float aDip = aPip;
+
+                var ang = new[] { aMcp, aPip, aDip };
+                for (int j = 0; j < 3; j++)
+                {
+                    if (!perFrame.TryGetValue(fc.Tags[j], out var track)) continue;
+                    float t = Math.Clamp(ang[j], FingerFlexMin, maxFlex);
+                    var rest = gtaBindR.TryGetValue(fc.GtaNames[j], out var rq)
+                        ? rq : gtaBones[fc.GtaNames[j]].RestRot;
+                    track[f] = Q.Normalize(Q.CreateFromAxisAngle(axis[j], t) * rest);
+                }
+            }
+            solved++;
+        }
+        return solved;
+    }
+
     /// <summary>Distinct animated source joints needed before a hand counts as
     /// finger-tracked. A rig that collapses all 15 finger tags onto one or two
     /// bones has no real articulation; three or more distinct joints does.</summary>
@@ -336,6 +500,17 @@ internal static class AnimRetarget
         var srcLForeP = new V[frames]; var srcRForeP = new V[frames];
         var srcLHandP = new V[frames]; var srcRHandP = new V[frames];
 
+        // Finger curl pass needs world positions for the hand + every finger
+        // joint it will drive, so collect them alongside the limb paths above.
+        var fingerChainsL = emitFingersL ? BuildFingerChains(gtaBones, srcByTag, "L") : new List<FingerChain>();
+        var fingerChainsR = emitFingersR ? BuildFingerChains(gtaBones, srcByTag, "R") : new List<FingerChain>();
+        var srcFingerPos = new Dictionary<string, V[]>(StringComparer.Ordinal);
+        foreach (var fc in fingerChainsL.Concat(fingerChainsR))
+            foreach (var sn in fc.SrcNames)
+                if (sn != null && !srcFingerPos.ContainsKey(sn)) srcFingerPos[sn] = new V[frames];
+        foreach (var hn in new[] { srcLHand, srcRHand })
+            if (hn != null && !srcFingerPos.ContainsKey(hn)) srcFingerPos[hn] = new V[frames];
+
         for (int f = 0; f < frames; f++)
         {
             double ticks = (double)f / fps * tps;
@@ -358,6 +533,8 @@ internal static class AnimRetarget
             if (srcRFore != null && sP.TryGetValue(srcRFore, out var rfp2)) srcRForeP[f] = rfp2;
             if (srcLHand != null && sP.TryGetValue(srcLHand, out var lhp)) srcLHandP[f] = lhp;
             if (srcRHand != null && sP.TryGetValue(srcRHand, out var rhp)) srcRHandP[f] = rhp;
+            foreach (var kv in srcFingerPos)
+                if (sP.TryGetValue(kv.Key, out var fp)) kv.Value[f] = fp;
 
             var animW = new Dictionary<string, Q>(); var local = new Dictionary<string, Q>();
             foreach (var name in Ordered(gtaBones))
@@ -382,6 +559,31 @@ internal static class AnimRetarget
                 else
                     perFrame[tag][f] = local[name];
             }
+        }
+
+        // ─── Finger curl solve ────────────────────────────────────────────
+        // The generic per-bone path transfers a world rotation DELTA, which
+        // needs the source and target bone to share a local axis convention.
+        // Fingers don't: Mixamo's curl axis differs from GTA's per joint, so a
+        // correct-magnitude rotation lands on the wrong axis and the hand comes
+        // out splayed and crossed. Fingers are near-1-DOF, so solve them
+        // geometrically instead — measure the bend ANGLE from the source's
+        // world joint path and re-apply it about the GTA hand's own curl axis.
+        // Being angle-about-one-axis, this cannot splay or cross fingers.
+        if (frames > 0 && (fingerChainsL.Count > 0 || fingerChainsR.Count > 0))
+        {
+            var restWorld = BuildRestWorld(gtaBones, gtaBindR);
+            int curledL = 0, curledR = 0;
+            if (fingerChainsL.Count > 0 && srcLHand != null && GtaName(tLHandG) is { } gLHand)
+                curledL = FingerCurlSolve(gtaBones, gtaBindR, gtaBindP, restWorld, perFrame,
+                    srcFingerPos, fingerChainsL, gLHand, srcLHand, frames);
+            if (fingerChainsR.Count > 0 && srcRHand != null && GtaName(tRHandG) is { } gRHand)
+                curledR = FingerCurlSolve(gtaBones, gtaBindR, gtaBindP, restWorld, perFrame,
+                    srcFingerPos, fingerChainsR, gRHand, srcRHand, frames);
+            FosLogger.Info("retarget", $"finger curl solve: digits L={curledL} R={curledR}");
+            if (curledL + curledR > 0)
+                warnings.Add($"Finger curl: solved {curledL + curledR} digits from the source's joint paths "
+                           + "(angle about the hand's curl axis, so fingers can't splay).");
         }
 
         bool doRoot = Environment.GetEnvironmentVariable("FIVEOS_NO_ROOTMOTION") != "1";
