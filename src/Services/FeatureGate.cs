@@ -48,5 +48,18 @@ internal static class FeatureGate
     /// Until the bind/axis handling for the finger chains is worked out this
     /// stays off, so nobody imports broken hands. Flip
     /// <c>FingerRetarget</c> in %APPDATA%\FiveOS settings to keep debugging it.</summary>
-    public static bool FingerRetarget => IsMotionUser && UserSettings.LoadFingerRetarget();
+    public static bool FingerRetarget
+    {
+        get
+        {
+            // Env override for headless test harnesses / field debugging,
+            // mirroring AnimRetarget's FIVEOS_NO_* switches: 1 forces on
+            // (bypassing entitlement — it's a client gate, not a secret),
+            // 0 forces off, unset falls through to the normal logic.
+            var env = Environment.GetEnvironmentVariable("FIVEOS_FINGER_RETARGET");
+            if (env == "1") return true;
+            if (env == "0") return false;
+            return IsMotionUser && UserSettings.LoadFingerRetarget();
+        }
+    }
 }

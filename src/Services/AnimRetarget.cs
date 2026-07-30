@@ -67,20 +67,6 @@ internal static class AnimRetarget
         return list;
     }
 
-    /// <summary>Rest (bind) WORLD rotation per GTA bone, parents first.</summary>
-    private static Dictionary<string, Q> BuildRestWorld(
-        Dictionary<string, Bone> gtaBones, Dictionary<string, Q> gtaBindR)
-    {
-        var w = new Dictionary<string, Q>(StringComparer.Ordinal);
-        foreach (var name in Ordered(gtaBones))
-        {
-            var b = gtaBones[name];
-            Q parent = (b.Parent != "" && w.TryGetValue(b.Parent, out var pw)) ? pw : Q.Identity;
-            w[name] = Q.Normalize(parent * (gtaBindR.TryGetValue(name, out var r) ? r : b.RestRot));
-        }
-        return w;
-    }
-
     /// <summary>Signed angle from <paramref name="u"/> to <paramref name="v"/>
     /// measured about <paramref name="n"/>. Zero when either is degenerate.</summary>
     private static float SignedAngleAbout(V u, V v, V n)
@@ -109,11 +95,11 @@ internal static class AnimRetarget
     /// </summary>
     private static int FingerCurlSolve(
         Dictionary<string, Bone> gtaBones,
-        Dictionary<string, Q> gtaBindR,
-        Dictionary<string, V> gtaBindP,
-        Dictionary<string, Q> restWorld,
+        Dictionary<string, Q> gtaBindR,   // WORLD bind rotations (Fk output)
+        Dictionary<string, V> gtaBindP,   // WORLD bind positions
         Dictionary<ushort, Q[]> perFrame,
         Dictionary<string, V[]> srcPos,
+        Dictionary<string, V> srcBindP,
         List<FingerChain> chains,
         string gtaHand,
         string srcHand,
@@ -128,9 +114,14 @@ internal static class AnimRetarget
             || !gtaBindP.TryGetValue(dMid.GtaNames[0], out var midRest)
             || !gtaBindP.TryGetValue(dPnk.GtaNames[0], out var pnkRest)) return 0;
 
-        // GTA curl axis, in rest world space. Every joint rotates about this, so
-        // the whole hand closes coherently instead of per-joint drifting.
-        var gtaNormal = PalmNormal(handRest, idxRest, midRest, pnkRest);
+        // GTA curl axis, in rest world space: the KNUCKLE LINE (index→pinky).
+        // NOT the palm normal — that was the axis error behind every broken
+        // attempt: fingers curl about the lateral knuckle axis; rotating about
+        // the palm normal splays them sideways into the crossed-finger wreck,
+        // and measuring about it degenerates (the curl's cross-product is
+        // parallel to the knuckle line, so its component along the normal is
+        // ~zero — the harness probe showed near-constant emitted quats).
+        var gtaNormal = pnkRest - idxRest;
         if (gtaNormal.LengthSquared() < 1e-12f) return 0;
         gtaNormal = V.Normalize(gtaNormal);
 
@@ -139,54 +130,173 @@ internal static class AnimRetarget
         var idxPath = SrcPath(dIdx, 0); var midPath = SrcPath(dMid, 0); var pnkPath = SrcPath(dPnk, 0);
         if (idxPath is null || midPath is null || pnkPath is null) return 0;
 
+        // ── chirality self-calibration ──
+        // Signed angles depend on which way the palm normal points, and the
+        // cross-product convention flips between left and right hands (mirrored
+        // geometry). Measured on the first attempt as ±0.99 correlation on the
+        // SAME joint of opposite hands. So don't assume: sample the clip,
+        // and if the average measured curl comes out negative, flip that
+        // side's normal. Curl-positive is then guaranteed on both hands, on
+        // both rigs. Same treatment for the GTA bind (freemode's rest hand is
+        // relaxed-curled, so its mean bind angle is clearly nonzero too).
+        if (!srcBindP.TryGetValue(srcHand, out _)) return 0;
+
+        float srcMeanCurl = 0; int srcSamples = 0;
+        int step = Math.Max(1, frames / 24);
+        foreach (var fc in chains)
+        {
+            var p0 = SrcPath(fc, 0); var p1 = SrcPath(fc, 1); var p2 = SrcPath(fc, 2);
+            if (p0 is null || p1 is null || p2 is null) continue;
+            for (int f = 0; f < frames; f += step)
+            {
+                var n = pnkPath[f] - idxPath[f];   // knuckle line, same axis family as gta side
+                if (n.LengthSquared() < 1e-12f) continue;
+                srcMeanCurl += SignedAngleAbout(p0[f] - handPath[f], p1[f] - p0[f], n)
+                             + SignedAngleAbout(p1[f] - p0[f], p2[f] - p1[f], n);
+                srcSamples += 2;
+            }
+        }
+        float srcSign = (srcSamples > 0 && srcMeanCurl < 0) ? -1f : 1f;
+
+        float gtaMeanBind = 0; int gtaSamples = 0;
+        foreach (var fc in chains)
+        {
+            if (!gtaBindP.TryGetValue(fc.GtaNames[0], out var g0)
+                || !gtaBindP.TryGetValue(fc.GtaNames[1], out var g1)
+                || !gtaBindP.TryGetValue(fc.GtaNames[2], out var g2)) continue;
+            gtaMeanBind += SignedAngleAbout(g0 - handRest, g1 - g0, gtaNormal)
+                         + SignedAngleAbout(g1 - g0, g2 - g1, gtaNormal);
+            gtaSamples += 2;
+        }
+        float gtaSign = (gtaSamples > 0 && gtaMeanBind < 0) ? -1f : 1f;
+        // From here on, ALL gta-side measurement + application uses the
+        // curl-positive normal.
+        var gtaCurlNormal = gtaNormal * gtaSign;
+
         int solved = 0;
         foreach (var fc in chains)
         {
             var p0 = SrcPath(fc, 0); var p1 = SrcPath(fc, 1); var p2 = SrcPath(fc, 2);
             if (p0 is null || p1 is null || p2 is null) continue;
+            if (!gtaBindP.TryGetValue(fc.GtaNames[0], out var g0)
+                || !gtaBindP.TryGetValue(fc.GtaNames[1], out var g1)
+                || !gtaBindP.TryGetValue(fc.GtaNames[2], out var g2)) continue;
 
-            // Axis expressed in each joint's PARENT rest frame. Doing it in the
-            // parent's frame (not world) is what makes the curl follow the hand
-            // once the wrist is animated.
+            // Axis expressed in each joint's PARENT bind frame — gtaBindR IS
+            // world (it comes out of the Fk pass), so use it directly. An
+            // earlier version re-accumulated it as if it were locals, which
+            // double-rotated the frame: MCP (one level under the hand) came out
+            // roughly right while every PIP curled backwards (−0.9
+            // correlation), the depth-proportional signature of that bug.
+            // Parent-frame (not world) is what makes the curl follow the hand
+            // once the wrist animates.
             var axis = new V[3];
             bool axesOk = true;
             for (int j = 0; j < 3; j++)
             {
                 var parent = gtaBones[fc.GtaNames[j]].Parent;
-                Q wp = (parent != "" && restWorld.TryGetValue(parent, out var q)) ? q : Q.Identity;
-                var a = V.Transform(gtaNormal, Q.Inverse(wp));
+                Q wp = (parent != "" && gtaBindR.TryGetValue(parent, out var q)) ? q : Q.Identity;
+                var a = V.Transform(gtaCurlNormal, Q.Inverse(wp));
                 if (a.LengthSquared() < 1e-12f) { axesOk = false; break; }
                 axis[j] = V.Normalize(a);
             }
             if (!axesOk) continue;
 
+            // GTA's OWN bind angles are the zero point. The first attempt used
+            // absolute source angles (over-curled by the source's rest bend);
+            // the second used delta-from-source-bind (over-curled by GTA's rest
+            // bend — freemode's relaxed hand starts ~30-100° curled, measured
+            // by the fingertest harness). Matching ABSOLUTE angles: rotate each
+            // joint by (source angle − GTA bind angle), so the GTA hand lands
+            // on the source's actual curl whatever either rig's rest looks like.
+            float gtaBindMcp = SignedAngleAbout(g0 - handRest, g1 - g0, gtaCurlNormal);
+            float gtaBindPip = SignedAngleAbout(g1 - g0, g2 - g1, gtaCurlNormal);
+
             float maxFlex = fc.Digit == 0 ? ThumbFlexMax : FingerFlexMax;
 
             for (int f = 0; f < frames; f++)
             {
-                // Source palm normal per frame, so the measurement frame tracks
+                // Source knuckle line per frame, so the measurement axis tracks
                 // the hand rather than assuming the bind orientation.
-                var srcNormal = PalmNormal(handPath[f], idxPath[f], midPath[f], pnkPath[f]);
+                var srcNormal = pnkPath[f] - idxPath[f];
                 if (srcNormal.LengthSquared() < 1e-12f) continue;
+                srcNormal *= srcSign;
 
-                // MCP (hand→j0 vs j0→j1) and PIP (j0→j1 vs j1→j2).
-                float aMcp = SignedAngleAbout(p0[f] - handPath[f], p1[f] - p0[f], srcNormal);
-                float aPip = SignedAngleAbout(p1[f] - p0[f], p2[f] - p1[f], srcNormal);
-                // No 4th joint in the source to measure the distal bend from —
-                // anatomically DIP follows PIP closely, so mirror it.
-                float aDip = aPip;
+                // Absolute source curl, clamped to plausible flexion BEFORE
+                // differencing so a noisy frame can't hyper-extend the digit.
+                float srcMcp = Math.Clamp(
+                    SignedAngleAbout(p0[f] - handPath[f], p1[f] - p0[f], srcNormal), FingerFlexMin, maxFlex);
+                float srcPip = Math.Clamp(
+                    SignedAngleAbout(p1[f] - p0[f], p2[f] - p1[f], srcNormal), FingerFlexMin, maxFlex);
 
-                var ang = new[] { aMcp, aPip, aDip };
+                // Rotation that carries the GTA joint from its bind angle to the
+                // source's angle. May legitimately be negative (straightening a
+                // rest-curled digit). Thumb MCP is the exception: the thumb's
+                // metacarpal rotates about an axis ~90° off the knuckle line, so
+                // a knuckle-line curl there measured NEGATIVE correlation on
+                // both hands — a wrong motion is worse than none. Its MCP stays
+                // at GTA rest; the two distal joints still curl (0.7–0.9 corr).
+                float tMcp = fc.Digit == 0 ? 0f : srcMcp - gtaBindMcp;
+                float tPip = srcPip - gtaBindPip;
+                // No 4th source joint to measure the distal bend from —
+                // anatomically DIP follows PIP closely, so mirror its delta.
+                float tDip = tPip;
+
+                var ang = new[] { tMcp, tPip, tDip };
                 for (int j = 0; j < 3; j++)
                 {
                     if (!perFrame.TryGetValue(fc.Tags[j], out var track)) continue;
-                    float t = Math.Clamp(ang[j], FingerFlexMin, maxFlex);
-                    var rest = gtaBindR.TryGetValue(fc.GtaNames[j], out var rq)
-                        ? rq : gtaBones[fc.GtaNames[j]].RestRot;
-                    track[f] = Q.Normalize(Q.CreateFromAxisAngle(axis[j], t) * rest);
+                    // Tracks are parent-LOCAL, so compose on the LOCAL rest
+                    // (gtaBindR is world — using it here was the other half of
+                    // the depth bug above).
+                    var rest = gtaBones[fc.GtaNames[j]].RestRot;
+                    track[f] = Q.Normalize(Q.CreateFromAxisAngle(axis[j], ang[j]) * rest);
                 }
             }
             solved++;
+
+            // Harness contract dump: the ABSOLUTE angles this solve intends the
+            // GTA joints to land on (clamped source curl). fingertest scores the
+            // FK-reconstructed target against these, because it cannot re-derive
+            // the source side itself — its naive FK diverges from this file's
+            // useFull channel semantics on the wrist chain.
+            if (Environment.GetEnvironmentVariable("FIVEOS_FINGER_CSV") is { Length: > 0 } csvPath)
+            {
+                try
+                {
+                    using var sw = new StreamWriter(csvPath, append: true);
+                    for (int f = 0; f < frames; f++)
+                    {
+                        var n = pnkPath[f] - idxPath[f];
+                        if (n.LengthSquared() < 1e-12f) continue;
+                        n = V.Normalize(n) * srcSign;
+                        float maxF = fc.Digit == 0 ? ThumbFlexMax : FingerFlexMax;
+                        float sm = Math.Clamp(SignedAngleAbout(p0[f] - handPath[f], p1[f] - p0[f], n), FingerFlexMin, maxF);
+                        float sp = Math.Clamp(SignedAngleAbout(p1[f] - p0[f], p2[f] - p1[f], n), FingerFlexMin, maxF);
+                        sw.WriteLine($"{gtaHand},{fc.Digit},{f},{sm:0.####},{sp:0.####}");
+                    }
+                }
+                catch { /* diagnostics only */ }
+            }
+
+            // TEMP diagnostics (harness): solver's own view of this digit.
+            if (Environment.GetEnvironmentVariable("FIVEOS_FINGER_DEBUG") == "1")
+            {
+                float mMin = float.MaxValue, mMax = float.MinValue, pMin = float.MaxValue, pMax = float.MinValue;
+                for (int f = 0; f < frames; f += Math.Max(1, frames / 60))
+                {
+                    var n = (pnkPath[f] - idxPath[f]);
+                    if (n.LengthSquared() < 1e-12f) continue;
+                    n = V.Normalize(n) * srcSign;
+                    float m = SignedAngleAbout(p0[f] - handPath[f], p1[f] - p0[f], n);
+                    float p = SignedAngleAbout(p1[f] - p0[f], p2[f] - p1[f], n);
+                    mMin = Math.Min(mMin, m); mMax = Math.Max(mMax, m);
+                    pMin = Math.Min(pMin, p); pMax = Math.Max(pMax, p);
+                }
+                Console.WriteLine($"    dbg {gtaHand} d{fc.Digit}: srcSign={srcSign} gtaSign={gtaSign} "
+                    + $"mcp={mMin * 57.3f:0}..{mMax * 57.3f:0} pip={pMin * 57.3f:0}..{pMax * 57.3f:0} "
+                    + $"gtaBindMcp={gtaBindMcp * 57.3f:0} gtaBindPip={gtaBindPip * 57.3f:0}");
+            }
         }
         return solved;
     }
@@ -572,14 +682,13 @@ internal static class AnimRetarget
         // Being angle-about-one-axis, this cannot splay or cross fingers.
         if (frames > 0 && (fingerChainsL.Count > 0 || fingerChainsR.Count > 0))
         {
-            var restWorld = BuildRestWorld(gtaBones, gtaBindR);
             int curledL = 0, curledR = 0;
             if (fingerChainsL.Count > 0 && srcLHand != null && GtaName(tLHandG) is { } gLHand)
-                curledL = FingerCurlSolve(gtaBones, gtaBindR, gtaBindP, restWorld, perFrame,
-                    srcFingerPos, fingerChainsL, gLHand, srcLHand, frames);
+                curledL = FingerCurlSolve(gtaBones, gtaBindR, gtaBindP, perFrame,
+                    srcFingerPos, srcBindP, fingerChainsL, gLHand, srcLHand, frames);
             if (fingerChainsR.Count > 0 && srcRHand != null && GtaName(tRHandG) is { } gRHand)
-                curledR = FingerCurlSolve(gtaBones, gtaBindR, gtaBindP, restWorld, perFrame,
-                    srcFingerPos, fingerChainsR, gRHand, srcRHand, frames);
+                curledR = FingerCurlSolve(gtaBones, gtaBindR, gtaBindP, perFrame,
+                    srcFingerPos, srcBindP, fingerChainsR, gRHand, srcRHand, frames);
             FosLogger.Info("retarget", $"finger curl solve: digits L={curledL} R={curledR}");
             if (curledL + curledR > 0)
                 warnings.Add($"Finger curl: solved {curledL + curledR} digits from the source's joint paths "
