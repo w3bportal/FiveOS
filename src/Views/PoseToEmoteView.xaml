@@ -769,15 +769,73 @@
                               Padding="0">
                 <StackPanel Orientation="Horizontal">
                 <!-- Primary actions — ONE home: the toolbar (sidebar retired 2026-07-16). -->
-                <ui:Button Click="OnImportAnimation"
+                <!-- Import is a split of three actions now. Kept as a Primary
+                     ui:Button (not a ToggleButton) so it stays accent-filled
+                     rather than only colouring while the flyout is open. -->
+                <ui:Button x:Name="ImportFlyoutBtn"
+                           Click="OnImportFlyoutClick"
                            Appearance="Primary"
                            Padding="10,5"
-                           ToolTip="Import an animated clip — .glb / .gltf / .fbx / .blend / .dae / .bvh, Sims 4 .package, physics-mocap .json, or a GTA .ycd.">
+                           ToolTip="Import an animation, or drop a reference photo / video on a plane in the viewport.">
                     <StackPanel Orientation="Horizontal">
                         <ui:SymbolIcon Symbol="ArrowDownload24" FontSize="13" Margin="0,0,6,0" />
                         <TextBlock Text="Import" FontSize="11" FontWeight="SemiBold" />
+                        <ui:SymbolIcon Symbol="ChevronDown12" FontSize="9" Margin="5,1,0,0" Opacity="0.85" />
                     </StackPanel>
                 </ui:Button>
+                <Popup x:Name="ImportFlyout"
+                       PlacementTarget="{Binding ElementName=ImportFlyoutBtn}"
+                       Placement="Bottom"
+                       StaysOpen="False"
+                       AllowsTransparency="True"
+                       PopupAnimation="Fade">
+                    <Border Background="{DynamicResource ApplicationBackgroundBrush}"
+                            BorderBrush="{DynamicResource ControlElevationBorderBrush}"
+                            BorderThickness="1"
+                            CornerRadius="8"
+                            Padding="6"
+                            MinWidth="212"
+                            Margin="0,4,0,0">
+                        <StackPanel>
+                            <ui:Button Click="OnImportFlyoutAnimation"
+                                       Appearance="Transparent"
+                                       HorizontalAlignment="Stretch"
+                                       HorizontalContentAlignment="Left"
+                                       Padding="8,6"
+                                       ToolTip="Import an animated clip — .glb / .gltf / .fbx / .blend / .dae / .bvh, Sims 4 .package, physics-mocap .json, or a GTA .ycd.">
+                                <StackPanel Orientation="Horizontal">
+                                    <ui:SymbolIcon Symbol="ArrowDownload24" FontSize="14" Margin="0,0,9,0" VerticalAlignment="Center" />
+                                    <TextBlock Text="Animation" FontSize="11" VerticalAlignment="Center" />
+                                </StackPanel>
+                            </ui:Button>
+                            <Border Height="1"
+                                    Margin="4,5"
+                                    Background="{DynamicResource ControlElevationBorderBrush}" />
+                            <ui:Button Click="OnImportFlyoutReferenceImage"
+                                       Appearance="Transparent"
+                                       HorizontalAlignment="Stretch"
+                                       HorizontalContentAlignment="Left"
+                                       Padding="8,6"
+                                       ToolTip="Put a photo on a plane in the viewport to pose against.">
+                                <StackPanel Orientation="Horizontal">
+                                    <ui:SymbolIcon Symbol="Image24" FontSize="14" Margin="0,0,9,0" VerticalAlignment="Center" />
+                                    <TextBlock Text="Image Reference" FontSize="11" VerticalAlignment="Center" />
+                                </StackPanel>
+                            </ui:Button>
+                            <ui:Button Click="OnImportFlyoutReferenceVideo"
+                                       Appearance="Transparent"
+                                       HorizontalAlignment="Stretch"
+                                       HorizontalContentAlignment="Left"
+                                       Padding="8,6"
+                                       ToolTip="Put a video on a plane in the viewport — it stays locked to the timeline as you scrub.">
+                                <StackPanel Orientation="Horizontal">
+                                    <ui:SymbolIcon Symbol="Video24" FontSize="14" Margin="0,0,9,0" VerticalAlignment="Center" />
+                                    <TextBlock Text="Video Reference" FontSize="11" VerticalAlignment="Center" />
+                                </StackPanel>
+                            </ui:Button>
+                        </StackPanel>
+                    </Border>
+                </Popup>
                 <!-- Video → Emote lives in the Motion sidebar section, and
                      Save Pose in the SAVED POSES section — both retired from
                      the toolbar to keep it to one row of primary actions. -->

@@ -1852,6 +1852,30 @@ case "prop-loaded":
     // URL also sidesteps WebView2's cache.
     private int _referenceSeq;
 
+    // ─── Import flyout (toolbar) ──────────────────────────────────────
+    // Toggles rather than always-open so a second click on the button closes
+    // it; StaysOpen="False" handles click-away.
+    private void OnImportFlyoutClick(object sender, RoutedEventArgs e)
+        => ImportFlyout.IsOpen = !ImportFlyout.IsOpen;
+
+    private void OnImportFlyoutAnimation(object sender, RoutedEventArgs e)
+    {
+        ImportFlyout.IsOpen = false;
+        OnImportAnimation(sender, e);
+    }
+
+    private void OnImportFlyoutReferenceImage(object sender, RoutedEventArgs e)
+    {
+        ImportFlyout.IsOpen = false;
+        RunImportReference("photo");
+    }
+
+    private void OnImportFlyoutReferenceVideo(object sender, RoutedEventArgs e)
+    {
+        ImportFlyout.IsOpen = false;
+        RunImportReference("video");
+    }
+
     private const string ReferenceImageFilter = "Images (*.png;*.jpg;*.jpeg;*.webp;*.bmp;*.gif)|*.png;*.jpg;*.jpeg;*.webp;*.bmp;*.gif";
     private const string ReferenceVideoFilter = "Video (*.mp4;*.webm;*.m4v;*.mov)|*.mp4;*.webm;*.m4v;*.mov";
 
