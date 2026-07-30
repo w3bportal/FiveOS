@@ -1858,12 +1858,6 @@ case "prop-loaded":
     private void OnImportFlyoutClick(object sender, RoutedEventArgs e)
         => ImportFlyout.IsOpen = !ImportFlyout.IsOpen;
 
-    private void OnImportFlyoutAnimation(object sender, RoutedEventArgs e)
-    {
-        ImportFlyout.IsOpen = false;
-        OnImportAnimation(sender, e);
-    }
-
     private void OnImportFlyoutReferenceImage(object sender, RoutedEventArgs e)
     {
         ImportFlyout.IsOpen = false;
