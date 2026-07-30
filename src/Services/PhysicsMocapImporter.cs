@@ -229,9 +229,15 @@ public static class PhysicsMocapImporter
                 warnings.Add($"Physics clip thinned to {fps} fps ({MaxImportFrames}-frame cap).");
             }
 
+            // Move-style foot detection: the file's per-frame ground
+            // reaction_forces on ankle/toe (0.0 ⇔ airborne) are the exact
+            // foot contacts — they replace the kinematic plant heuristic.
+            var plants = BuildFootPlants(frames, fps, sampleFrames, warnings);
+
             var anim = scene.Animations[0];
             var rt = AnimRetarget.Retarget(scene, anim, tps, sampleFrames, fps,
-                out var mapped, out var unmapped, out var rootMotion, warnings);
+                out var mapped, out var unmapped, out var rootMotion, warnings,
+                plants: plants);
             if (rt == null || rt.Count == 0)
                 return AnimEmoteImporter.Result.Fail("Retarget produced no bone tracks from physics mocap.");
 
@@ -281,8 +287,12 @@ public static class PhysicsMocapImporter
         return Q.Normalize(q);
     }
 
-    private readonly record struct JointSample(V Position, Q LocalRot);
+    private readonly record struct JointSample(V Position, Q LocalRot, float Force = float.NaN);
     private readonly record struct Frame(double Time, Dictionary<string, JointSample> Joints);
+
+    /// <summary>Reaction forces below this (Newtons) count as airborne — the
+    /// format's contract is 0.0 ⇔ no contact, the epsilon just eats float noise.</summary>
+    private const float ForceContactThreshold = 0.5f;
 
     private static bool TryReadJoint(JsonElement el, out JointSample sample)
     {
@@ -297,16 +307,78 @@ public static class PhysicsMocapImporter
         if (el.TryGetProperty("type", out var typeEl) && typeEl.ValueKind == JsonValueKind.String)
             type = typeEl.GetString() ?? type;
 
+        // Ground reaction force in Newtons (foot joints only; scalar in the
+        // documented format, but some dumps wrap it in a 1..3 element array).
+        float force = float.NaN;
+        if (el.TryGetProperty("reaction_forces", out var rfEl))
+        {
+            if (rfEl.ValueKind == JsonValueKind.Array)
+            {
+                double m = 0; bool any = false;
+                foreach (var v in rfEl.EnumerateArray()) { m = Math.Max(m, Math.Abs(ParseDouble(v))); any = true; }
+                if (any) force = (float)m;
+            }
+            else
+                force = (float)Math.Abs(ParseDouble(rfEl));
+        }
+
         if (!el.TryGetProperty("rotations", out var rotEl) || rotEl.ValueKind != JsonValueKind.Array)
             return false;
         var angles = new List<double>();
         foreach (var a in rotEl.EnumerateArray()) angles.Add(ParseDouble(a));
         try
         {
-            sample = new JointSample(pos, EulerToQuat(type, angles));
+            sample = new JointSample(pos, EulerToQuat(type, angles), force);
             return true;
         }
         catch { return false; }
+    }
+
+    /// <summary>Per-side plant masks from the file's ground reaction forces
+    /// (ankle + toe), resampled onto the retarget frame grid. Null when the
+    /// dump carries no force data (older exports) — the retarget then falls
+    /// back to its kinematic speed/height heuristic.</summary>
+    private static AnimRetarget.FootPlants? BuildFootPlants(List<Frame> frames, int fps, int sampleFrames, List<string> warnings)
+    {
+        bool[]? Side(string ankle, string toe)
+        {
+            bool saw = false;
+            var contact = new bool[frames.Count];
+            for (int i = 0; i < frames.Count; i++)
+            {
+                float fA = frames[i].Joints.TryGetValue(ankle, out var a) ? a.Force : float.NaN;
+                float fT = frames[i].Joints.TryGetValue(toe, out var t) ? t.Force : float.NaN;
+                if (!float.IsNaN(fA) || !float.IsNaN(fT)) saw = true;
+                contact[i] = (!float.IsNaN(fA) && fA > ForceContactThreshold)
+                          || (!float.IsNaN(fT) && fT > ForceContactThreshold);
+            }
+            if (!saw) return null;
+
+            // Nearest-frame resample onto the retarget grid: sample f sits at
+            // frames[0].Time + f/fps — the same mapping BuildScene bakes into
+            // the channel ticks, so masks and rotations stay aligned.
+            var mask = new bool[sampleFrames];
+            double t0 = frames[0].Time;
+            int j = 0;
+            for (int f = 0; f < sampleFrames; f++)
+            {
+                double tSec = t0 + (double)f / fps;
+                while (j < frames.Count - 1 && Math.Abs(frames[j + 1].Time - tSec) <= Math.Abs(frames[j].Time - tSec)) j++;
+                mask[f] = contact[j];
+            }
+            // Bridge ≤2-frame dropouts so one noisy force sample doesn't split
+            // a stance into two lock segments (mirrors the heuristic backfill).
+            for (int f = 1; f < sampleFrames - 2; f++)
+                if (!mask[f] && mask[f - 1] && (mask[f + 1] || mask[f + 2])) mask[f] = true;
+            return mask;
+        }
+
+        var left = Side("Left_ankle", "Left_toe");
+        var right = Side("Right_ankle", "Right_toe");
+        if (left == null && right == null) return null;
+        int nl = left?.Count(b => b) ?? 0, nr = right?.Count(b => b) ?? 0;
+        warnings.Add($"Foot contacts from ground-reaction forces: L {nl}/{sampleFrames} · R {nr}/{sampleFrames} planted frames.");
+        return new AnimRetarget.FootPlants(left, right);
     }
 
     /// <summary>True when the file's Left_*/Right_* labels are camera-mirrored.

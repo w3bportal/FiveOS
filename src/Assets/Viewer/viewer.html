@@ -566,6 +566,78 @@
       width: 10px; height: 10px; border-radius: 50%;
       background: #ccc; border: 1px solid #1c1c1c;
     }
+
+    /* Reference photo / video controls. Bottom-right: top-right is the bone
+       tree, top-left the gizmo bar, bottom-centre the sub-mesh chip. */
+    #ref-bar {
+      position: absolute; right: 12px; bottom: 12px; z-index: 30;
+      display: flex; flex-direction: column; gap: 7px;
+      width: 188px; padding: 9px 10px 10px;
+      border-radius: 4px;
+      background: rgba(38, 38, 38, 0.92);
+      border: 1px solid #363636;
+      backdrop-filter: blur(6px);
+      font: 11px/1.3 -apple-system, "Segoe UI", sans-serif;
+      color: var(--vscode-fg);
+    }
+    #ref-bar.hidden { display: none; }
+    #ref-bar .ref-head { display: flex; align-items: center; gap: 6px; }
+    #ref-bar .ref-title {
+      flex: 1; min-width: 0;
+      font-size: 10px; font-weight: 600;
+      letter-spacing: 0.08em; text-transform: uppercase; color: #8a8a8a;
+      overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    }
+    #ref-bar .ref-close {
+      background: transparent; border: none; color: #777;
+      font-size: 15px; line-height: 1; cursor: pointer; padding: 0 2px;
+    }
+    #ref-bar .ref-close:hover { color: #ddd; }
+    #ref-bar .ref-row {
+      display: grid; grid-template-columns: 44px 1fr 34px;
+      align-items: center; gap: 6px; margin: 0;
+    }
+    #ref-bar .ref-row > span:first-child { color: #666; font-size: 10px; }
+    #ref-bar .ref-val {
+      color: #888; font-size: 10px;
+      font-variant-numeric: tabular-nums; text-align: right;
+    }
+    #ref-bar .ref-btns { display: flex; gap: 4px; }
+    #ref-bar .ref-btn {
+      flex: 1; padding: 4px 0;
+      background: transparent;
+      border: 1px solid #4a4a4a; border-radius: 4px;
+      color: var(--vscode-fg); font-size: 10px; cursor: pointer;
+    }
+    #ref-bar .ref-btn:hover { background: var(--vscode-hover); border-color: #5a5a5a; }
+    #ref-bar .ref-btn.active { background: var(--pose-accent); border-color: transparent; color: #fff; }
+    #ref-bar .ref-btn.danger:hover { background: #7a2626; border-color: #a33; color: #fff; }
+    #ref-bar .ref-note { color: #666; font-size: 9px; line-height: 1.35; }
+    #ref-bar input[type=range] {
+      -webkit-appearance: none; appearance: none;
+      width: 100%; height: 14px; margin: 0;
+      background: transparent; cursor: pointer;
+    }
+    #ref-bar input[type=range]:focus { outline: none; }
+    #ref-bar input[type=range]::-webkit-slider-runnable-track {
+      height: 2px; border-radius: 1px; background: #4d4d4d;
+    }
+    #ref-bar input[type=range]::-webkit-slider-thumb {
+      -webkit-appearance: none; appearance: none;
+      width: 10px; height: 10px; margin-top: -4px;
+      border-radius: 50%;
+      background: #ccc;
+      border: 1px solid #1c1c1c;
+      box-shadow: 0 0 0 1px #363636;
+    }
+    #ref-bar input[type=range]:hover::-webkit-slider-thumb { background: #fff; }
+    #ref-bar input[type=range]::-moz-range-track {
+      height: 2px; border-radius: 1px; background: #4d4d4d; border: none;
+    }
+    #ref-bar input[type=range]::-moz-range-thumb {
+      width: 10px; height: 10px; border-radius: 50%;
+      background: #ccc; border: 1px solid #1c1c1c;
+    }
   </style>
   <div id="hdri-bar" class="hidden">
     <div class="hdri-title">Lighting</div>
@@ -641,6 +713,34 @@
       <span id="sb-separate-label">Separate</span>
     </button>
     <button class="sb-close" id="sb-close" title="Deselect">&times;</button>
+  </div>
+
+  <!-- Reference photo / video controls. Starts hidden; revealed by the
+       REFERENCE MEDIA block once media loads, and only on the Emotes page
+       (this same viewer.html also serves Props, Optimize and AI). -->
+  <div id="ref-bar" class="hidden">
+    <div class="ref-head">
+      <span class="ref-title" id="ref-title">Reference</span>
+      <button type="button" class="ref-close" id="ref-hide-bar" title="Hide these controls (the plane stays)">&times;</button>
+    </div>
+    <label class="ref-row"><span>Opacity</span>
+      <input id="ref-opacity" type="range" min="0.05" max="1" step="0.05" value="0.75" />
+      <span class="ref-val" id="ref-opacity-val">0.75</span>
+    </label>
+    <label class="ref-row" id="ref-offset-row" style="display:none"><span>Offset</span>
+      <input id="ref-offset" type="range" min="-5" max="5" step="0.05" value="0" />
+      <span class="ref-val" id="ref-offset-val">0.00s</span>
+    </label>
+    <div class="ref-btns">
+      <button type="button" class="ref-btn" id="ref-select" title="Attach the gizmo to the reference plane — W moves, R scales. Clicking the plane in the viewport does the same.">Move</button>
+      <button type="button" class="ref-btn" id="ref-flip" title="Mirror the reference left ↔ right (for mirrored footage)">Flip</button>
+      <button type="button" class="ref-btn" id="ref-visible" title="Show / hide the reference plane">Hide</button>
+    </div>
+    <div class="ref-btns">
+      <button type="button" class="ref-btn" id="ref-fit" title="Stretch the video across the whole clip instead of matching it second-for-second">Fit clip</button>
+      <button type="button" class="ref-btn danger" id="ref-remove" title="Remove the reference plane">Remove</button>
+    </div>
+    <div class="ref-note" id="ref-note"></div>
   </div>
 
   <div id="status"></div>
@@ -4314,6 +4414,11 @@ function tick() {
   // no-op when paused. Defined later in the pose-mode block; guarded.
   if (typeof poseTimelineTick === 'function') poseTimelineTick();
   if (posePlaying) needsRender = true;
+  // Keep a reference VIDEO frame-locked to the playhead. This OBSERVES
+  // poseTime instead of hooking the ~14 places that write it (playback
+  // advance, scrub, undo/redo, imports, clearTimeline), so it can't
+  // desync. No-op unless reference video is loaded.
+  refMediaSync();
   // Skinned-animation playback. The mixer mutates bone matrices each
   // frame, so we have to opt out of the render-on-demand short-circuit
   // and repaint every frame for as long as a clip is playing.
@@ -4339,6 +4444,7 @@ function tick() {
   // Guarded behind poseDotsSyncEnabled (undefined at first tick) so the
   // `let poseMode` below isn't touched during its temporal dead zone.
   if (poseDotsSyncEnabled && poseMode) { try { updateBoneLines(); } catch (e) {} }
+  try { _footVizSync(); } catch (e) {}
   renderer.render(scene, camera);
   // First real paint after entering pose mode → tell the host so its boot
   // splash can stay up until the rig is actually on screen (not just built),
@@ -5387,6 +5493,51 @@ function _rtApplyFootPlant(f) {
     bone.position.z = _rtFootTargetLocal.z;
   }
   if (_rt.modelRoot) _rt.modelRoot.updateMatrixWorld(true);
+}
+
+// ── Foot-contact visual (Move-style) ──────────────────────────────────
+// Magenta ground ring + green up arrow under each foot while a plant
+// lock is active (rt preview or keyframe path). Pure chrome: reads the
+// lock state on painted frames only, never writes bones.
+let _footViz = null;
+function _footVizEnsure() {
+  const mk = () => {
+    const g = new THREE.Group();
+    const ring = new THREE.Mesh(
+      new THREE.RingGeometry(0.11, 0.155, 40),
+      new THREE.MeshBasicMaterial({ color: 0xe040c8, transparent: true, opacity: 0.85, side: THREE.DoubleSide, depthWrite: false }));
+    ring.rotation.x = -Math.PI / 2;
+    ring.renderOrder = 6;
+    g.add(ring);
+    const arrow = new THREE.ArrowHelper(new THREE.Vector3(0, 1, 0), new THREE.Vector3(0, 0.03, 0), 0.30, 0x35e05a, 0.09, 0.045);
+    g.add(arrow);
+    g.visible = false;
+    scene.add(g);
+    return g;
+  };
+  if (!_footViz) _footViz = { L: mk(), R: mk() };
+  return _footViz;
+}
+function _footVizSync() {
+  const intensity = (typeof poseFootPlantIntensity === 'number' && isFinite(poseFootPlantIntensity))
+    ? poseFootPlantIntensity : 1;
+  const fpRt = _rt ? _rt.footPlant : null;
+  const fpKf = poseKfFootPlant;
+  const fp = (fpRt && (fpRt.lockL || fpRt.lockR)) ? fpRt
+           : (fpKf && (fpKf.lockL || fpKf.lockR)) ? fpKf : null;
+  if (!fp || !posePreviewFootIk || intensity < 1e-4) {
+    if (_footViz) { _footViz.L.visible = false; _footViz.R.visible = false; }
+    return;
+  }
+  const viz = _footVizEnsure();
+  const set = (g, lock) => {
+    if (!lock) { g.visible = false; return; }
+    // Ring flat on the floor at the locked contact point, just above the grid.
+    g.position.set(lock.x, 0.012, lock.z);
+    g.visible = true;
+  };
+  set(viz.L, fp.lockL);
+  set(viz.R, fp.lockR);
 }
 
 // ── Keyframe-path foot plant (anim-import setKeyframes) ───────────────
@@ -11941,6 +12092,17 @@ renderer.domElement.addEventListener('pointerdown', e => {
     if (jointHits.length > 0) { grabJoint(); return; }
     if (ikHits.length > 0 && grabIk()) return;
   }
+
+  //   3. last: the reference plane. Only reached when no gizmo handle, joint
+  //      marker or IK ring was under the cursor, so bone picking always wins
+  //      and a plane standing behind the ped can never steal a limb click.
+  if (refMedia && refMedia.visible && refMedia.mesh) {
+    if (raycaster.intersectObject(refMedia.mesh, false).length > 0) {
+      transformControls.attach(refMedia.mesh);
+      if (transformControls.mode === 'rotate') transformControls.setMode('translate');
+      requestRender();
+    }
+  }
 }, true);
 
 // Hover feedback for the IK ring handles: brighten + enlarge the one under
@@ -12161,6 +12323,412 @@ window.addEventListener('unhandledrejection', e => {
     postToHost({ kind: 'js-error', message: 'unhandled rejection: ' + String(e.reason && e.reason.message || e.reason || ''), source: '', line: 0, col: 0 });
   } catch {}
 });
+
+// ─────────────────────────────────────────────────────────────────────────
+// REFERENCE MEDIA — a photo or video on an upright plane in the scene, for
+// matching a pose against real footage. Emotes page only.
+//
+// A reference VIDEO is frame-locked to the emote timeline. We deliberately
+// do NOT wrap poseSetTime / poseTimelineTick / _rtApply: poseTime is written
+// from ~14 places (playback advance in both storage modes, scrub, undo/redo,
+// imports, clearTimeline), so intercepting seeks would leak. Instead
+// refMediaSync() runs from tick() and OBSERVES poseTime every frame — being
+// inside this module means we can read it directly. Sync is one-directional
+// (timeline drives video, never the reverse): in _rt mode poseSetTime routes
+// through rtSeek → rtPause, so pushing time the other way would silently
+// stop emote playback.
+// ─────────────────────────────────────────────────────────────────────────
+
+// `var`, not `let`: tick() starts during module init and calls refMediaSync()
+// before this section's initializers run — a `let` would hit its TDZ. The
+// `refMedia == null` guard makes the early call a no-op.
+var refMedia = null;
+
+const REF_DEFAULT_OPACITY = 0.75;
+// Below this drift (in seconds) a playing video is left alone; correcting
+// every frame would thrash the decoder.
+const REF_PLAY_DRIFT = 0.18;
+
+function refEl(id) { return document.getElementById(id); }
+
+// One viewer.html serves four WebView2 hosts; reference media is Emotes-only.
+function refIsEmotesPage() { return location.hostname === 'pose-viewer.local'; }
+
+function refNote(text) {
+  const el = refEl('ref-note');
+  if (el) el.textContent = text || '';
+}
+
+// Match the ped so the plane reads at life size whatever the model's unit
+// scale is; 1.8 is only the no-model fallback.
+function refDefaultHeight() {
+  try {
+    if (currentModel) {
+      const box = new THREE.Box3().setFromObject(currentModel);
+      const h = box.max.y - box.min.y;
+      if (isFinite(h) && h > 0.01) return h;
+    }
+  } catch (e) { /* fall through to the default */ }
+  return 1.8;
+}
+
+function refBuildPlane(texture, aspect) {
+  const h = refDefaultHeight();
+  const w = Math.max(0.05, h * (isFinite(aspect) && aspect > 0 ? aspect : 1));
+  // Unit geometry + scale, so the user's own gizmo scaling composes cleanly.
+  const mesh = new THREE.Mesh(
+    new THREE.PlaneGeometry(1, 1),
+    new THREE.MeshBasicMaterial({
+      map: texture,
+      transparent: true,
+      opacity: REF_DEFAULT_OPACITY,
+      side: THREE.DoubleSide,
+      // Semi-transparent reference must not punch a hole in the depth
+      // buffer, or the ped behind it disappears.
+      depthWrite: false,
+      toneMapped: false,
+    })
+  );
+  mesh.name = 'FiveOS_ReferenceMedia';
+  mesh.userData.fiveosRefPlane = true;
+  mesh.scale.set(w, h, 1);
+  // Standing on the grid, just off the ped's left, facing the default camera
+  // (PlaneGeometry's front face is +Z, which is where the camera starts).
+  mesh.position.set(-(w / 2 + h * 0.2), h / 2, 0);
+  scene.add(mesh);
+  return mesh;
+}
+
+function refDispose() {
+  if (!refMedia) return;
+  try { if (transformControls.object === refMedia.mesh) transformControls.detach(); } catch (e) {}
+  try { scene.remove(refMedia.mesh); } catch (e) {}
+  try { refMedia.mesh.geometry.dispose(); } catch (e) {}
+  try { refMedia.material.dispose(); } catch (e) {}
+  try { refMedia.texture.dispose(); } catch (e) {}
+  if (refMedia.video) {
+    try { refMedia.video.pause(); } catch (e) {}
+    // Drop the src so WebView2 releases the decoder + file handle; the host
+    // overwrites this file on the next import.
+    try { refMedia.video.removeAttribute('src'); refMedia.video.load(); } catch (e) {}
+    try { refMedia.video.remove(); } catch (e) {}
+    if (refMedia.blobUrl) { try { URL.revokeObjectURL(refMedia.blobUrl); } catch (e) {} }
+  }
+  refMedia = null;
+}
+
+function refSyncBarToState() {
+  const bar = refEl('ref-bar');
+  if (!bar) return;
+  const isVideo = !!(refMedia && refMedia.kind === 'video');
+  const title = refEl('ref-title');
+  if (title) title.textContent = (refMedia && refMedia.label) || 'Reference';
+  const offRow = refEl('ref-offset-row');
+  if (offRow) offRow.style.display = isVideo ? '' : 'none';
+  const fit = refEl('ref-fit');
+  if (fit) {
+    fit.style.display = isVideo ? '' : 'none';
+    fit.classList.toggle('active', !!(refMedia && refMedia.fitClip));
+  }
+  const op = refEl('ref-opacity'), opv = refEl('ref-opacity-val');
+  if (op && refMedia) op.value = String(refMedia.opacity);
+  if (opv && refMedia) opv.textContent = refMedia.opacity.toFixed(2);
+  const flip = refEl('ref-flip');
+  if (flip) flip.classList.toggle('active', !!(refMedia && refMedia.flipped));
+  const vis = refEl('ref-visible');
+  if (vis) {
+    vis.textContent = (refMedia && !refMedia.visible) ? 'Show' : 'Hide';
+    vis.classList.toggle('active', !!(refMedia && !refMedia.visible));
+  }
+}
+
+function refShowBar() {
+  const bar = refEl('ref-bar');
+  if (!bar || !refIsEmotesPage()) return;
+  bar.classList.remove('hidden');
+  refSyncBarToState();
+  refNote(refMedia && refMedia.kind === 'video'
+    ? 'Locked to the timeline — scrub or play to match.'
+    : '');
+}
+
+function refApplyFlip() {
+  const m = refMedia;
+  if (!m) return;
+  const t = m.texture;
+  t.wrapS = THREE.RepeatWrapping;
+  t.repeat.x = m.flipped ? -1 : 1;
+  t.offset.x = m.flipped ? 1 : 0;
+  t.needsUpdate = true;
+  requestRender();
+}
+
+// ─── timeline → video mapping ───
+// Default is second-for-second (plus a manual offset) so real-time footage
+// lines up with a real-time clip. "Fit clip" instead stretches the whole
+// video across the whole clip.
+function refTargetVideoTime() {
+  const m = refMedia;
+  if (!m || !m.video) return 0;
+  const dur = m.duration > 0 ? m.duration : 0;
+  let t;
+  if (m.fitClip && poseDuration > 1e-6 && dur > 0) {
+    t = (Math.max(0, Math.min(poseDuration, poseTime)) / poseDuration) * dur;
+  } else {
+    t = poseTime + m.offset;
+  }
+  // Wrap, so a short reference keeps cycling under a longer clip instead of
+  // freezing on its last frame.
+  if (dur > 0) t = ((t % dur) + dur) % dur;
+  return t;
+}
+
+function refSyncVideo(force) {
+  const m = refMedia;
+  if (!m || !m.video || !m.visible) return;
+  const v = m.video;
+  if (v.readyState < 1) return;   // no metadata yet — nothing to seek
+  const target = refTargetVideoTime();
+  const drift = Math.abs(v.currentTime - target);
+
+  if (posePlaying && v.duration > 0) {
+    // Let the decoder run at its own pace and only correct real drift —
+    // per-frame currentTime writes stutter badly on compressed video.
+    const rate = (m.fitClip && poseDuration > 1e-6)
+      ? Math.max(0.0625, Math.min(16, m.duration / poseDuration))
+      : 1;
+    if (Math.abs(v.playbackRate - rate) > 1e-3) {
+      try { v.playbackRate = rate; } catch (e) {}
+    }
+    if (v.paused) { const p = v.play(); if (p && p.catch) p.catch(() => {}); }
+    if (drift > REF_PLAY_DRIFT) { try { v.currentTime = target; } catch (e) {} }
+    m.texture.needsUpdate = true;
+    needsRender = true;
+    return;
+  }
+
+  // Paused / scrubbing / stepping: drive the frame explicitly.
+  if (!v.paused) { try { v.pause(); } catch (e) {} }
+  // poseTime is NOT fps-quantized during playback, so use half a frame as
+  // the seek threshold rather than testing for equality.
+  const eps = 0.5 / Math.max(1, poseFps);
+  if (force || drift > eps) {
+    if (v.seeking) return;   // let the in-flight seek land first
+    try { v.currentTime = target; } catch (e) {}
+    m.texture.needsUpdate = true;
+    needsRender = true;
+  }
+}
+
+// Called every frame from tick(). Cheap no-op with no reference video.
+function refMediaSync() {
+  if (!refMedia || !refMedia.video) return;
+  refSyncVideo(false);
+}
+
+function refLoadImage(url, label) {
+  new THREE.TextureLoader().load(
+    url,
+    (tex) => {
+      tex.colorSpace = THREE.SRGBColorSpace;
+      const img = tex.image;
+      const aspect = (img && img.height) ? img.width / img.height : 1;
+      const mesh = refBuildPlane(tex, aspect);
+      refMedia = {
+        mesh, material: mesh.material, texture: tex, video: null,
+        kind: 'photo', label: label || 'Reference',
+        opacity: REF_DEFAULT_OPACITY, flipped: false, visible: true,
+        offset: 0, fitClip: false, duration: 0,
+      };
+      refShowBar();
+      requestRender();
+      postToHost({
+        // state is 'ok', not 'loaded': the Props host substring-matches raw
+      // JSON for "loaded"/"ready" instead of parsing kind, so those tokens
+      // are best kept out of any new message.
+      kind: 'reference-media', state: 'ok', mediaKind: 'photo',
+        width: img ? img.width : 0, height: img ? img.height : 0,
+      });
+    },
+    undefined,
+    () => {
+      refNote('Could not decode that image.');
+      postToHost({
+        kind: 'reference-media', state: 'error',
+        message: 'Could not decode that image. PNG, JPG, WebP, BMP and GIF work.',
+      });
+    }
+  );
+}
+
+// Frame-accurate scrubbing needs random access, and range-request support
+// through SetVirtualHostNameToFolderMapping isn't something we can rely on.
+// A blob URL guarantees seeking; we skip it for very large clips rather than
+// hold them in memory, and fall back to the plain URL on any failure.
+const REF_MAX_BLOB_BYTES = 320 * 1024 * 1024;
+
+async function refVideoSourceUrl(url) {
+  try {
+    const res = await fetch(url);
+    if (!res.ok) return { src: url, blobUrl: null };
+    const blob = await res.blob();
+    if (blob.size > REF_MAX_BLOB_BYTES) return { src: url, blobUrl: null };
+    const blobUrl = URL.createObjectURL(blob);
+    return { src: blobUrl, blobUrl };
+  } catch (e) {
+    return { src: url, blobUrl: null };
+  }
+}
+
+function refLoadVideo(url, label) {
+  const v = document.createElement('video');
+  v.muted = true;          // muted is what allows play() with no user gesture
+  v.defaultMuted = true;
+  v.loop = true;
+  v.playsInline = true;
+  v.preload = 'auto';
+  v.style.display = 'none';
+  document.body.appendChild(v);
+
+  let settled = false;
+  let blobUrl = null;
+  v.addEventListener('loadedmetadata', () => {
+    if (settled) return;
+    settled = true;
+    const tex = new THREE.VideoTexture(v);
+    tex.colorSpace = THREE.SRGBColorSpace;
+    tex.minFilter = THREE.LinearFilter;
+    tex.magFilter = THREE.LinearFilter;
+    tex.generateMipmaps = false;
+    const aspect = v.videoHeight ? v.videoWidth / v.videoHeight : 1;
+    const mesh = refBuildPlane(tex, aspect);
+    refMedia = {
+      mesh, material: mesh.material, texture: tex, video: v,
+      kind: 'video', label: label || 'Reference',
+      opacity: REF_DEFAULT_OPACITY, flipped: false, visible: true,
+      offset: 0, fitClip: false,
+      duration: isFinite(v.duration) ? v.duration : 0,
+      blobUrl,
+    };
+    refShowBar();
+    // Prime the decoder: a video that has never played paints nothing on the
+    // first seek in WebView2.
+    const p = v.play();
+    if (p && p.then) p.then(() => { v.pause(); refSyncVideo(true); }).catch(() => refSyncVideo(true));
+    else refSyncVideo(true);
+    requestRender();
+    postToHost({
+      // state is 'ok', not 'loaded': the Props host substring-matches raw
+      // JSON for "loaded"/"ready" instead of parsing kind, so those tokens
+      // are best kept out of any new message.
+      kind: 'reference-media', state: 'ok', mediaKind: 'video',
+      width: v.videoWidth, height: v.videoHeight,
+      duration: isFinite(v.duration) ? v.duration : 0,
+    });
+  });
+
+  // A paused <video> doesn't push new frames, so repaint on each landed seek.
+  v.addEventListener('seeked', () => {
+    if (refMedia && refMedia.texture) {
+      refMedia.texture.needsUpdate = true;
+      requestRender();
+    }
+  });
+
+  v.addEventListener('error', () => {
+    if (settled) return;
+    settled = true;
+    try { v.remove(); } catch (e) {}
+    if (blobUrl) { try { URL.revokeObjectURL(blobUrl); } catch (e) {} }
+    refNote('Can’t decode this video.');
+    postToHost({
+      kind: 'reference-media', state: 'error',
+      message: 'Windows can’t decode this video. Re-encode to MP4 (H.264) or WebM and try again.',
+    });
+  });
+
+  // Set src last, so both listeners are attached before decoding starts.
+  refVideoSourceUrl(url).then((picked) => {
+    blobUrl = picked.blobUrl;
+    v.src = picked.src;
+  });
+}
+
+window.setReferenceMedia = function (url, kind, label) {
+  if (!refIsEmotesPage()) return;
+  refDispose();
+  if (String(kind || '').toLowerCase() === 'video') refLoadVideo(url, label);
+  else refLoadImage(url, label);
+};
+
+window.removeReferenceMedia = function () {
+  refDispose();
+  const bar = refEl('ref-bar');
+  if (bar) bar.classList.add('hidden');
+  requestRender();
+  postToHost({ kind: 'reference-media', state: 'removed' });
+};
+
+(function wireReferenceBar() {
+  if (!refIsEmotesPage()) return;
+  const bar = refEl('ref-bar');
+  if (!bar) return;
+
+  const op = refEl('ref-opacity'), opv = refEl('ref-opacity-val');
+  op && op.addEventListener('input', () => {
+    const v = Math.max(0.05, Math.min(1, parseFloat(op.value) || REF_DEFAULT_OPACITY));
+    if (opv) opv.textContent = v.toFixed(2);
+    if (!refMedia) return;
+    refMedia.opacity = v;
+    refMedia.material.opacity = v;
+    refMedia.material.needsUpdate = true;
+    requestRender();
+  });
+
+  const off = refEl('ref-offset'), offv = refEl('ref-offset-val');
+  off && off.addEventListener('input', () => {
+    const v = parseFloat(off.value) || 0;
+    if (offv) offv.textContent = v.toFixed(2) + 's';
+    if (!refMedia) return;
+    refMedia.offset = v;
+    refSyncVideo(true);
+  });
+
+  refEl('ref-select')?.addEventListener('click', () => {
+    if (!refMedia) return;
+    transformControls.attach(refMedia.mesh);
+    // Rotate on a flat plane is rarely what's wanted; land on move.
+    if (transformControls.mode === 'rotate') transformControls.setMode('translate');
+    requestRender();
+  });
+
+  refEl('ref-flip')?.addEventListener('click', () => {
+    if (!refMedia) return;
+    refMedia.flipped = !refMedia.flipped;
+    refApplyFlip();
+    refSyncBarToState();
+  });
+
+  refEl('ref-visible')?.addEventListener('click', () => {
+    if (!refMedia) return;
+    refMedia.visible = !refMedia.visible;
+    refMedia.mesh.visible = refMedia.visible;
+    if (!refMedia.visible && transformControls.object === refMedia.mesh) transformControls.detach();
+    if (refMedia.video && !refMedia.visible) { try { refMedia.video.pause(); } catch (e) {} }
+    refSyncBarToState();
+    requestRender();
+  });
+
+  refEl('ref-fit')?.addEventListener('click', () => {
+    if (!refMedia || refMedia.kind !== 'video') return;
+    refMedia.fitClip = !refMedia.fitClip;
+    refSyncBarToState();
+    refSyncVideo(true);
+  });
+
+  refEl('ref-remove')?.addEventListener('click', () => window.removeReferenceMedia());
+  refEl('ref-hide-bar')?.addEventListener('click', () => bar.classList.add('hidden'));
+})();
 
 postToHost({ kind: 'ready' });
 </script>

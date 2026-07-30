@@ -22,10 +22,15 @@ internal static class AnimRetarget
         public bool HasTag;
     }
 
+    /// <summary>Ground-truth per-frame foot plants on the RETARGET frame grid
+    /// (e.g. mocap ground-reaction forces: force &gt; 0 ⇒ foot on the floor).
+    /// When present, FootLock uses these instead of DetectPlantedFrames.</summary>
+    internal sealed record FootPlants(bool[]? Left, bool[]? Right);
+
     public static List<PosedBoneTrack>? Retarget(
         Scene srcScene, Animation anim, double tps, int frames, int fps,
         out List<string> mapped, out List<string> unmapped, out V[] rootMotion, List<string> warnings,
-        int? calibFrame = null)
+        int? calibFrame = null, FootPlants? plants = null)
     {
         mapped = new List<string>();
         unmapped = new List<string>();
@@ -196,11 +201,16 @@ internal static class AnimRetarget
         var emit = new List<(ushort tag, string name)>();
         var seenTags = new HashSet<ushort>();
         bool noPelvis = Environment.GetEnvironmentVariable("FIVEOS_NO_PELVIS") == "1";
+        // Foot tracks are normally left un-emitted (source foot orientation is
+        // unreliable), which also parks FootLock — but with ground-truth
+        // reaction-force plants the feet must be driven so the leg IK + sole
+        // alignment can bake exact contacts into the clip.
+        bool emitFeet = plants?.Left != null || plants?.Right != null;
         foreach (var name in Ordered(gtaBones))
         {
             var b = gtaBones[name];
             if (noPelvis && b.Tag == tPelvis) continue;
-            if (name.Contains("Foot", StringComparison.OrdinalIgnoreCase)
+            if ((name.Contains("Foot", StringComparison.OrdinalIgnoreCase) && !emitFeet)
                 || name.Contains("Toe", StringComparison.OrdinalIgnoreCase)
                 || name.Contains("Finger", StringComparison.OrdinalIgnoreCase))
                 continue;
@@ -385,14 +395,18 @@ internal static class AnimRetarget
 
             V[]? plantL = srcLFoot != null ? ToGtaUpPath(srcLFootP, Rc, frames) : null;
             V[]? plantR = srcRFoot != null ? ToGtaUpPath(srcRFootP, Rc, frames) : null;
+            bool[]? forceL = plants?.Left is { } pfl && pfl.Length == frames ? pfl : null;
+            bool[]? forceR = plants?.Right is { } pfr && pfr.Length == frames ? pfr : null;
             bool[]? plantedL = null, plantedR = null;
             if (plantL != null && gLThigh != null && gLCalf != null && gLFoot != null)
-                plantedL = FootLock(gtaBones, driveNames, perFrame, rootMotion, rootName, gLThigh, gLCalf, gLFoot, tLThighG, tLCalfG, tLFootG, plantL, frames, pelvisDrop);
+                plantedL = FootLock(gtaBones, driveNames, perFrame, rootMotion, rootName, gLThigh, gLCalf, gLFoot, tLThighG, tLCalfG, tLFootG, plantL, frames, pelvisDrop, forceL);
             if (plantR != null && gRThigh != null && gRCalf != null && gRFoot != null)
-                plantedR = FootLock(gtaBones, driveNames, perFrame, rootMotion, rootName, gRThigh, gRCalf, gRFoot, tRThighG, tRCalfG, tRFootG, plantR, frames, pelvisDrop);
+                plantedR = FootLock(gtaBones, driveNames, perFrame, rootMotion, rootName, gRThigh, gRCalf, gRFoot, tRThighG, tRCalfG, tRFootG, plantR, frames, pelvisDrop, forceR);
             if (rootMotion != null && plantedL != null && plantedR != null)
                 ClampRootWhilePlanted(rootMotion, plantedL, plantedR, frames);
-            if (plantedL != null || plantedR != null)
+            if ((plantedL != null && forceL != null) || (plantedR != null && forceR != null))
+                warnings.Add("Foot-lock: exact plants from mocap ground-reaction forces (reaction_forces > 0 ⇒ contact).");
+            else if (plantedL != null || plantedR != null)
                 warnings.Add("Foot-lock: planted feet pinned in world XZ (step/stance no longer skates with root travel).");
         }
 
@@ -481,7 +495,7 @@ internal static class AnimRetarget
         Dictionary<ushort, Q[]> perFrame, V[] rootMotion, string rootName,
         string thighName, string calfName, string footName,
         ushort thighTag, ushort calfTag, ushort footTag, V[] srcFootP, int frames,
-        float pelvisDrop = 0)
+        float pelvisDrop = 0, bool[]? plantedOverride = null)
     {
         if (!perFrame.ContainsKey(thighTag) || !perFrame.ContainsKey(calfTag)) return null;
         if (!gtaBones.ContainsKey(thighName) || !gtaBones.ContainsKey(calfName) || !gtaBones.ContainsKey(footName)) return null;
@@ -508,7 +522,7 @@ internal static class AnimRetarget
             }
         }
 
-        var planted = DetectPlantedFrames(srcFootP, frames);
+        var planted = plantedOverride ?? DetectPlantedFrames(srcFootP, frames);
         if (planted is null) return null;
 
         const int blend = 3;
