@@ -1030,6 +1030,12 @@ public partial class MainWindow : FluentWindow
         EmotesWorkspace.RunVideoToEmote();
     }
 
+    private void OnFileEmoteReferenceMedia(object sender, RoutedEventArgs e)
+    {
+        EnsureEmotesView();
+        EmotesWorkspace.RunImportReference();
+    }
+
     private void OnSketchfabSidebarImport(object sender, RoutedEventArgs e)
     {
         var url = SketchfabUrlBox.Text?.Trim() ?? "";

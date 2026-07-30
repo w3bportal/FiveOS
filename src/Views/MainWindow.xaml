@@ -795,6 +795,15 @@
                                 <ui:SymbolIcon Symbol="Video24" FontSize="14" Foreground="#FFE0C070" />
                             </MenuItem.Icon>
                         </MenuItem>
+                        <MenuItem Header="Reference Photo…"
+                                  Style="{StaticResource C4DMenuCommandNew}"
+                                  Click="OnFileEmoteReferenceMedia"
+                                  Visibility="{Binding IsEmotesView, Converter={StaticResource BooleanToVisibility}}"
+                                  ToolTip="New — put a photo or video on a plane in the viewport to pose against">
+                            <MenuItem.Icon>
+                                <ui:SymbolIcon Symbol="ImageAdd24" FontSize="14" Foreground="#FFE0C070" />
+                            </MenuItem.Icon>
+                        </MenuItem>
 
                         <Separator Style="{StaticResource C4DMenuSeparator}" />
                         <MenuItem Header="CONFIGURE"

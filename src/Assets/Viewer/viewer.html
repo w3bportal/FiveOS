@@ -1917,6 +1917,13 @@ renderer.domElement.addEventListener('pointerdown', e => {
 });
 
 renderer.domElement.addEventListener('pointerup', e => {
+  // Reference plane is pickable in BOTH modes and must be tested before
+  // anything below: the plane is scene-level (not under currentModel), so
+  // the no-model bail-out further down would detach the gizmo the instant
+  // the user clicked it, and pose mode's capture handler returns early when
+  // the rig has no visible handles. refTryPickOnPointerUp declines the click
+  // whenever a bone / IK ring / gizmo handle already claimed it.
+  if (refTryPickOnPointerUp(e)) return;
   // CRITICAL: in pose mode the gizmo belongs to a BONE, not the model
   // root. If we let this handler run, every click that misses a joint
   // marker (which is basically every click on the model body) would
@@ -12093,16 +12100,6 @@ renderer.domElement.addEventListener('pointerdown', e => {
     if (ikHits.length > 0 && grabIk()) return;
   }
 
-  //   3. last: the reference plane. Only reached when no gizmo handle, joint
-  //      marker or IK ring was under the cursor, so bone picking always wins
-  //      and a plane standing behind the ped can never steal a limb click.
-  if (refMedia && refMedia.visible && refMedia.mesh) {
-    if (raycaster.intersectObject(refMedia.mesh, false).length > 0) {
-      transformControls.attach(refMedia.mesh);
-      if (transformControls.mode === 'rotate') transformControls.setMode('translate');
-      requestRender();
-    }
-  }
 }, true);
 
 // Hover feedback for the IK ring handles: brighten + enlarge the one under
@@ -12450,6 +12447,45 @@ function refShowBar() {
   refNote(refMedia && refMedia.kind === 'video'
     ? 'Locked to the timeline — scrub or play to match.'
     : '');
+}
+
+// Click-to-select for the plane, called first from the main pointerup handler.
+// Returns true when it has claimed the click.
+//
+// Deliberately on pointerUP, not the pose-mode capture pointerdown: that
+// handler returns before any plane test when the rig has no joint/IK handles
+// (viewer.html:12027), and pointerup is where the existing 4px click-vs-drag
+// rejection lives, so orbiting across the plane doesn't select it.
+function refTryPickOnPointerUp(e) {
+  const m = refMedia;
+  if (!m || !m.visible || !m.mesh) return false;
+  // The gizmo owns its own drags.
+  if (transformControls.dragging || transformControls.axis) return false;
+  // Pose mode already claimed this click for a bone, IK ring or gizmo handle —
+  // bone picking must always outrank the plane.
+  if (pointerDownOnJointMarker || pointerDownOnGizmoHandle || pointerDownIkHandle) return false;
+  const start = pointerDownAt;
+  if (start && Math.hypot(e.clientX - start.x, e.clientY - start.y) > 4) return false;
+
+  const rect = renderer.domElement.getBoundingClientRect();
+  ndc.x = ((e.clientX - rect.left) / rect.width) * 2 - 1;
+  ndc.y = -((e.clientY - rect.top) / rect.height) * 2 + 1;
+  raycaster.setFromCamera(ndc, camera);
+  const hit = raycaster.intersectObject(m.mesh, false);
+  if (hit.length === 0) return false;
+
+  // Outside pose mode the model still wins when it's actually in front, so a
+  // plane parked behind the prop doesn't steal clicks on the prop.
+  if (!poseMode && currentModel) {
+    const modelHits = raycaster.intersectObject(currentModel, true);
+    if (modelHits.length > 0 && modelHits[0].distance < hit[0].distance) return false;
+  }
+
+  transformControls.attach(m.mesh);
+  if (transformControls.mode === 'rotate') transformControls.setMode('translate');
+  requestRender();
+  pointerDownAt = null;
+  return true;
 }
 
 function refApplyFlip() {

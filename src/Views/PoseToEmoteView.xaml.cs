@@ -1122,6 +1122,28 @@ public partial class PoseToEmoteView : UserControl
                     });
                     break;
 
+                case "reference-media":
+                {
+                    // Decode failures happen in the browser, not in our copy
+                    // step, so the only way the user hears about an unplayable
+                    // codec is this echo.
+                    var state = doc.RootElement.TryGetProperty("state", out var stEl) ? stEl.GetString() : null;
+                    var refMsg = doc.RootElement.TryGetProperty("message", out var rmEl) ? rmEl.GetString() : null;
+                    var w = doc.RootElement.TryGetProperty("width", out var wEl) && wEl.TryGetInt32(out var wi) ? wi : 0;
+                    var h = doc.RootElement.TryGetProperty("height", out var hEl) && hEl.TryGetInt32(out var hi) ? hi : 0;
+                    Dispatcher.Invoke(() =>
+                    {
+                        _vm.StatusText = state switch
+                        {
+                            "error" => refMsg ?? "Couldn't load that reference.",
+                            "ok" => w > 0 && h > 0 ? $"Reference loaded ({w}x{h})." : "Reference loaded.",
+                            "removed" => "Reference removed.",
+                            _ => _vm.StatusText,
+                        };
+                    });
+                    break;
+                }
+
                 case "host-timeline-command-result":
                 {
                     if (!doc.RootElement.TryGetProperty("requestId", out var tidEl)
@@ -1800,6 +1822,79 @@ case "prop-loaded":
         var safe = url.Replace("\\", "/").Replace("'", "\\'");
         await Viewport.CoreWebView2.ExecuteScriptAsync($"window.exitPoseMode && window.exitPoseMode()");
         await Viewport.CoreWebView2.ExecuteScriptAsync($"window.loadModel('{safe}')");
+    }
+
+    // Containers WebView2/Edge can actually decode. Anything else (.mkv, .avi,
+    // HEVC-in-.mp4) fails inside the browser, and the viewer echoes back a
+    // re-encode hint — see the "reference-media" message case.
+    private static readonly HashSet<string> ReferenceVideoExts =
+        new(StringComparer.OrdinalIgnoreCase) { ".mp4", ".webm", ".m4v", ".mov", ".ogv" };
+
+    // Bumped per import so each reference gets a fresh filename + URL: the
+    // previous file can still be held open by the <video> decoder, and a new
+    // URL also sidesteps WebView2's cache.
+    private int _referenceSeq;
+
+    private async void OnImportReference(object sender, RoutedEventArgs e)
+    {
+        var dlg = new Microsoft.Win32.OpenFileDialog
+        {
+            Title = "Reference photo or video",
+            Filter = "Images and video|*.png;*.jpg;*.jpeg;*.webp;*.bmp;*.gif;*.mp4;*.webm;*.m4v;*.mov"
+                   + "|Images (*.png;*.jpg;*.jpeg;*.webp;*.bmp;*.gif)|*.png;*.jpg;*.jpeg;*.webp;*.bmp;*.gif"
+                   + "|Video (*.mp4;*.webm;*.m4v;*.mov)|*.mp4;*.webm;*.m4v;*.mov"
+                   + "|All files (*.*)|*.*",
+        };
+        if (dlg.ShowDialog() != true) return;
+        if (!_webViewReady) await InitWebViewAsync();
+        await LoadReferenceMediaAsync(dlg.FileName);
+    }
+
+    private async Task LoadReferenceMediaAsync(string path)
+    {
+        if (!_webViewReady || _viewerSessionDir is null)
+        {
+            _vm.StatusText = "Viewer not ready yet.";
+            return;
+        }
+
+        var ext = System.IO.Path.GetExtension(path);
+        var kind = ReferenceVideoExts.Contains(ext) ? "video" : "photo";
+        var name = $"user-reference-{++_referenceSeq:x}{ext}";
+        var dest = System.IO.Path.Combine(_viewerSessionDir, name);
+        try { File.Copy(path, dest, overwrite: true); }
+        catch (Exception ex)
+        {
+            _vm.StatusText = "Couldn't copy the reference: " + ex.Message;
+            return;
+        }
+        PruneOldReferenceFiles(dest);
+
+        var label = System.IO.Path.GetFileName(path);
+        _vm.StatusText = $"Loading reference {label}...";
+        // JsonSerializer gives a properly quoted + escaped JS string literal,
+        // so paths with quotes or backslashes can't break out of the call.
+        var url = "https://pose-viewer.local/" + name;
+        var js = "window.setReferenceMedia && window.setReferenceMedia("
+               + JsonSerializer.Serialize(url) + ","
+               + JsonSerializer.Serialize(kind) + ","
+               + JsonSerializer.Serialize(label) + ")";
+        await Viewport.CoreWebView2.ExecuteScriptAsync(js);
+    }
+
+    private void PruneOldReferenceFiles(string keep)
+    {
+        if (_viewerSessionDir is null) return;
+        try
+        {
+            foreach (var f in Directory.EnumerateFiles(_viewerSessionDir, "user-reference-*"))
+            {
+                if (string.Equals(f, keep, StringComparison.OrdinalIgnoreCase)) continue;
+                // Still open in the decoder — the next import clears it.
+                try { File.Delete(f); } catch { }
+            }
+        }
+        catch { }
     }
 
     private async void OnResetPose(object sender, RoutedEventArgs e)
@@ -8322,6 +8417,7 @@ case "prop-loaded":
     public void RunRedoPose() => OnRedoPose(this, new RoutedEventArgs());
 
     public void RunOpenRiggedModel() => OnOpenRiggedModel(this, new RoutedEventArgs());
+    public void RunImportReference() => OnImportReference(this, new RoutedEventArgs());
     public void RunLoadGtaMale() => OnLoadGtaMale(this, new RoutedEventArgs());
     public void RunLoadGtaFemale() => OnLoadGtaFemale(this, new RoutedEventArgs());
     public void RunNewEmoteTab() => OnNewEmoteTab(this, new RoutedEventArgs());
