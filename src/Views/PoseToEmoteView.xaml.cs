@@ -655,6 +655,7 @@ public partial class PoseToEmoteView : UserControl
                     // Rig handles only exist once pose mode is up, so this is
                     // the earliest point the weight setting can apply.
                     _ = PushControlRigStyleAsync();
+                    _ = PushFingerRetargetAsync();
                     Dispatcher.Invoke(SyncPedVariantPicker);
                     if (!_firstReadyFired)
                     {
@@ -2200,6 +2201,20 @@ case "prop-loaded":
         {
             return false;   // can't tell — don't block the swap on a probe failure
         }
+    }
+
+    /// <summary>Tell the viewer whether finger tracks may be rebased. Motion-only,
+    /// so it is pushed per session rather than defaulted on in the viewer.</summary>
+    private async Task PushFingerRetargetAsync()
+    {
+        if (!_webViewReady || Viewport?.CoreWebView2 is null) return;
+        var on = Services.FeatureGate.FingerRetarget ? "true" : "false";
+        try
+        {
+            await Viewport.CoreWebView2.ExecuteScriptAsync(
+                $"window.setFingerRetarget && window.setFingerRetarget({on})");
+        }
+        catch { /* viewer torn down mid-push */ }
     }
 
     /// <summary>Push the user's control-rig opacity/thickness into the viewer.

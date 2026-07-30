@@ -242,10 +242,14 @@ internal static class AnimRetarget
         // every finger onto one hand bone — driving those splays the hand into a
         // claw, which is what the blanket skip was really protecting against.
         // Per-side so one tracked hand isn't held back by an untracked one.
+        // Finger retargeting is a Motion-customer feature (see FeatureGate).
+        // Coverage is still measured either way so the warning can tell a
+        // non-subscriber that their clip DOES carry finger data.
+        bool fingersEntitled = FeatureGate.FingerRetarget;
         int fingerSrcL = FingerSourceCount(gtaBones, srcByTag, chan, "SKEL_L_Finger");
         int fingerSrcR = FingerSourceCount(gtaBones, srcByTag, chan, "SKEL_R_Finger");
-        bool emitFingersL = fingerSrcL >= MinFingerSources;
-        bool emitFingersR = fingerSrcR >= MinFingerSources;
+        bool emitFingersL = fingersEntitled && fingerSrcL >= MinFingerSources;
+        bool emitFingersR = fingersEntitled && fingerSrcR >= MinFingerSources;
 
         foreach (var name in Ordered(gtaBones))
         {
@@ -269,9 +273,13 @@ internal static class AnimRetarget
             { driveNames.Add(name); emit.Add((b.Tag, name)); }
         }
 
+        bool sourceHasFingers = fingerSrcL >= MinFingerSources || fingerSrcR >= MinFingerSources;
         if (emitFingersL || emitFingersR)
             warnings.Add($"Fingers: retargeted from {fingerSrcL} left / {fingerSrcR} right animated source joints "
                        + "(untracked digits stay at rest).");
+        else if (sourceHasFingers)
+            warnings.Add($"Fingers: this clip carries finger animation ({fingerSrcL} left / {fingerSrcR} right joints), "
+                       + "but finger tracking is a FiveOS Motion feature — hands imported at rest.");
         else
             warnings.Add("Fingers: source has no articulated finger bones — hands left at rest. "
                        + "Pose them by hand, or import from a rig with per-joint fingers (Rokoko, Mixamo).");

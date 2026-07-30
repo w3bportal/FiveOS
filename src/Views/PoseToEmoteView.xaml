@@ -769,19 +769,26 @@
                               Padding="0">
                 <StackPanel Orientation="Horizontal">
                 <!-- Primary actions — ONE home: the toolbar (sidebar retired 2026-07-16). -->
-                <!-- Import is a split of three actions now. Kept as a Primary
-                     ui:Button (not a ToggleButton) so it stays accent-filled
-                     rather than only colouring while the flyout is open. -->
-                <ui:Button x:Name="ImportFlyoutBtn"
-                           Click="OnImportFlyoutClick"
+                <!-- Split button: the label imports an animation (the old
+                     one-click behaviour), the chevron opens the reference menu.
+                     Two Primary ui:Buttons butted together rather than a
+                     ToggleButton, so the pair stays accent-filled at rest. -->
+                <ui:Button Click="OnImportAnimation"
                            Appearance="Primary"
                            Padding="10,5"
-                           ToolTip="Put a reference photo or video on a plane in the viewport to pose against. Animation clips import from File ▸ Import.">
+                           ToolTip="Import an animated clip — .glb / .gltf / .fbx / .blend / .dae / .bvh, Sims 4 .package, physics-mocap .json, or a GTA .ycd.">
                     <StackPanel Orientation="Horizontal">
                         <ui:SymbolIcon Symbol="ArrowDownload24" FontSize="13" Margin="0,0,6,0" />
                         <TextBlock Text="Import" FontSize="11" FontWeight="SemiBold" />
-                        <ui:SymbolIcon Symbol="ChevronDown12" FontSize="9" Margin="5,1,0,0" Opacity="0.85" />
                     </StackPanel>
+                </ui:Button>
+                <ui:Button x:Name="ImportFlyoutBtn"
+                           Click="OnImportFlyoutClick"
+                           Appearance="Primary"
+                           Padding="5,5"
+                           Margin="1,0,0,0"
+                           ToolTip="More — put a reference photo or video on a plane in the viewport.">
+                    <ui:SymbolIcon Symbol="ChevronDown12" FontSize="9" Opacity="0.9" />
                 </ui:Button>
                 <Popup x:Name="ImportFlyout"
                        PlacementTarget="{Binding ElementName=ImportFlyoutBtn}"

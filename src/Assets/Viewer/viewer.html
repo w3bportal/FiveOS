@@ -789,10 +789,12 @@ let posePreviewEnd = 0;
 // derives binds by walking the reference freemode glb, which resolves all 30
 // SKEL_[LR]_FingerDJ tags, so fingers rebase like any other bone — and the
 // bind-presence check that follows each skip still drops anything unmapped.
-// The old failure was ugly enough to keep an escape hatch: run
-// window.setFingerRetarget(false) to restore hands-at-rest with no rebuild.
+// Defaults OFF and is switched on per session by the host — finger tracking is
+// a FiveOS Motion feature (see FeatureGate on the C# side), and this also keeps
+// the escape hatch if the rebase ever explodes hands again on a new rig:
+// window.setFingerRetarget(false).
 // `var` so the import paths can read it regardless of init order.
-var poseFingerRetarget = true;
+var poseFingerRetarget = false;
 window.setFingerRetarget = function (on) {
   poseFingerRetarget = on !== false;
   return poseFingerRetarget;
