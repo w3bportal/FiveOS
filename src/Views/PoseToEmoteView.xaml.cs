@@ -1835,16 +1835,25 @@ case "prop-loaded":
     // URL also sidesteps WebView2's cache.
     private int _referenceSeq;
 
-    private async void OnImportReference(object sender, RoutedEventArgs e)
+    private const string ReferenceImageFilter = "Images (*.png;*.jpg;*.jpeg;*.webp;*.bmp;*.gif)|*.png;*.jpg;*.jpeg;*.webp;*.bmp;*.gif";
+    private const string ReferenceVideoFilter = "Video (*.mp4;*.webm;*.m4v;*.mov)|*.mp4;*.webm;*.m4v;*.mov";
+
+    /// <param name="only">"photo" or "video" to scope the picker; null gives a
+    /// combined picker (File ▸ Import is the only entry point today).</param>
+    private async Task PickReferenceAsync(string? only)
     {
-        var dlg = new Microsoft.Win32.OpenFileDialog
+        var (title, filter) = only switch
         {
-            Title = "Reference photo or video",
-            Filter = "Images and video|*.png;*.jpg;*.jpeg;*.webp;*.bmp;*.gif;*.mp4;*.webm;*.m4v;*.mov"
-                   + "|Images (*.png;*.jpg;*.jpeg;*.webp;*.bmp;*.gif)|*.png;*.jpg;*.jpeg;*.webp;*.bmp;*.gif"
-                   + "|Video (*.mp4;*.webm;*.m4v;*.mov)|*.mp4;*.webm;*.m4v;*.mov"
-                   + "|All files (*.*)|*.*",
+            "photo" => ("Reference photo", ReferenceImageFilter + "|All files (*.*)|*.*"),
+            "video" => ("Reference video", ReferenceVideoFilter + "|All files (*.*)|*.*"),
+            _ => ("Reference photo or video",
+                  "Images and video|*.png;*.jpg;*.jpeg;*.webp;*.bmp;*.gif;*.mp4;*.webm;*.m4v;*.mov"
+                  + "|" + ReferenceImageFilter
+                  + "|" + ReferenceVideoFilter
+                  + "|All files (*.*)|*.*"),
         };
+
+        var dlg = new Microsoft.Win32.OpenFileDialog { Title = title, Filter = filter };
         if (dlg.ShowDialog() != true) return;
         if (!_webViewReady) await InitWebViewAsync();
         await LoadReferenceMediaAsync(dlg.FileName);
@@ -8417,7 +8426,10 @@ case "prop-loaded":
     public void RunRedoPose() => OnRedoPose(this, new RoutedEventArgs());
 
     public void RunOpenRiggedModel() => OnOpenRiggedModel(this, new RoutedEventArgs());
-    public void RunImportReference() => OnImportReference(this, new RoutedEventArgs());
+    public void RunImportAnimation() => OnImportAnimation(this, new RoutedEventArgs());
+    /// <summary>Reference import from the File menu. <paramref name="only"/> is
+    /// "photo", "video", or null for the combined picker on the toolbar.</summary>
+    public async void RunImportReference(string? only = null) => await PickReferenceAsync(only);
     public void RunLoadGtaMale() => OnLoadGtaMale(this, new RoutedEventArgs());
     public void RunLoadGtaFemale() => OnLoadGtaFemale(this, new RoutedEventArgs());
     public void RunNewEmoteTab() => OnNewEmoteTab(this, new RoutedEventArgs());

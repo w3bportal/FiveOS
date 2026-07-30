@@ -778,16 +778,6 @@
                         <TextBlock Text="Import" FontSize="11" FontWeight="SemiBold" />
                     </StackPanel>
                 </ui:Button>
-                <ui:Button Click="OnImportReference"
-                           Appearance="Secondary"
-                           Padding="10,5"
-                           Margin="6,0,0,0"
-                           ToolTip="Put a reference photo or video on a plane in the viewport to pose against. Video stays locked to the timeline — scrub and the reference frame follows.">
-                    <StackPanel Orientation="Horizontal">
-                        <ui:SymbolIcon Symbol="ImageAdd24" FontSize="13" Margin="0,0,6,0" VerticalAlignment="Center" />
-                        <TextBlock Text="Reference" FontSize="11" VerticalAlignment="Center" />
-                    </StackPanel>
-                </ui:Button>
                 <ui:Button x:Name="VideoToEmoteToolbarBtn"
                            Click="OnVideoToEmote"
                            Appearance="Secondary"

@@ -1030,10 +1030,22 @@ public partial class MainWindow : FluentWindow
         EmotesWorkspace.RunVideoToEmote();
     }
 
-    private void OnFileEmoteReferenceMedia(object sender, RoutedEventArgs e)
+    private void OnFileEmoteImportAnimation(object sender, RoutedEventArgs e)
     {
         EnsureEmotesView();
-        EmotesWorkspace.RunImportReference();
+        EmotesWorkspace.RunImportAnimation();
+    }
+
+    private void OnFileEmoteReferencePhoto(object sender, RoutedEventArgs e)
+    {
+        EnsureEmotesView();
+        EmotesWorkspace.RunImportReference("photo");
+    }
+
+    private void OnFileEmoteReferenceVideo(object sender, RoutedEventArgs e)
+    {
+        EnsureEmotesView();
+        EmotesWorkspace.RunImportReference("video");
     }
 
     private void OnSketchfabSidebarImport(object sender, RoutedEventArgs e)

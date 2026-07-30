@@ -634,180 +634,210 @@
                         </MenuItem>
                         <Separator Style="{StaticResource C4DMenuSeparator}" />
 
-                        <!-- Assets -->
-                        <MenuItem Header="OPEN"
-                                  Style="{StaticResource C4DMenuSectionHeader}"
-                                  Visibility="{Binding Is3DView, Converter={StaticResource BooleanToVisibility}}" />
-                        <MenuItem Header="Open Model…"
+                        <!-- Assets. Each workspace contributes its own Open /
+                             Import / Export submenu; only one workspace flag is
+                             true at a time, so the parent carries the
+                             Visibility and its children stay unconditional. -->
+                        <MenuItem Header="Open"
                                   Style="{StaticResource C4DMenuCommand}"
-                                  InputGestureText="Ctrl+O"
-                                  Click="OnFileOpen"
-                                  Visibility="{Binding Is3DView, Converter={StaticResource BooleanToVisibility}}"
-                                  ToolTip="Load a 3D file into Assets">
+                                  Visibility="{Binding Is3DView, Converter={StaticResource BooleanToVisibility}}">
                             <MenuItem.Icon>
                                 <ui:SymbolIcon Symbol="FolderOpen24" FontSize="14" />
                             </MenuItem.Icon>
+                            <MenuItem Header="Open Model…"
+                                      Style="{StaticResource C4DMenuCommand}"
+                                      InputGestureText="Ctrl+O"
+                                      Click="OnFileOpen"
+                                      ToolTip="Load a 3D file into Assets">
+                                <MenuItem.Icon>
+                                    <ui:SymbolIcon Symbol="FolderOpen24" FontSize="14" />
+                                </MenuItem.Icon>
+                            </MenuItem>
+                            <MenuItem Header="Batch Convert…"
+                                      Style="{StaticResource C4DMenuCommandNew}"
+                                      InputGestureText="Ctrl+Shift+O"
+                                      Click="OnFileBatchConvert"
+                                      ToolTip="New — queue up to 30 meshes into one FiveM resource">
+                                <MenuItem.Icon>
+                                    <ui:SymbolIcon Symbol="DocumentMultiple24" FontSize="14" Foreground="#FFE0C070" />
+                                </MenuItem.Icon>
+                            </MenuItem>
                         </MenuItem>
-                        <MenuItem Header="Batch Convert…"
-                                  Style="{StaticResource C4DMenuCommandNew}"
-                                  InputGestureText="Ctrl+Shift+O"
-                                  Click="OnFileBatchConvert"
-                                  Visibility="{Binding Is3DView, Converter={StaticResource BooleanToVisibility}}"
-                                  ToolTip="New — queue up to 30 meshes into one FiveM resource">
-                            <MenuItem.Icon>
-                                <ui:SymbolIcon Symbol="DocumentMultiple24" FontSize="14" Foreground="#FFE0C070" />
-                            </MenuItem.Icon>
-                        </MenuItem>
-                        <MenuItem Header="EXPORT"
-                                  Style="{StaticResource C4DMenuSectionHeader}"
-                                  Visibility="{Binding Is3DView, Converter={StaticResource BooleanToVisibility}}" />
-                        <MenuItem Header="Convert…"
+                        <MenuItem Header="Export"
                                   Style="{StaticResource C4DMenuCommand}"
-                                  Click="OnConvert"
-                                  Visibility="{Binding Is3DView, Converter={StaticResource BooleanToVisibility}}"
-                                  IsEnabled="{Binding CanConvert}"
-                                  ToolTip="Export the loaded prop">
+                                  Visibility="{Binding Is3DView, Converter={StaticResource BooleanToVisibility}}">
                             <MenuItem.Icon>
                                 <ui:SymbolIcon Symbol="ArrowExportUp24" FontSize="14" />
                             </MenuItem.Icon>
-                        </MenuItem>
-                        <MenuItem Header="Clear Model"
-                                  Style="{StaticResource C4DMenuCommand}"
-                                  Click="OnClearSource"
-                                  Visibility="{Binding Is3DView, Converter={StaticResource BooleanToVisibility}}"
-                                  ToolTip="Unload the current model">
-                            <MenuItem.Icon>
-                                <ui:SymbolIcon Symbol="Delete24" FontSize="14" />
-                            </MenuItem.Icon>
+                            <MenuItem Header="Convert…"
+                                      Style="{StaticResource C4DMenuCommand}"
+                                      Click="OnConvert"
+                                      IsEnabled="{Binding CanConvert}"
+                                      ToolTip="Export the loaded prop">
+                                <MenuItem.Icon>
+                                    <ui:SymbolIcon Symbol="ArrowExportUp24" FontSize="14" />
+                                </MenuItem.Icon>
+                            </MenuItem>
+                            <MenuItem Header="Clear Model"
+                                      Style="{StaticResource C4DMenuCommand}"
+                                      Click="OnClearSource"
+                                      ToolTip="Unload the current model">
+                                <MenuItem.Icon>
+                                    <ui:SymbolIcon Symbol="Delete24" FontSize="14" />
+                                </MenuItem.Icon>
+                            </MenuItem>
                         </MenuItem>
 
                         <!-- Optimize -->
-                        <MenuItem Header="ADD"
-                                  Style="{StaticResource C4DMenuSectionHeader}"
-                                  Visibility="{Binding IsOptimizeView, Converter={StaticResource BooleanToVisibility}}" />
-                        <MenuItem Header="Add Files…"
+                        <MenuItem Header="Import"
                                   Style="{StaticResource C4DMenuCommand}"
-                                  Click="OnMenuOptimizeAddFiles"
                                   Visibility="{Binding IsOptimizeView, Converter={StaticResource BooleanToVisibility}}">
                             <MenuItem.Icon>
                                 <ui:SymbolIcon Symbol="DocumentAdd24" FontSize="14" />
                             </MenuItem.Icon>
-                        </MenuItem>
-                        <MenuItem Header="Add Folder…"
-                                  Style="{StaticResource C4DMenuCommand}"
-                                  Click="OnMenuOptimizeAddFolder"
-                                  Visibility="{Binding IsOptimizeView, Converter={StaticResource BooleanToVisibility}}">
-                            <MenuItem.Icon>
-                                <ui:SymbolIcon Symbol="FolderAdd24" FontSize="14" />
-                            </MenuItem.Icon>
+                            <MenuItem Header="Add Files…"
+                                      Style="{StaticResource C4DMenuCommand}"
+                                      Click="OnMenuOptimizeAddFiles">
+                                <MenuItem.Icon>
+                                    <ui:SymbolIcon Symbol="DocumentAdd24" FontSize="14" />
+                                </MenuItem.Icon>
+                            </MenuItem>
+                            <MenuItem Header="Add Folder…"
+                                      Style="{StaticResource C4DMenuCommand}"
+                                      Click="OnMenuOptimizeAddFolder">
+                                <MenuItem.Icon>
+                                    <ui:SymbolIcon Symbol="FolderAdd24" FontSize="14" />
+                                </MenuItem.Icon>
+                            </MenuItem>
                         </MenuItem>
 
                         <!-- Vehicles -->
-                        <MenuItem Header="BROWSE"
-                                  Style="{StaticResource C4DMenuSectionHeader}"
-                                  Visibility="{Binding IsVehiclesView, Converter={StaticResource BooleanToVisibility}}" />
-                        <MenuItem Header="Browse…"
+                        <MenuItem Header="Open"
                                   Style="{StaticResource C4DMenuCommand}"
-                                  Click="OnMenuVehiclesBrowse"
                                   Visibility="{Binding IsVehiclesView, Converter={StaticResource BooleanToVisibility}}">
                             <MenuItem.Icon>
                                 <ui:SymbolIcon Symbol="FolderOpen24" FontSize="14" />
                             </MenuItem.Icon>
-                        </MenuItem>
-                        <MenuItem Header="Output…"
-                                  Style="{StaticResource C4DMenuCommand}"
-                                  Click="OnMenuVehiclesBrowseOutput"
-                                  Visibility="{Binding IsVehiclesView, Converter={StaticResource BooleanToVisibility}}">
-                            <MenuItem.Icon>
-                                <ui:SymbolIcon Symbol="Folder24" FontSize="14" />
-                            </MenuItem.Icon>
+                            <MenuItem Header="Browse…"
+                                      Style="{StaticResource C4DMenuCommand}"
+                                      Click="OnMenuVehiclesBrowse">
+                                <MenuItem.Icon>
+                                    <ui:SymbolIcon Symbol="FolderOpen24" FontSize="14" />
+                                </MenuItem.Icon>
+                            </MenuItem>
+                            <MenuItem Header="Output…"
+                                      Style="{StaticResource C4DMenuCommand}"
+                                      Click="OnMenuVehiclesBrowseOutput">
+                                <MenuItem.Icon>
+                                    <ui:SymbolIcon Symbol="Folder24" FontSize="14" />
+                                </MenuItem.Icon>
+                            </MenuItem>
                         </MenuItem>
 
                         <!-- RPF -->
-                        <MenuItem Header="CONVERT"
-                                  Style="{StaticResource C4DMenuSectionHeader}"
-                                  Visibility="{Binding IsRpfView, Converter={StaticResource BooleanToVisibility}}" />
-                        <MenuItem Header="Browse Input…"
-                                  Style="{StaticResource C4DMenuCommand}"
-                                  Click="OnMenuRpfBrowseInput"
-                                  Visibility="{Binding IsRpfView, Converter={StaticResource BooleanToVisibility}}">
-                            <MenuItem.Icon>
-                                <ui:SymbolIcon Symbol="FolderOpen24" FontSize="14" />
-                            </MenuItem.Icon>
-                        </MenuItem>
-                        <MenuItem Header="Browse Output…"
-                                  Style="{StaticResource C4DMenuCommand}"
-                                  Click="OnMenuRpfBrowseOutput"
-                                  Visibility="{Binding IsRpfView, Converter={StaticResource BooleanToVisibility}}">
-                            <MenuItem.Icon>
-                                <ui:SymbolIcon Symbol="Folder24" FontSize="14" />
-                            </MenuItem.Icon>
-                        </MenuItem>
                         <MenuItem Header="Convert"
                                   Style="{StaticResource C4DMenuCommand}"
-                                  Click="OnMenuRpfConvert"
                                   Visibility="{Binding IsRpfView, Converter={StaticResource BooleanToVisibility}}">
                             <MenuItem.Icon>
                                 <ui:SymbolIcon Symbol="ArrowSync24" FontSize="14" />
                             </MenuItem.Icon>
+                            <MenuItem Header="Browse Input…"
+                                      Style="{StaticResource C4DMenuCommand}"
+                                      Click="OnMenuRpfBrowseInput">
+                                <MenuItem.Icon>
+                                    <ui:SymbolIcon Symbol="FolderOpen24" FontSize="14" />
+                                </MenuItem.Icon>
+                            </MenuItem>
+                            <MenuItem Header="Browse Output…"
+                                      Style="{StaticResource C4DMenuCommand}"
+                                      Click="OnMenuRpfBrowseOutput">
+                                <MenuItem.Icon>
+                                    <ui:SymbolIcon Symbol="Folder24" FontSize="14" />
+                                </MenuItem.Icon>
+                            </MenuItem>
+                            <MenuItem Header="Convert"
+                                      Style="{StaticResource C4DMenuCommand}"
+                                      Click="OnMenuRpfConvert">
+                                <MenuItem.Icon>
+                                    <ui:SymbolIcon Symbol="ArrowSync24" FontSize="14" />
+                                </MenuItem.Icon>
+                            </MenuItem>
                         </MenuItem>
 
                         <!-- Emotes -->
-                        <MenuItem Header="OPEN"
-                                  Style="{StaticResource C4DMenuSectionHeader}"
-                                  Visibility="{Binding IsEmotesView, Converter={StaticResource BooleanToVisibility}}" />
-                        <MenuItem Header="Open Rig…"
-                                  Style="{StaticResource C4DMenuCommandNew}"
-                                  Click="OnFileEmoteOpenRig"
-                                  Visibility="{Binding IsEmotesView, Converter={StaticResource BooleanToVisibility}}"
-                                  ToolTip="New — load a rigged .glb / .fbx into Emotes">
+                        <MenuItem Header="Open"
+                                  Style="{StaticResource C4DMenuCommand}"
+                                  Visibility="{Binding IsEmotesView, Converter={StaticResource BooleanToVisibility}}">
                             <MenuItem.Icon>
-                                <ui:SymbolIcon Symbol="FolderOpen24" FontSize="14" Foreground="#FFE0C070" />
+                                <ui:SymbolIcon Symbol="FolderOpen24" FontSize="14" />
                             </MenuItem.Icon>
+                            <MenuItem Header="Open Rig…"
+                                      Style="{StaticResource C4DMenuCommand}"
+                                      Click="OnFileEmoteOpenRig"
+                                      ToolTip="Load a rigged .glb / .fbx into Emotes">
+                                <MenuItem.Icon>
+                                    <ui:SymbolIcon Symbol="FolderOpen24" FontSize="14" />
+                                </MenuItem.Icon>
+                            </MenuItem>
+                            <MenuItem Header="GTA Male"
+                                      Style="{StaticResource C4DMenuCommand}"
+                                      Click="OnFileEmoteGtaMale"
+                                      ToolTip="Freemode male skeleton preset">
+                                <MenuItem.Icon>
+                                    <ui:SymbolIcon Symbol="Person24" FontSize="14" />
+                                </MenuItem.Icon>
+                            </MenuItem>
+                            <MenuItem Header="GTA Female"
+                                      Style="{StaticResource C4DMenuCommand}"
+                                      Click="OnFileEmoteGtaFemale"
+                                      ToolTip="Freemode female skeleton preset">
+                                <MenuItem.Icon>
+                                    <ui:SymbolIcon Symbol="Person24" FontSize="14" />
+                                </MenuItem.Icon>
+                            </MenuItem>
                         </MenuItem>
-                        <MenuItem Header="GTA Male"
-                                  Style="{StaticResource C4DMenuCommandNew}"
-                                  Click="OnFileEmoteGtaMale"
-                                  Visibility="{Binding IsEmotesView, Converter={StaticResource BooleanToVisibility}}"
-                                  ToolTip="New — freemode male skeleton preset">
+                        <MenuItem Header="Import"
+                                  Style="{StaticResource C4DMenuCommand}"
+                                  Visibility="{Binding IsEmotesView, Converter={StaticResource BooleanToVisibility}}">
                             <MenuItem.Icon>
-                                <ui:SymbolIcon Symbol="Person24" FontSize="14" Foreground="#FFE0C070" />
+                                <ui:SymbolIcon Symbol="ArrowDownload24" FontSize="14" />
                             </MenuItem.Icon>
-                        </MenuItem>
-                        <MenuItem Header="GTA Female"
-                                  Style="{StaticResource C4DMenuCommandNew}"
-                                  Click="OnFileEmoteGtaFemale"
-                                  Visibility="{Binding IsEmotesView, Converter={StaticResource BooleanToVisibility}}"
-                                  ToolTip="New — freemode female skeleton preset">
-                            <MenuItem.Icon>
-                                <ui:SymbolIcon Symbol="Person24" FontSize="14" Foreground="#FFE0C070" />
-                            </MenuItem.Icon>
-                        </MenuItem>
-                        <MenuItem Header="IMPORT"
-                                  Style="{StaticResource C4DMenuSectionHeader}"
-                                  Visibility="{Binding IsEmotesView, Converter={StaticResource BooleanToVisibility}}" />
-                        <MenuItem Header="Video → Emote"
-                                  Style="{StaticResource C4DMenuCommandNew}"
-                                  Click="OnFileEmoteVideoToEmote"
-                                  Visibility="{Binding IsEmotesView, Converter={StaticResource BooleanToVisibility}}"
-                                  ToolTip="New — FiveOS Motion: turn a video into an editable emote">
-                            <MenuItem.Icon>
-                                <ui:SymbolIcon Symbol="Video24" FontSize="14" Foreground="#FFE0C070" />
-                            </MenuItem.Icon>
-                        </MenuItem>
-                        <MenuItem Header="Reference Photo…"
-                                  Style="{StaticResource C4DMenuCommandNew}"
-                                  Click="OnFileEmoteReferenceMedia"
-                                  Visibility="{Binding IsEmotesView, Converter={StaticResource BooleanToVisibility}}"
-                                  ToolTip="New — put a photo or video on a plane in the viewport to pose against">
-                            <MenuItem.Icon>
-                                <ui:SymbolIcon Symbol="ImageAdd24" FontSize="14" Foreground="#FFE0C070" />
-                            </MenuItem.Icon>
+                            <MenuItem Header="Animation…"
+                                      Style="{StaticResource C4DMenuCommand}"
+                                      Click="OnFileEmoteImportAnimation"
+                                      ToolTip="Import an animated clip — .glb / .fbx / .dae / .bvh, Sims 4 .package or a GTA .ycd">
+                                <MenuItem.Icon>
+                                    <ui:SymbolIcon Symbol="ArrowDownload24" FontSize="14" />
+                                </MenuItem.Icon>
+                            </MenuItem>
+                            <MenuItem Header="Reference Photo…"
+                                      Style="{StaticResource C4DMenuCommand}"
+                                      Click="OnFileEmoteReferencePhoto"
+                                      ToolTip="Put a photo on a plane in the viewport to pose against">
+                                <MenuItem.Icon>
+                                    <ui:SymbolIcon Symbol="Image24" FontSize="14" />
+                                </MenuItem.Icon>
+                            </MenuItem>
+                            <MenuItem Header="Reference Video…"
+                                      Style="{StaticResource C4DMenuCommand}"
+                                      Click="OnFileEmoteReferenceVideo"
+                                      ToolTip="Put a video on a plane in the viewport — stays locked to the timeline as you scrub">
+                                <MenuItem.Icon>
+                                    <ui:SymbolIcon Symbol="Video24" FontSize="14" />
+                                </MenuItem.Icon>
+                            </MenuItem>
+                            <Separator Style="{StaticResource C4DMenuSeparator}" />
+                            <MenuItem Header="Video → Emote"
+                                      Style="{StaticResource C4DMenuCommandNew}"
+                                      Click="OnFileEmoteVideoToEmote"
+                                      ToolTip="New — FiveOS Motion: turn a video into an editable emote">
+                                <MenuItem.Icon>
+                                    <ui:SymbolIcon Symbol="Sparkle24" FontSize="14" Foreground="#FFE0C070" />
+                                </MenuItem.Icon>
+                            </MenuItem>
                         </MenuItem>
 
                         <Separator Style="{StaticResource C4DMenuSeparator}" />
-                        <MenuItem Header="CONFIGURE"
-                                  Style="{StaticResource C4DMenuSectionHeader}" />
                         <MenuItem Header="{loc:Loc Menu.OpenOutput}"
                                   Style="{StaticResource C4DMenuCommand}"
                                   Click="OnFileOpenOutput"
@@ -816,9 +846,6 @@
                                 <ui:SymbolIcon Symbol="FolderOpen24" FontSize="14" />
                             </MenuItem.Icon>
                         </MenuItem>
-                        <Separator Style="{StaticResource C4DMenuSeparator}" />
-                        <MenuItem Header="QUIT"
-                                  Style="{StaticResource C4DMenuSectionHeader}" />
                         <MenuItem Header="{loc:Loc Menu.Exit}"
                                   Style="{StaticResource C4DMenuCommand}"
                                   InputGestureText="Alt+F4"
