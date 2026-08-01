@@ -315,40 +315,6 @@ public partial class App : Application
             tryFinish();
         }
 
-        // ─── Plugin host wiring ──────────────────────────────────────
-        // The PluginManager exposes two callback hooks the host owns:
-        //  - Toaster: how plugins surface user-facing messages.
-        //  - RequestDllTrust: the consent gate before a DLL plugin runs.
-        // Wiring them once at startup keeps PluginManager free of UI deps.
-        FiveOS.Plugins.PluginManager.Toaster = msg =>
-        {
-            // Marshal back to the UI thread — plugins might call from any
-            // thread. StatusText is the existing global status bar.
-            Dispatcher.BeginInvoke(new Action(() =>
-            {
-                if (main.DataContext is MainViewModel mvm) mvm.StatusText = msg;
-            }));
-        };
-        FiveOS.Plugins.PluginManager.RequestDllTrust = async record =>
-        {
-            // Synchronous prompt on the UI thread; PluginManager invokes
-            // this from CreateView which is already UI-bound. Async signature
-            // exists for future MVVM dialogs.
-            return await Dispatcher.InvokeAsync(() =>
-            {
-                var msg =
-                    $"\"{record.Name}\" is a .NET DLL plugin loaded from:\n\n" +
-                    $"{record.EntryPath}\n\n" +
-                    "DLL plugins run with full app permissions: filesystem, network, registry. " +
-                    "Only trust plugins from sources you recognise.\n\n" +
-                    "Trust this plugin and load it?";
-                var result = FiveOS.Views.AppDialog.Show(msg,
-                    "FiveOS — confirm plugin trust",
-                    MessageBoxButton.YesNo, MessageBoxImage.Warning, main);
-                return result == MessageBoxResult.Yes;
-            });
-        };
-
         // ─── Discord Rich Presence ───────────────────────────────────
         // Off when the user has flipped the toggle in Settings; otherwise
         // bring up the IPC client and start mirroring VM state. Wired here

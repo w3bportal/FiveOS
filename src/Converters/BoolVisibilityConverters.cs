@@ -46,8 +46,8 @@ public sealed class NullToVisibilityConverter : IValueConverter
 
 /// <summary>
 /// Multi-binding converter that returns true when the first two bound
-/// values are equal as strings (case-insensitive). Used by the rail's
-/// per-plugin row to tint itself when its id matches ActivePluginId.
+/// values are equal as strings (case-insensitive). Used by the workspace
+/// tab strip to highlight the active document's tab.
 /// </summary>
 public sealed class StringEqualsMultiConverter : IMultiValueConverter
 {
@@ -96,48 +96,6 @@ public sealed class PathToImageSourceConverter : IValueConverter
             FiveOS.Services.FosLogger.Warn("converter", $"image load '{path}'", ex);
             return null;
         }
-    }
-
-    // One-way converter — the source path / file-existence flag is the
-    // owning property, not something the UI writes back. Returning
-    // Binding.DoNothing is the WPF-idiomatic "no value" reply; throwing
-    // NotImplementedException would crash the app if a future TwoWay
-    // binding ever hit this code path by mistake.
-    public object ConvertBack(object? value, Type targetType, object? parameter, CultureInfo culture)
-        => System.Windows.Data.Binding.DoNothing;
-}
-
-/// <summary>True when the bound value is a non-empty string pointing
-/// at an existing file. Returns bool by default; if the binding target
-/// is a Visibility property, returns Visible/Collapsed instead.</summary>
-public sealed class FileExistsToBoolConverter : IValueConverter
-{
-    public object Convert(object? value, Type targetType, object? parameter, CultureInfo culture)
-    {
-        bool exists = value is string s && !string.IsNullOrWhiteSpace(s) && System.IO.File.Exists(s);
-        if (targetType == typeof(Visibility))
-            return exists ? Visibility.Visible : Visibility.Collapsed;
-        return exists;
-    }
-
-    // One-way converter — the source path / file-existence flag is the
-    // owning property, not something the UI writes back. Returning
-    // Binding.DoNothing is the WPF-idiomatic "no value" reply; throwing
-    // NotImplementedException would crash the app if a future TwoWay
-    // binding ever hit this code path by mistake.
-    public object ConvertBack(object? value, Type targetType, object? parameter, CultureInfo culture)
-        => System.Windows.Data.Binding.DoNothing;
-}
-
-/// <summary>Inverse of <see cref="FileExistsToBoolConverter"/> — true /
-/// Visible when the path is empty or doesn't exist. Used to show the
-/// fallback SymbolIcon when a plugin lacks a custom icon.</summary>
-public sealed class FileMissingToVisibilityConverter : IValueConverter
-{
-    public object Convert(object? value, Type targetType, object? parameter, CultureInfo culture)
-    {
-        bool exists = value is string s && !string.IsNullOrWhiteSpace(s) && System.IO.File.Exists(s);
-        return exists ? Visibility.Collapsed : Visibility.Visible;
     }
 
     // One-way converter — the source path / file-existence flag is the

@@ -755,11 +755,10 @@
                         </Border>
                     </Popup>
                     <ComboBox x:Name="MovementCombo"
-                              SelectedIndex="{Binding MovementIndex, Mode=TwoWay}"
+                              SelectedIndex="{Binding MovementComboIndex, Mode=TwoWay}"
                               MinWidth="190"
                               VerticalAlignment="Center"
                               ToolTip="How the emote coexists with player movement. Imported / library clips default to root motion so the ped travels. Static poses export as in-place.">
-                        <ComboBoxItem Content="In place (full body)" ToolTip="Whole body plays; player locked in place. Use for static poses / dances that shouldn't travel. (flag 1 looping, 2 one-shot)" />
                         <ComboBoxItem Content="Upper body (can move)" ToolTip="Only the upper body animates; legs keep walking/idling, so the player can move. Waves, salutes, gestures. This is dpemotes' 'EmoteMoving'. (flag 49 looping, 50 one-shot)" />
                         <ComboBoxItem Content="Root motion (ped travels)" ToolTip="Full body + mover extraction — the ped physically walks along the clip's SKEL_ROOT path. Default for imported animations. Needs fxresource export for FiveM." />
                     </ComboBox>
@@ -840,6 +839,16 @@
                     <StackPanel Orientation="Horizontal">
                         <ui:SymbolIcon Symbol="Save24" FontSize="13" Margin="0,0,6,0" />
                         <TextBlock Text="Export" FontSize="11" FontWeight="SemiBold" />
+                    </StackPanel>
+                </ui:Button>
+                <ui:Button Click="OnExportSyncedPair"
+                           Appearance="Secondary"
+                           Padding="10,5"
+                           Margin="6,0,0,0"
+                           ToolTip="Synced multi-player emote — place one or more partner ghosts in the viewport with live sliders, then install to rpemotes-reborn (2 players) or export a standalone group resource with the exact offsets you previewed.">
+                    <StackPanel Orientation="Horizontal">
+                        <ui:SymbolIcon Symbol="People24" FontSize="13" Margin="0,0,6,0" />
+                        <TextBlock Text="Sync Pair" FontSize="11" />
                     </StackPanel>
                 </ui:Button>
                 <ui:Button Click="OnMirrorPose"
@@ -2536,8 +2545,6 @@
                                         <MenuItem Header="Split at playhead" Click="OnTimelineSplitClick" />
                                         <MenuItem Header="Frame selection" Click="OnTimelineFrameSelected" />
                                         <MenuItem Header="Fit whole animation" Click="OnTimelineFitAll" />
-                                        <Separator />
-                                        <MenuItem Header="Clear all…" Click="OnClearAll" />
                                     </ContextMenu>
                                 </Button.ContextMenu>
                                 <Path Style="{StaticResource TransportIcon}" Width="12" Height="12"
@@ -2771,6 +2778,13 @@
                                     Background="#FF2B2B2B"
                                     Margin="0,0,2,0"
                                     Panel.ZIndex="1">
+                            <ui:Button Appearance="Secondary"
+                                       Padding="7,4"
+                                       Margin="0,0,6,0"
+                                       Click="OnClearAll"
+                                       ToolTip="Clear all — clips, keyframes and pose (Shift+Del)">
+                                <ui:SymbolIcon Symbol="Broom24" FontSize="13" />
+                            </ui:Button>
                             <ToggleButton x:Name="FilterToggle"
                                           Padding="7,4"
                                           Margin="0,0,6,0"
@@ -3310,34 +3324,7 @@
             </StackPanel>
         </Border>
 
-        <!-- Non-blocking operation HUD: imports and mocap keep the editor usable. -->
-        <Border Grid.Row="2"
-                Panel.ZIndex="50"
-                HorizontalAlignment="Right"
-                VerticalAlignment="Top"
-                Margin="18"
-                MaxWidth="420"
-                Padding="14,10"
-                CornerRadius="6"
-                Background="#E6292929"
-                BorderBrush="#665BBFB5"
-                BorderThickness="1"
-                IsHitTestVisible="False"
-                Visibility="{Binding IsOperationRunning, Converter={StaticResource BooleanToVisibility}}">
-            <StackPanel>
-                <StackPanel Orientation="Horizontal">
-                    <ProgressBar IsIndeterminate="True" Width="52" Height="4" Margin="0,0,10,0" />
-                    <TextBlock Text="Processing animation"
-                               FontWeight="SemiBold"
-                               FontSize="11"
-                               VerticalAlignment="Center" />
-                </StackPanel>
-                <TextBlock Text="{Binding OperationCaption}"
-                           FontSize="10"
-                           Foreground="#C5C5C5"
-                           Margin="0,6,0,0"
-                           TextWrapping="Wrap" />
-            </StackPanel>
-        </Border>
+        <!-- Long-running imports/mocap report in the window's bottom status bar
+             (see MainWindow's status strip) — no floating HUD over the scene. -->
     </Grid>
 </UserControl>

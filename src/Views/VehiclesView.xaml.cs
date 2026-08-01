@@ -207,7 +207,7 @@ public partial class VehiclesView : UserControl
         if (rename.ShowDialog() != true) return;
 
         var parent = GetDir(Vm.OutputPath)
-            ?? Environment.GetFolderPath(Environment.SpecialFolder.UserProfile) + "\\Downloads";
+            ?? FiveOS.Services.UserSettings.GetDownloadsFolder();
         var folderDlg = new OpenFolderDialog
         {
             Title = "Where should the empty pack be created?",
@@ -310,6 +310,12 @@ public partial class VehiclesView : UserControl
     {
         try { return string.IsNullOrWhiteSpace(path) ? null : Path.GetDirectoryName(path); }
         catch { return null; }
+    }
+
+    private async void OnAddToLoadedPack(object sender, RoutedEventArgs e)
+    {
+        if (Vm == null) return;
+        await Vm.AddToLoadedPackAsync();
     }
 
     private async void OnConvert(object sender, RoutedEventArgs e)

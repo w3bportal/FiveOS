@@ -181,7 +181,14 @@ public static class YcdAnimationBuilder
             return;
         }
 
-        float quantum = Math.Max(1e-9f, (max - min) / 1048575f);
+        // Quantum floor = 1e-7, NOT 1e-9: F() serializes 7 decimal places, so
+        // any smaller quantum becomes the literal string "0" in the XML — and
+        // CodeWalker then decodes EVERY frame of the channel to its minimum.
+        // That froze all subtle motion (<~6° bone swings: breathing, head bobs,
+        // fingers, weight shifts) in game while the preview played it fine.
+        // 1e-7 matches the StaticFloat threshold above and is a FINER step than
+        // range/2^20 for exactly the small ranges this affects.
+        float quantum = Math.Max(1e-7f, (max - min) / 1048575f);
         sb.AppendLine("       <Item>");
         sb.AppendLine("        <Type value=\"QuantizeFloat\" />");
         sb.AppendLine($"        <Quantum value=\"{F(quantum)}\" />");
@@ -233,7 +240,14 @@ public static class YcdAnimationBuilder
             return;
         }
 
-        float quantum = Math.Max(1e-9f, (max - min) / 1048575f);
+        // Quantum floor = 1e-7, NOT 1e-9: F() serializes 7 decimal places, so
+        // any smaller quantum becomes the literal string "0" in the XML — and
+        // CodeWalker then decodes EVERY frame of the channel to its minimum.
+        // That froze all subtle motion (<~6° bone swings: breathing, head bobs,
+        // fingers, weight shifts) in game while the preview played it fine.
+        // 1e-7 matches the StaticFloat threshold above and is a FINER step than
+        // range/2^20 for exactly the small ranges this affects.
+        float quantum = Math.Max(1e-7f, (max - min) / 1048575f);
         sb.AppendLine("       <Item>");
         sb.AppendLine("        <Type value=\"QuantizeFloat\" />");
         sb.AppendLine($"        <Quantum value=\"{F(quantum)}\" />");

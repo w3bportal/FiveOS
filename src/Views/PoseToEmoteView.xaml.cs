@@ -103,6 +103,7 @@ public partial class PoseToEmoteView : UserControl
         InitializeComponent();
         DataContext = _vm;
         Focusable = true;
+        HookStatusRelay();
         ThemeAccent.Changed += OnThemeAccentChanged;
         // Control-rig weight lives in Settings; push it live so the rig
         // updates while the Settings dialog is still open. This view is a
@@ -210,7 +211,10 @@ public partial class PoseToEmoteView : UserControl
                 SyncTrimRangeToDuration();
                 if (_webViewReady)
                 {
-                    var d = _vm.TimelineDuration.ToString("0.###", System.Globalization.CultureInfo.InvariantCulture);
+                    // Round-trip precision, NOT "0.###": pushing a rounded value
+                    // that differs from what the viewer announced made its no-op
+                    // guard miss, re-triggering full timeline updates in a loop.
+                    var d = _vm.TimelineDuration.ToString("R", System.Globalization.CultureInfo.InvariantCulture);
                     _ = Viewport.CoreWebView2.ExecuteScriptAsync($"window.poseSetDuration && window.poseSetDuration({d})");
                 }
             }
@@ -237,6 +241,7 @@ public partial class PoseToEmoteView : UserControl
                 bool travel = _vm.Movement == Services.EmoteMovement.RootMotion;
                 _ = Viewport.CoreWebView2.ExecuteScriptAsync(
                     $"window.poseSetRootMotionPreview && window.poseSetRootMotionPreview({(travel ? "true" : "false")})");
+                PushMovementModeToViewer();
                 PushRootMotionScaleToViewer();
                 PushFootPlantToViewer();
             }
@@ -834,6 +839,7 @@ public partial class PoseToEmoteView : UserControl
                             $"window.poseSetIkMode && window.poseSetIkMode({ikOn});" +
                             $"window.poseSetFootLock && window.poseSetFootLock({footOn})");
                         PushSecondaryMotionToViewer();
+                        PushMovementModeToViewer();
                         PushRootMotionScaleToViewer();
                         PushFootPlantToViewer();
                         // Clear any prior clip drive dots until a new map arrives.
@@ -1028,8 +1034,15 @@ public partial class PoseToEmoteView : UserControl
                             _timelineStateRevApplied = rev;
                         }
                         bool structural = false;
-                        // Re-sync C# state from the JS source-of-truth.
-                        if (rootUpd.TryGetProperty("time", out var tEl))
+                        // Re-sync C# state from the JS source-of-truth — but the
+                        // TICKS own the playhead while playing: this lambda runs
+                        // at Background priority, so its payload time is already
+                        // stale mid-playback and applying it yanks the playhead
+                        // backwards (visible back-and-forth jitter).
+                        bool payloadPlaying =
+                            rootUpd.TryGetProperty("playing", out var pPeek) && pPeek.GetBoolean();
+                        if (rootUpd.TryGetProperty("time", out var tEl)
+                            && !(payloadPlaying && _vm.TimelinePlaying))
                             _vm.TimelineTime = tEl.GetDouble();
                         if (rootUpd.TryGetProperty("duration", out var dEl))
                         {
@@ -1788,18 +1801,18 @@ case "prop-loaded":
 
     private async void OnOpenRiggedModel(object sender, RoutedEventArgs e)
     {
-        var dlg = new Microsoft.Win32.OpenFileDialog
+        var file = await Services.StaFileDialogs.OpenAsync(Window.GetWindow(this), dlg =>
         {
-            Title = "Open Rigged Model",
-            Filter = "Rigged 3D models (*.glb;*.gltf;*.fbx)|*.glb;*.gltf;*.fbx|All files (*.*)|*.*",
-        };
-        if (dlg.ShowDialog() != true) return;
+            dlg.Title = "Open Rigged Model";
+            dlg.Filter = "Rigged 3D models (*.glb;*.gltf;*.fbx)|*.glb;*.gltf;*.fbx|All files (*.*)|*.*";
+        });
+        if (file is null) return;
         // Defensive: IsVisibleChanged usually wins this race, but if the
         // user clicks fast enough that the WebView2 hasn't started its
         // init yet, kick it off here so the load isn't dropped.
         if (!_webViewReady) await InitWebViewAsync();
         await EnsureFreshTabForImportAsync();
-        await LoadModelAsync(dlg.FileName);
+        await LoadModelAsync(file);
     }
 
     private async Task LoadModelAsync(string path)
@@ -1889,10 +1902,14 @@ case "prop-loaded":
                   + "|All files (*.*)|*.*"),
         };
 
-        var dlg = new Microsoft.Win32.OpenFileDialog { Title = title, Filter = filter };
-        if (dlg.ShowDialog() != true) return;
+        var file = await Services.StaFileDialogs.OpenAsync(Window.GetWindow(this), dlg =>
+        {
+            dlg.Title = title;
+            dlg.Filter = filter;
+        });
+        if (file is null) return;
         if (!_webViewReady) await InitWebViewAsync();
-        await LoadReferenceMediaAsync(dlg.FileName);
+        await LoadReferenceMediaAsync(file);
     }
 
     private async Task LoadReferenceMediaAsync(string path)
@@ -2445,6 +2462,10 @@ case "prop-loaded":
         if (ok != System.Windows.MessageBoxResult.Yes) return;
 
         await Viewport.CoreWebView2.ExecuteScriptAsync("window.poseClearAll && window.poseClearAll()");
+        // poseClearAll empties strips/keys/pose viewer-side, but the Keys-view
+        // lane bars render from the cached timeline DOCUMENT, which only
+        // refreshes on a snapshot — without this, cleared lanes stayed painted.
+        _ = SendTimelineCommandAsync("requestSnapshot");
         _vm.StatusText = "Workspace cleared.";
     }
 
@@ -6437,6 +6458,22 @@ case "prop-loaded":
             $"window.poseSetRootMotionScale && window.poseSetRootMotionScale({scale})");
     }
 
+    /// <summary>Push the movement mode so the preview masks itself instantly:
+    /// Upper body plays spine-and-up only (matching the in-game AF_UPPERBODY
+    /// flag the export ships with); the other modes play the full body.</summary>
+    private async void PushMovementModeToViewer()
+    {
+        if (!_webViewReady) return;
+        var mode = _vm.Movement switch
+        {
+            Services.EmoteMovement.UpperBody => "upper",
+            Services.EmoteMovement.RootMotion => "root",
+            _ => "inplace",
+        };
+        await Viewport.CoreWebView2.ExecuteScriptAsync(
+            $"window.poseSetMovementMode && window.poseSetMovementMode('{mode}')");
+    }
+
     /// <summary>Push foot-plant enable + intensity so the soft anti-skate
     /// correction (and ankle distortion) can be dialed live.</summary>
     private async void PushFootPlantToViewer()
@@ -6537,11 +6574,18 @@ case "prop-loaded":
     private static bool LooksLikeHashName(string? name)
         => !string.IsNullOrEmpty(name) && name.All(char.IsDigit);
 
+    /// <summary>Marks a long-running import/mocap step. The caption goes to the
+    /// window's bottom status bar (with a busy indicator) rather than a HUD over
+    /// the scene; the editor stays usable throughout either way.</summary>
     private void SetImportOverlay(bool on, string? caption = null)
     {
         if (on)
         {
-            if (caption is not null) _vm.OperationCaption = caption;
+            if (caption is not null)
+            {
+                _vm.OperationCaption = caption;
+                _vm.StatusText = caption;
+            }
             _vm.IsOperationRunning = true;
             _vm.OperationProgress = 0;
         }
@@ -6805,72 +6849,460 @@ case "prop-loaded":
         }
     }
 
-    private async void OnExportPose(object sender, RoutedEventArgs e)
+    private string DefaultExportName()
     {
-        if (!_webViewReady)
+        var sourceName = Path.GetFileNameWithoutExtension(_vm.LoadedModelPath);
+        return string.IsNullOrEmpty(sourceName) ? "pose" : sourceName;
+    }
+
+    /// <summary>File → Export → Single Player / Menyoo: a raw .ycd to drop
+    /// into a dlc/mods rpf (OpenIV) and play by dict/clip name.</summary>
+    private async void OnExportSpMenyoo(object sender, RoutedEventArgs e)
+    {
+        var poseJson = await GetPoseJsonForExportAsync();
+        if (string.IsNullOrEmpty(poseJson))
         {
-            _vm.StatusText = "Viewer not ready.";
+            _vm.StatusText = "No pose to export — load a rigged model first.";
+            return;
+        }
+        var file = await Services.StaFileDialogs.SaveAsync(Window.GetWindow(this), dlg =>
+        {
+            dlg.Title = "Export for Single Player / Menyoo";
+            dlg.Filter = "GTA V animation (*.ycd)|*.ycd";
+            dlg.FileName = DefaultExportName() + ".ycd";
+            dlg.DefaultExt = ".ycd";
+        });
+        if (file is null) return;
+        try { await WriteYcdAsync(file, poseJson); }
+        catch (Exception ex) { _vm.StatusText = "Save failed: " + ex.Message; }
+    }
+
+    /// <summary>File → Export → FiveM Resource: the self-contained resource
+    /// folder (fxmanifest + client.lua + stream/.ycd).</summary>
+    private async void OnExportFiveM(object sender, RoutedEventArgs e)
+    {
+        var poseJson = await GetPoseJsonForExportAsync();
+        if (string.IsNullOrEmpty(poseJson))
+        {
+            _vm.StatusText = "No pose to export — load a rigged model first.";
+            return;
+        }
+        var file = await Services.StaFileDialogs.SaveAsync(Window.GetWindow(this), dlg =>
+        {
+            dlg.Title = "Export FiveM resource";
+            dlg.Filter = "FiveM resource folder (*.fxresource)|*.fxresource";
+            dlg.FileName = DefaultExportName() + ".fxresource";
+            dlg.DefaultExt = ".fxresource";
+        });
+        if (file is null) return;
+        try { await WriteFiveMResourceFolderAsync(file, poseJson); }
+        catch (Exception ex) { _vm.StatusText = "Save failed: " + ex.Message; }
+    }
+
+    /// <summary>File → Export → dpemotes pack: a .zip to merge into a classic
+    /// dpemotes install.</summary>
+    private async void OnExportDpemotes(object sender, RoutedEventArgs e)
+    {
+        var poseJson = await GetPoseJsonForExportAsync();
+        if (string.IsNullOrEmpty(poseJson))
+        {
+            _vm.StatusText = "No pose to export — load a rigged model first.";
+            return;
+        }
+        var file = await Services.StaFileDialogs.SaveAsync(Window.GetWindow(this), dlg =>
+        {
+            dlg.Title = "Export dpemotes pack";
+            dlg.Filter = "dpemotes pack (*.dpemotes.zip)|*.dpemotes.zip";
+            dlg.FileName = DefaultExportName() + ".dpemotes.zip";
+            dlg.DefaultExt = ".dpemotes.zip";
+        });
+        if (file is null) return;
+        try { await WriteDpemotesPackAsync(file, poseJson); }
+        catch (Exception ex) { _vm.StatusText = "Save failed: " + ex.Message; }
+    }
+
+    /// <summary>File → Export → CodeWalker XML: the .ycd.xml source, for users
+    /// compiling or inspecting via CodeWalker.</summary>
+    private async void OnExportYcdXml(object sender, RoutedEventArgs e)
+    {
+        var poseJson = await GetPoseJsonForExportAsync();
+        if (string.IsNullOrEmpty(poseJson))
+        {
+            _vm.StatusText = "No pose to export — load a rigged model first.";
+            return;
+        }
+        var file = await Services.StaFileDialogs.SaveAsync(Window.GetWindow(this), dlg =>
+        {
+            dlg.Title = "Export CodeWalker XML";
+            dlg.Filter = "CodeWalker XML (*.ycd.xml)|*.ycd.xml";
+            dlg.FileName = DefaultExportName() + ".ycd.xml";
+            dlg.DefaultExt = ".ycd.xml";
+        });
+        if (file is null) return;
+        try { await WriteYcdXmlAsync(file, poseJson); }
+        catch (Exception ex) { _vm.StatusText = "Save failed: " + ex.Message; }
+    }
+
+    /// <summary>File → Export → pose JSON: share a pose between FiveOS users
+    /// without baking a .ycd.</summary>
+    private async void OnExportPoseJson(object sender, RoutedEventArgs e)
+    {
+        var poseJson = await GetPoseJsonForExportAsync();
+        if (string.IsNullOrEmpty(poseJson))
+        {
+            _vm.StatusText = "No pose to export — load a rigged model first.";
+            return;
+        }
+        var file = await Services.StaFileDialogs.SaveAsync(Window.GetWindow(this), dlg =>
+        {
+            dlg.Title = "Export FiveOS pose JSON";
+            dlg.Filter = "FiveOS pose JSON (*.fivepose.json)|*.fivepose.json";
+            dlg.FileName = DefaultExportName() + ".fivepose.json";
+            dlg.DefaultExt = ".fivepose.json";
+        });
+        if (file is null) return;
+        try { WriteJsonPose(file, poseJson); }
+        catch (Exception ex) { _vm.StatusText = "Save failed: " + ex.Message; }
+    }
+
+    /// <summary>File → Export → animated GIF: one recorded loop of the current
+    /// clip, for previews and sharing.</summary>
+    private async void OnExportGif(object sender, RoutedEventArgs e)
+    {
+        if (!_webViewReady) { _vm.StatusText = "Viewer not ready."; return; }
+        var file = await Services.StaFileDialogs.SaveAsync(Window.GetWindow(this), dlg =>
+        {
+            dlg.Title = "Export animated GIF";
+            dlg.Filter = "Animated GIF (*.gif)|*.gif";
+            dlg.FileName = DefaultExportName() + ".gif";
+            dlg.DefaultExt = ".gif";
+        });
+        if (file is null) return;
+        try { await ExportViewerGifAsync(file); }
+        catch (Exception ex) { _vm.StatusText = "GIF failed: " + ex.Message; }
+    }
+
+    /// <summary>Resolve (and remember) the user's rpemotes-reborn resource
+    /// folder — prompting with an off-thread folder picker when unset.</summary>
+    private async Task<string?> ResolveRpEmotesFolderAsync()
+    {
+        var folder = Services.UserSettings.LoadRpEmotesFolder();
+        if (Services.RpEmotesInstaller.LooksLikeInstall(folder)) return folder;
+
+        folder = await Services.StaFileDialogs.OpenFolderAsync(Window.GetWindow(this), dlg =>
+        {
+            dlg.Title = "Pick your rpemotes-reborn resource folder";
+        });
+        if (folder is null) return null;
+        if (!Services.RpEmotesInstaller.LooksLikeInstall(folder))
+        {
+            _vm.StatusText = "That folder doesn't look like rpemotes-reborn "
+                + "(it needs fxmanifest.lua and client/AnimationListCustom.lua).";
+            Views.AppDialog.Warn(_vm.StatusText, "Add to RPEmotes", Window.GetWindow(this));
+            return null;
+        }
+        Services.UserSettings.SaveRpEmotesFolder(folder);
+        return folder;
+    }
+
+    /// <summary>Toolbar Sync Pair / File → Export → Synced Pair: a SHARED
+    /// emote for two players or a whole group. Shows teal partner ghosts in
+    /// the viewport, lets the user place each with live sliders, then installs
+    /// the .ycd + a CustomDP.Shared entry (single partner) or writes the
+    /// standalone N-slot resource carrying the exact offsets they previewed.</summary>
+    private SyncPairDialog? _syncPairDialogOpen;
+
+    private async void OnExportSyncedPair(object sender, RoutedEventArgs e)
+    {
+        // The dialog is modeless, so the toolbar button stays clickable while
+        // one is already up — a second flow would tear down the first flow's
+        // ghosts on close. Re-focus the live dialog instead.
+        if (_syncPairDialogOpen != null)
+        {
+            _syncPairDialogOpen.Activate();
             return;
         }
 
-        var raw = await Viewport.CoreWebView2.ExecuteScriptAsync("window.getPose && window.getPose()");
-        // ExecuteScriptAsync returns the JS value JSON-encoded. Our getPose
-        // already returns a JSON STRING, so the result here is a
-        // double-encoded JSON string. Peel one layer.
-        string? poseJson = null;
-        if (!string.IsNullOrEmpty(raw) && raw != "null")
-        {
-            try { poseJson = JsonSerializer.Deserialize<string>(raw); }
-            catch { poseJson = raw; }
-        }
-
+        var poseJson = await GetPoseJsonForExportAsync();
         if (string.IsNullOrEmpty(poseJson))
         {
             _vm.StatusText = "No pose to export — load a rigged model first.";
             return;
         }
 
-        var sourceName = Path.GetFileNameWithoutExtension(_vm.LoadedModelPath);
-        var defaultName = string.IsNullOrEmpty(sourceName) ? "pose" : sourceName;
-        var dlg = new Microsoft.Win32.SaveFileDialog
+        // Partner ghosts on while the dialog is up — the dialog re-sends the
+        // whole partner list on every change (sliders, add/remove). The ghost
+        // bodies match the ped already in the preview; the viewer decides.
+        await Viewport.CoreWebView2.ExecuteScriptAsync(
+            "window.syncGhostEnable && window.syncGhostEnable(true)");
+        try
         {
-            Title = "Export Pose",
+            var diag = await Viewport.CoreWebView2.ExecuteScriptAsync(
+                "window.syncGhostDiag ? window.syncGhostDiag() : '\"no-diag\"'");
+            FosLogger.Info("sync", "partner ghost diag: " + diag);
+        }
+        catch { /* diagnostics only */ }
+        try
+        {
+            var owner = Window.GetWindow(this);
+            var dlg = new SyncPairDialog("sync_emote", "My sync emote") { Owner = owner };
+            void PushPartners()
+            {
+                // Whole-list resend: the viewer diffs it (offset moves re-place,
+                // count changes rebuild only the ghosts involved).
+                var list = dlg.Partners.Select(p => new
+                {
+                    front = p.Front, side = p.Side, height = p.Height,
+                    heading = p.Heading,
+                }).ToArray();
+                _ = Viewport.CoreWebView2.ExecuteScriptAsync(
+                    "window.syncGhostSetPartners && window.syncGhostSetPartners("
+                    + JsonSerializer.Serialize(list) + ")");
+            }
+            dlg.PartnersChanged += PushPartners;
+            PushPartners();
+
+            // MODELESS on purpose: the viewport must stay interactive so the
+            // user can orbit / play / scrub while placing the partner ghost.
+            // Parked at the owner's right edge so it doesn't sit on the scene.
+            // Window.Left reports the RESTORE rect while maximized (ActualWidth
+            // reports the real width), so derive the true on-screen origin via
+            // PointToScreen or the dialog lands off-screen on maximized owners.
+            dlg.WindowStartupLocation = WindowStartupLocation.Manual;
+            if (owner != null)
+            {
+                double ownerLeft = owner.Left, ownerTop = owner.Top;
+                try
+                {
+                    var src = PresentationSource.FromVisual(owner);
+                    if (src?.CompositionTarget != null)
+                    {
+                        var origin = src.CompositionTarget.TransformFromDevice.Transform(
+                            owner.PointToScreen(new Point(0, 0)));
+                        ownerLeft = origin.X;
+                        ownerTop = origin.Y;
+                    }
+                }
+                catch { /* fall back to the (restore-rect) Left/Top */ }
+                dlg.Left = System.Math.Max(0, ownerLeft + owner.ActualWidth - 470);
+                dlg.Top = ownerTop + 120;
+            }
+            var closed = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+            dlg.Closed += (_, _) => closed.TrySetResult(true);
+            _syncPairDialogOpen = dlg;
+            dlg.Show();
+            await closed.Task;
+            if (!dlg.Confirmed) return;
+
+            var emoteName = Services.RpEmotesInstaller.SanitizeEmoteName(dlg.EmoteName);
+            var label = string.IsNullOrWhiteSpace(dlg.EmoteLabel) ? emoteName : dlg.EmoteLabel;
+
+            string? kfJson = null;
+            try
+            {
+                var raw = await Viewport.CoreWebView2.ExecuteScriptAsync("window.getKeyframes && window.getKeyframes()");
+                if (!string.IsNullOrEmpty(raw) && raw != "null")
+                {
+                    try { kfJson = JsonSerializer.Deserialize<string>(raw); }
+                    catch { kfJson = raw; }
+                }
+            }
+            catch { /* fall through to single-pose */ }
+
+            byte[]? ycdBytes = await HasAnimatedTimelineAsync()
+                ? await BuildAnimatedYcdBytesFromViewerAsync(emoteName, kfJson ?? "{}")
+                : BuildSinglePoseYcdBytes(emoteName, poseJson);
+            if (ycdBytes is null || ycdBytes.Length == 0) return; // status set by builders
+
+            try
+            {
+                if (dlg.TargetRpEmotes)
+                {
+                    // Only reachable with exactly ONE partner — the dialog
+                    // locks this target out for groups (rpemotes' Shared
+                    // format is strictly 2-player).
+                    var p = dlg.Partners[0];
+                    var folder = await ResolveRpEmotesFolderAsync();
+                    if (folder is null) return;
+                    var msg = Services.RpEmotesInstaller.InstallShared(
+                        folder, emoteName, label, ycdBytes,
+                        p.Front, p.Side, p.Height, p.Heading);
+                    _vm.StatusText = msg;
+                    Views.AppDialog.Show(msg, "Synced emote",
+                        MessageBoxButton.OK, MessageBoxImage.Information);
+                }
+                else
+                {
+                    // Standalone FiveM resource — self-contained slot-based
+                    // sync logic, any partner count.
+                    var file = await Services.StaFileDialogs.SaveAsync(Window.GetWindow(this), d =>
+                    {
+                        d.Title = "Save synced-emote FiveM resource";
+                        d.Filter = "FiveM resource folder (*.fxresource)|*.fxresource";
+                        d.FileName = emoteName + ".fxresource";
+                        d.DefaultExt = ".fxresource";
+                    });
+                    if (file is null) return;
+                    var folderPath = file.EndsWith(".fxresource", StringComparison.OrdinalIgnoreCase)
+                        ? file[..^".fxresource".Length]
+                        : file;
+                    var slots = dlg.Partners
+                        .Select(p => new Services.SyncFiveMResourceBuilder.Slot(
+                            p.Front, p.Side, p.Height, p.Heading))
+                        .ToList();
+                    Services.SyncFiveMResourceBuilder.BuildFolder(
+                        folderPath, emoteName, label, ycdBytes, slots);
+                    var who = slots.Count == 1 ? "a player" : $"{slots.Count} players";
+                    var msg = $"Saved synced-emote resource '{Path.GetFileName(folderPath)}'. Drop it in resources/, "
+                        + $"ensure it, then /{emoteName} near {who} (each types /{emoteName} accept — "
+                        + "everyone starts together once all have accepted).";
+                    _vm.StatusText = msg;
+                    Views.AppDialog.Show(msg, "Synced emote",
+                        MessageBoxButton.OK, MessageBoxImage.Information);
+                }
+            }
+            catch (Exception ex)
+            {
+                _vm.StatusText = "Synced emote install failed: " + ex.Message;
+                FosLogger.Warn("export", "synced emote install failed", ex);
+                Views.AppDialog.Warn(_vm.StatusText, "Synced emote", Window.GetWindow(this));
+            }
+        }
+        finally
+        {
+            _syncPairDialogOpen = null;
+            try
+            {
+                await Viewport.CoreWebView2.ExecuteScriptAsync(
+                    "window.syncGhostEnable && window.syncGhostEnable(false)");
+            }
+            catch { /* viewer gone — nothing to hide */ }
+        }
+    }
+
+    /// <summary>File → Export → Add to RPEmotes: install the emote straight
+    /// into the user's rpemotes-reborn resource as an addon (.ycd into
+    /// stream/[Custom Emotes]/FiveOS + a CustomDP.Emotes entry).</summary>
+    private async void OnExportRpEmotes(object sender, RoutedEventArgs e)
+    {
+        var poseJson = await GetPoseJsonForExportAsync();
+        if (string.IsNullOrEmpty(poseJson))
+        {
+            _vm.StatusText = "No pose to export — load a rigged model first.";
+            return;
+        }
+
+        var folder = await ResolveRpEmotesFolderAsync();
+        if (folder is null) return;
+
+        var emoteName = Services.RpEmotesInstaller.SanitizeEmoteName(DefaultExportName());
+
+        // Same animated-vs-single-pose branching as the FiveM folder export.
+        string? kfJson = null;
+        try
+        {
+            var raw = await Viewport.CoreWebView2.ExecuteScriptAsync("window.getKeyframes && window.getKeyframes()");
+            if (!string.IsNullOrEmpty(raw) && raw != "null")
+            {
+                try { kfJson = JsonSerializer.Deserialize<string>(raw); }
+                catch { kfJson = raw; }
+            }
+        }
+        catch { /* fall through to single-pose */ }
+
+        byte[]? ycdBytes = await HasAnimatedTimelineAsync()
+            ? await BuildAnimatedYcdBytesFromViewerAsync(emoteName, kfJson ?? "{}")
+            : BuildSinglePoseYcdBytes(emoteName, poseJson);
+        if (ycdBytes is null || ycdBytes.Length == 0) return; // status set by builders
+
+        var pretty = char.ToUpper(emoteName[0]) + emoteName[1..].Replace('_', ' ');
+        try
+        {
+            var msg = Services.RpEmotesInstaller.Install(
+                folder!, emoteName, pretty, ycdBytes,
+                emoteMoving: _vm.EffectiveExportMovement.ToEmoteMoving());
+            _vm.StatusText = msg;
+            Views.AppDialog.Show(msg, "Add to RPEmotes",
+                MessageBoxButton.OK, MessageBoxImage.Information);
+        }
+        catch (Exception ex)
+        {
+            _vm.StatusText = "Add to RPEmotes failed: " + ex.Message;
+            FosLogger.Warn("export", "rpemotes install failed", ex);
+            Views.AppDialog.Warn(_vm.StatusText, "Add to RPEmotes", Window.GetWindow(this));
+        }
+    }
+
+    private async void OnExportPose(object sender, RoutedEventArgs e)
+    {
+        var poseJson = await GetPoseJsonForExportAsync();
+        if (string.IsNullOrEmpty(poseJson))
+        {
+            _vm.StatusText = "No pose to export — load a rigged model first.";
+            return;
+        }
+
+        var defaultName = DefaultExportName();
+        // Off-thread dialog: on the app's contended UI thread the shell save
+        // dialog took 16+ seconds to appear (same starvation the Motion video
+        // picker had) — "Export" looked frozen.
+        var file = await Services.StaFileDialogs.SaveAsync(Window.GetWindow(this), dlg =>
+        {
+            dlg.Title = "Export Pose";
             // Order top-to-bottom = most-to-least drop-in:
             //   1. FiveM resource folder = self-contained, drop in resources/ + ensure.
             //   2. dpemotes pack = merge into an existing dpemotes install.
             //   3. Raw .ycd = for users wiring it into another anim pipeline.
             //   4. FiveOS JSON = sharing the pose between FiveOS users without a baked .ycd.
+            //   5. Animated GIF = one loop of the current clip, for previews/sharing.
             // The resource-folder filter uses a sentinel .fxresource "extension"
             // that we strip + treat as the folder name when the user picks it.
-            Filter =
+            dlg.Filter =
                   "FiveM resource folder (*.fxresource)|*.fxresource"
                 + "|dpemotes pack (*.dpemotes.zip)|*.dpemotes.zip"
                 + "|FiveM emote (*.ycd)|*.ycd"
                 + "|CodeWalker XML (*.ycd.xml)|*.ycd.xml"
-                + "|FiveOS pose JSON (*.fivepose.json)|*.fivepose.json",
-            FileName = defaultName + ".fxresource",
-            DefaultExt = ".fxresource",
-        };
-        if (dlg.ShowDialog() != true) return;
+                + "|FiveOS pose JSON (*.fivepose.json)|*.fivepose.json"
+                + "|Animated GIF preview (*.gif)|*.gif";
+            dlg.FileName = defaultName + ".fxresource";
+            dlg.DefaultExt = ".fxresource";
+        });
+        if (file is null) return;
 
-        var name = Path.GetFileName(dlg.FileName).ToLowerInvariant();
+        var name = Path.GetFileName(file).ToLowerInvariant();
         try
         {
             if (name.EndsWith(".fxresource"))
-                await WriteFiveMResourceFolderAsync(dlg.FileName, poseJson);
+                await WriteFiveMResourceFolderAsync(file, poseJson);
             else if (name.EndsWith(".dpemotes.zip"))
-                await WriteDpemotesPackAsync(dlg.FileName, poseJson);
+                await WriteDpemotesPackAsync(file, poseJson);
             else if (name.EndsWith(".ycd.xml"))
-                await WriteYcdXmlAsync(dlg.FileName, poseJson);
+                await WriteYcdXmlAsync(file, poseJson);
             else if (name.EndsWith(".ycd"))
-                await WriteYcdAsync(dlg.FileName, poseJson);
+                await WriteYcdAsync(file, poseJson);
+            else if (name.EndsWith(".gif"))
+                await ExportViewerGifAsync(file);
             else
-                WriteJsonPose(dlg.FileName, poseJson);
+                WriteJsonPose(file, poseJson);
         }
         catch (Exception ex)
         {
             _vm.StatusText = "Save failed: " + ex.Message;
         }
+    }
+
+    /// <summary>Export-flow GIF: record one loop of whatever the viewer is set
+    /// up to play (the current pose timeline) straight to <paramref name="outPath"/>.
+    /// Shares the capture core with the Animation Library's GIF button.</summary>
+    private async Task ExportViewerGifAsync(string outPath)
+    {
+        var cap = await CaptureViewerGifFramesAsync();
+        if (cap is not { } c) return; // status already set by the capture core
+        _vm.StatusText = $"Encoding GIF… ({c.Frames.Count} frames)";
+        await Task.Run(() => PreviewGifEncoder.WriteAnimatedGif(c.Frames, c.Fps, outPath));
+        _vm.StatusText = $"Saved GIF: {Path.GetFileName(outPath)} ({c.Frames.Count} frames)";
+        try { Process.Start(new ProcessStartInfo(outPath) { UseShellExecute = true }); }
+        catch { /* ignore — file is still saved */ }
     }
 
     /// <summary>
@@ -6945,7 +7377,9 @@ case "prop-loaded":
                 emoteName: emoteName,
                 displayName: pretty,
                 ycdBytes: ycdBytes,
-                isLooping: !isAnimated,
+                // Loop animated clips too — the preview loops, and a dance that
+                // played once then froze on its last frame read as broken.
+                isLooping: true,
                 movement: _vm.EffectiveExportMovement,
                 prop: propInfo,
                 ycdXml: _lastYcdXml);
@@ -7050,7 +7484,8 @@ case "prop-loaded":
 
             var zipBytes = Services.DpemotesPackBuilder.Build(
                 emoteName, pretty, ycdBytes,
-                isLooping: !isAnimated,
+                // Loop animated clips too — matches the preview (see BuildFolder).
+                isLooping: true,
                 movement: _vm.EffectiveExportMovement,
                 prop: propInfo);
             File.WriteAllBytes(zipPath, zipBytes);
@@ -7186,8 +7621,58 @@ case "prop-loaded":
             .Select(kv => new Services.PosedBoneTrack(kv.Key, kv.Value))
             .ToList();
 
+        // Per-bone POSITION tracks. These used to be discarded wholesale, which
+        // silently dropped pelvis bob/crouch depth and the foot-plant
+        // (anti-skate) corrections the preview shows — feet skated in game
+        // where the preview glued them. Native-rig exports only: a custom glb
+        // rig's local positions aren't in GTA parent space. Only bones whose
+        // position actually animates (>1mm) get a track, like vanilla clips.
+        var bonePositions = new List<Services.PosedPositionTrack>();
+        var exportBoneSpace = root.TryGetProperty("boneSpace", out var bsEl)
+            ? (bsEl.GetString() ?? "") : "";
+        if (string.Equals(exportBoneSpace, "native", StringComparison.OrdinalIgnoreCase))
+        {
+            var posPerTag = new Dictionary<ushort, System.Numerics.Vector3[]>();
+            int pIdx = 0;
+            foreach (var pose in posesEl.EnumerateArray())
+            {
+                if (pIdx >= frames) break;
+                if (!pose.TryGetProperty("bones", out var bonesEl2)) { pIdx++; continue; }
+                foreach (var b in bonesEl2.EnumerateArray())
+                {
+                    var name = b.TryGetProperty("name", out var nm) ? (nm.GetString() ?? "") : "";
+                    if (!Services.GtaBoneTags.TryResolve(name, out var tag) || tag == 0) continue;
+                    if (!b.TryGetProperty("pos_xyz", out var pEl) || pEl.GetArrayLength() < 3) continue;
+                    var v = new System.Numerics.Vector3(
+                        (float)pEl[0].GetDouble(), (float)pEl[1].GetDouble(), (float)pEl[2].GetDouble());
+                    if (!posPerTag.TryGetValue(tag, out var arr))
+                    {
+                        arr = new System.Numerics.Vector3[frames];
+                        // Backfill so a late-appearing bone doesn't collapse to origin.
+                        for (int i = 0; i < frames; i++) arr[i] = v;
+                        posPerTag[tag] = arr;
+                    }
+                    arr[pIdx] = v;
+                }
+                pIdx++;
+            }
+            foreach (var kv in posPerTag.OrderBy(k => k.Key))
+            {
+                float range = 0f;
+                var first = kv.Value[0];
+                foreach (var v in kv.Value)
+                    range = Math.Max(range, System.Numerics.Vector3.Distance(v, first));
+                if (range > 0.001f)
+                    bonePositions.Add(new Services.PosedPositionTrack(kv.Key, kv.Value));
+            }
+        }
+
+        // The mover is built for EVERY movement mode now, not just RootMotion:
+        // the preview always plays the VERTICAL root component (jumps, crouch
+        // bounce) regardless of mode, so it must reach the .ycd too — "the ped
+        // doesn't even jump in game" was this gate. Horizontal travel remains
+        // RootMotion-only, matching the preview's In-Place behavior.
         Services.PosedPositionTrack? rootMotion = null;
-        if (_vm.MovementIndex == (int)Services.EmoteMovement.RootMotion)
         {
             var exportSource = root.TryGetProperty("source", out var srcEl) ? (srcEl.GetString() ?? "") : "";
             float travelScale = (float)Math.Clamp(_vm.RootMotionScale, 0.1, 2.0);
@@ -7200,23 +7685,30 @@ case "prop-loaded":
                 using var kdoc = JsonDocument.Parse(kfJsonForRootMotion);
                 rootMotion = BuildRootMotionTrack(kdoc.RootElement, frames, fps, travelScale);
             }
+
+            // Upper-body mode: no mover at all — in game AF_UPPERBODY never
+            // moves the ped, so an exported mover (even vertical-only) would
+            // fight the player's own locomotion. The preview masks the root
+            // the same way, so this stays WYSIWYG.
+            if (rootMotion != null && _vm.Movement != Services.EmoteMovement.RootMotion)
+                rootMotion = null;
+
             if (rootMotion != null && root.TryGetProperty("floorOffsetY", out var foEl))
             {
                 float bias = (float)foEl.GetDouble();
                 if (Math.Abs(bias) > 0.001f)
                 {
-                    bool animImport = string.Equals(exportSource, "anim-import", StringComparison.OrdinalIgnoreCase);
+                    // Ground bias always belongs on the UP axis (slot Z) — it
+                    // was previously applied to Y (forward) for anim-imports,
+                    // shoving the ped forward instead of grounding it.
                     var pf = rootMotion.PerFrame;
                     for (int f = 0; f < pf.Length; f++)
-                    {
-                        pf[f] = animImport
-                            ? new System.Numerics.Vector3(pf[f].X, pf[f].Y + bias, pf[f].Z)
-                            : new System.Numerics.Vector3(pf[f].X, pf[f].Y, pf[f].Z + bias);
-                    }
+                        pf[f] = new System.Numerics.Vector3(pf[f].X, pf[f].Y, pf[f].Z + bias);
                 }
             }
         }
-        var positions = rootMotion is null ? null : new[] { rootMotion };
+        if (rootMotion != null) bonePositions.Add(rootMotion);
+        var positions = bonePositions.Count > 0 ? bonePositions : null;
         _lastYcdXml = Services.YcdAnimationBuilder.BuildXml(clipName, tracks, frames, fps, positions);
         _vm.LastExportMapped = perTag.Count;
         _vm.LastExportSkipped = 0;
@@ -7496,15 +7988,15 @@ case "prop-loaded":
         if (maxD * scale < 0.03f) return null;
 
         var perFrame = new System.Numerics.Vector3[frames];
+        // Animation retarget roots are glTF ground-plane [x, 0, fwd]; video
+        // roots are [x, screen-up, 0]. Vertical goes in as a DELTA from the
+        // first sample: jumps survive while any constant height offset (the
+        // historical floating-ped bug) cancels. Scale applies to horizontal.
+        float y0 = SampleVec3AtTime(samples, 0).Y;
         for (int f = 0; f < frames; f++)
         {
             var v = SampleVec3AtTime(samples, f / (double)fps);
-            // Animation retarget roots are glTF ground-plane [x, 0, fwd].
-            // Video roots are [x, screen-up, 0]. Never feed glTF Y into RAGE Z
-            // (up) — that was the floating bug. Scale horizontal only.
-            perFrame[f] = animImport
-                ? new System.Numerics.Vector3(v.X * scale, v.Z * scale, 0f)
-                : new System.Numerics.Vector3(v.X * scale, 0f, v.Y * scale);
+            perFrame[f] = new System.Numerics.Vector3(v.X * scale, v.Z * scale, v.Y - y0);
         }
         return new Services.PosedPositionTrack(0 /* SKEL_ROOT */, perFrame);
     }
@@ -7516,7 +8008,13 @@ case "prop-loaded":
     {
         if (rootsEl.GetArrayLength() < 2) return null;
         var perFrame = new System.Numerics.Vector3[frames];
-        bool animImport = string.Equals(source, "anim-import", StringComparison.OrdinalIgnoreCase);
+        // Viewer roots are three.js space: [x, y(up), z(forward)]. RAGE slot
+        // layout here is (X side, Y forward, Z up). The vertical goes in as a
+        // DELTA from the first frame: jumps/crouches survive, while any
+        // constant height offset (the historical "floating ped" bug that a
+        // blanket zero used to paper over) cancels out.
+        float y0 = 0f;
+        bool haveY0 = false;
         for (int f = 0; f < frames; f++)
         {
             var idx = Math.Min(f, rootsEl.GetArrayLength() - 1);
@@ -7525,9 +8023,8 @@ case "prop-loaded":
             float x = (float)rEl[0].GetDouble();
             float y = (float)rEl[1].GetDouble();
             float z = (float)rEl[2].GetDouble();
-            perFrame[f] = animImport
-                ? new System.Numerics.Vector3(x, z, 0f)
-                : new System.Numerics.Vector3(x, 0f, y);
+            if (!haveY0) { y0 = y; haveY0 = true; }
+            perFrame[f] = new System.Numerics.Vector3(x, z, y - y0);
         }
         float maxD = 0f;
         var origin = perFrame[0];
@@ -7754,14 +8251,14 @@ case "prop-loaded":
             return;
         }
 
-        var dlg = new Microsoft.Win32.OpenFileDialog
+        var file = await Services.StaFileDialogs.OpenAsync(Window.GetWindow(this), dlg =>
         {
-            Title = "Import animation (.ycd)",
-            Filter = "RAGE animation (*.ycd)|*.ycd|All files (*.*)|*.*",
-        };
-        if (dlg.ShowDialog() != true) return;
+            dlg.Title = "Import animation (.ycd)";
+            dlg.Filter = "RAGE animation (*.ycd)|*.ycd|All files (*.*)|*.*";
+        });
+        if (file is null) return;
 
-        await ImportYcdFileAsync(dlg.FileName);
+        await ImportYcdFileAsync(file);
     }
 
     /// <summary>Parse a .ycd off the UI thread, push it into the viewer,
@@ -7856,19 +8353,19 @@ case "prop-loaded":
             return;
         }
 
-        var dlg = new Microsoft.Win32.OpenFileDialog
+        var file = await Services.StaFileDialogs.OpenAsync(Window.GetWindow(this), dlg =>
         {
-            Title = "Import animation (.glb / .gltf / .fbx / .blend / .dae / .bvh / .package / .ycd / .json)",
-            Filter = "Animations (*.glb;*.gltf;*.fbx;*.blend;*.dae;*.bvh;*.package;*.ycd;*.json)|*.glb;*.gltf;*.fbx;*.blend;*.dae;*.bvh;*.package;*.ycd;*.json|GTA animation (*.ycd)|*.ycd|Sims 4 package (*.package)|*.package|BVH mocap (*.bvh)|*.bvh|Physics mocap (*.json)|*.json|All files (*.*)|*.*",
-        };
-        if (dlg.ShowDialog() != true) return;
+            dlg.Title = "Import animation (.glb / .gltf / .fbx / .blend / .dae / .bvh / .package / .ycd / .json)";
+            dlg.Filter = "Animations (*.glb;*.gltf;*.fbx;*.blend;*.dae;*.bvh;*.package;*.ycd;*.json)|*.glb;*.gltf;*.fbx;*.blend;*.dae;*.bvh;*.package;*.ycd;*.json|GTA animation (*.ycd)|*.ycd|Sims 4 package (*.package)|*.package|BVH mocap (*.bvh)|*.bvh|Physics mocap (*.json)|*.json|All files (*.*)|*.*";
+        });
+        if (file is null) return;
 
         // One entry point for every animation source: .ycd takes the
         // RAGE-native import path, everything else goes through retarget.
-        if (Path.GetExtension(dlg.FileName).Equals(".ycd", StringComparison.OrdinalIgnoreCase))
-            await ImportYcdFileAsync(dlg.FileName);
+        if (Path.GetExtension(file).Equals(".ycd", StringComparison.OrdinalIgnoreCase))
+            await ImportYcdFileAsync(file);
         else
-            await ImportAnimationFileAsync(dlg.FileName);
+            await ImportAnimationFileAsync(file);
     }
 
     // ════════════════════════════════════════════════════════════════
@@ -8692,6 +9189,23 @@ case "prop-loaded":
     /// Undo/Redo buttons re-query CanExecute.</summary>
     public event EventHandler? HistoryChanged;
 
+    /// <summary>Workspace status line (imports, exports, errors) — the window
+    /// mirrors it into the bottom status bar. The bool is "busy": true while a
+    /// long-running step runs, so the bar can show a progress indicator.</summary>
+    public event Action<string, bool>? StatusChanged;
+
+    /// <summary>Wires <see cref="StatusChanged"/> to the view model. Called from
+    /// the constructor.</summary>
+    private void HookStatusRelay()
+    {
+        _vm.PropertyChanged += (_, e) =>
+        {
+            if (e.PropertyName is nameof(PoseToEmoteViewModel.StatusText)
+                or nameof(PoseToEmoteViewModel.IsOperationRunning))
+                StatusChanged?.Invoke(_vm.StatusText, _vm.IsOperationRunning);
+        };
+    }
+
     public bool CanUndoPose => _vm.CanUndo;
     public bool CanRedoPose => _vm.CanRedo;
 
@@ -8700,6 +9214,15 @@ case "prop-loaded":
 
     public void RunOpenRiggedModel() => OnOpenRiggedModel(this, new RoutedEventArgs());
     public void RunImportAnimation() => OnImportAnimation(this, new RoutedEventArgs());
+    public void RunExportPose() => OnExportPose(this, new RoutedEventArgs());
+    public void RunExportSpMenyoo() => OnExportSpMenyoo(this, new RoutedEventArgs());
+    public void RunExportFiveM() => OnExportFiveM(this, new RoutedEventArgs());
+    public void RunExportRpEmotes() => OnExportRpEmotes(this, new RoutedEventArgs());
+    public void RunExportSyncedPair() => OnExportSyncedPair(this, new RoutedEventArgs());
+    public void RunExportDpemotes() => OnExportDpemotes(this, new RoutedEventArgs());
+    public void RunExportYcdXml() => OnExportYcdXml(this, new RoutedEventArgs());
+    public void RunExportPoseJson() => OnExportPoseJson(this, new RoutedEventArgs());
+    public void RunExportGif() => OnExportGif(this, new RoutedEventArgs());
     /// <summary>Reference import from the File menu. <paramref name="only"/> is
     /// "photo", "video", or null for the combined picker on the toolbar.</summary>
     public async void RunImportReference(string? only = null) => await PickReferenceAsync(only);
@@ -9041,9 +9564,6 @@ case "prop-loaded":
             return;
         }
 
-        _vm.IsRecordingPreviewGif = true;
-        _gifRecordTcs = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
-
         try
         {
             if (!_vm.AnimLibraryClipReady)
@@ -9055,6 +9575,49 @@ case "prop-loaded":
                 return;
             }
 
+            var cap = await CaptureViewerGifFramesAsync();
+            if (cap is not { } c) return; // status set by the capture core
+
+            var safeDict = SanitizeFileToken(_vm.SelectedAnimDict.Name);
+            var safeClip = SanitizeFileToken(_vm.SelectedAnimClip);
+            var outPath = await Services.StaFileDialogs.SaveAsync(Window.GetWindow(this), dlg =>
+            {
+                dlg.Title = "Save preview GIF";
+                dlg.Filter = "Animated GIF (*.gif)|*.gif";
+                dlg.FileName = $"{safeDict}_{safeClip}.gif";
+                dlg.DefaultExt = ".gif";
+            });
+            if (outPath is null)
+            {
+                _vm.StatusText = "GIF save cancelled.";
+                return;
+            }
+
+            _vm.StatusText = $"Encoding GIF… ({c.Frames.Count} frames)";
+            await Task.Run(() => PreviewGifEncoder.WriteAnimatedGif(c.Frames, c.Fps, outPath));
+            _vm.StatusText = $"Saved GIF: {Path.GetFileName(outPath)} ({c.Frames.Count} frames)";
+            try { Process.Start(new ProcessStartInfo(outPath) { UseShellExecute = true }); }
+            catch { /* ignore — file is still saved */ }
+        }
+        catch (Exception ex)
+        {
+            _vm.StatusText = "GIF failed: " + ex.Message;
+            FosLogger.Warn("gif", "preview GIF failed", ex);
+        }
+    }
+
+    /// <summary>Shared GIF capture core: pauses playback, records one loop of
+    /// whatever the viewer will play, pulls the JPEG frames. Returns null on
+    /// any failure (StatusText already explains). Used by the Animation
+    /// Library's GIF button and the Export → Animated GIF format.</summary>
+    private async Task<(List<byte[]> Frames, int Fps)?> CaptureViewerGifFramesAsync()
+    {
+        if (!_webViewReady) { _vm.StatusText = "Viewer not ready."; return null; }
+        if (_vm.IsRecordingPreviewGif) return null;
+        _vm.IsRecordingPreviewGif = true;
+        _gifRecordTcs = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        try
+        {
             await Viewport.CoreWebView2.ExecuteScriptAsync("window.posePause && window.posePause()");
             _vm.TimelinePlaying = false;
             UpdatePlayButtonVisual();
@@ -9077,7 +9640,7 @@ case "prop-loaded":
                 }
                 catch { /* ignore */ }
                 _vm.StatusText = "GIF recording timed out.";
-                return;
+                return null;
             }
 
             if (!ok)
@@ -9085,7 +9648,7 @@ case "prop-loaded":
                 if (string.IsNullOrEmpty(_vm.StatusText)
                     || _vm.StatusText.StartsWith("Recording GIF", StringComparison.Ordinal))
                     _vm.StatusText = "GIF recording failed.";
-                return;
+                return null;
             }
 
             _vm.StatusText = "Collecting GIF frames…";
@@ -9100,36 +9663,9 @@ case "prop-loaded":
             if (frames.Count == 0)
             {
                 _vm.StatusText = "GIF recording failed — no frames captured.";
-                return;
+                return null;
             }
-
-            var safeDict = SanitizeFileToken(_vm.SelectedAnimDict.Name);
-            var safeClip = SanitizeFileToken(_vm.SelectedAnimClip);
-            var dlg = new SaveFileDialog
-            {
-                Title = "Save preview GIF",
-                Filter = "Animated GIF (*.gif)|*.gif",
-                FileName = $"{safeDict}_{safeClip}.gif",
-                DefaultExt = ".gif",
-            };
-            if (dlg.ShowDialog() != true)
-            {
-                _vm.StatusText = "GIF save cancelled.";
-                return;
-            }
-
-            _vm.StatusText = $"Encoding GIF… ({frames.Count} frames)";
-            var fps = _gifRecordFps;
-            var outPath = dlg.FileName;
-            await Task.Run(() => PreviewGifEncoder.WriteAnimatedGif(frames, fps, outPath));
-            _vm.StatusText = $"Saved GIF: {Path.GetFileName(outPath)} ({frames.Count} frames)";
-            try { Process.Start(new ProcessStartInfo(outPath) { UseShellExecute = true }); }
-            catch { /* ignore — file is still saved */ }
-        }
-        catch (Exception ex)
-        {
-            _vm.StatusText = "GIF failed: " + ex.Message;
-            FosLogger.Warn("gif", "preview GIF failed", ex);
+            return (frames, _gifRecordFps);
         }
         finally
         {

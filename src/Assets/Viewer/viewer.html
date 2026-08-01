@@ -4471,6 +4471,11 @@ function tick() {
   // `let poseMode` below isn't touched during its temporal dead zone.
   if (poseDotsSyncEnabled && poseMode) { try { updateBoneLines(); } catch (e) {} }
   try { _footVizSync(); } catch (e) {}
+  // Partner ghosts mirror the primary on EVERY painted frame — gizmo drags,
+  // undo, foot-IK settles, movement-mask flips… whatever repainted the scene
+  // repositions the ghosts in the same frame. try-guarded for the same TDZ
+  // reason as above (tick() starts during module init).
+  try { if (syncGhostOn && syncGhosts.length) syncGhostUpdate(); } catch (e) {}
   renderer.render(scene, camera);
   // First real paint after entering pose mode → tell the host so its boot
   // splash can stay up until the rig is actually on screen (not just built),
@@ -5129,7 +5134,7 @@ window.rtPlay = function () {
       }
       else { f = _rt.frames - 1; _rt.playing = false; if (_rt.timelineSync) posePlaying = false; }
     }
-    try { _rtApply(f); }
+    try { _rtApply(f); poseApplyMovementMask(); syncGhostUpdate(); }
     catch (err) {
       // Keep the RAF alive — a foot-plant / followCam exception used to
       // kill the chain and freeze the transport at 0:00 with Play lit.
@@ -8183,6 +8188,301 @@ function poseApplyRoot(rootArr, yaw) {
 // from the host when the Movement dropdown changes (In Place → false, Root
 // Motion → true). Snaps the ped back to base immediately when turning off so a
 // paused frame updates without needing a scrub.
+// ── Synced-emote partner ghosts ────────────────────────────────────────
+// Teal freemode ped "partners" (Male or Female, one or MANY) placed at the
+// sync offsets so the user can SEE where every other player will stand
+// before exporting a shared emote. Each mirrors whatever the main rig is
+// playing (exact for both-play-same-clip shared emotes; a spacing stand-in
+// otherwise). Offsets use GTA semantics: Side = right of the initiator,
+// Front = ahead of them, Height up, Heading = degrees subtracted from the
+// initiator's heading (180 = face them). One partner installs to rpemotes
+// (its Shared format is strictly 2-player); more export as the standalone
+// N-slot resource.
+let syncGhosts = [];      // [{alive, variant, group, ring, body, nodes, mats, front, side, height, heading}]
+let syncGhostOn = false;
+const _syncO = new THREE.Vector3();
+const _syncM1 = new THREE.Matrix4();
+const _syncM2 = new THREE.Matrix4();
+const _syncM3 = new THREE.Matrix4();
+const _syncMI = new THREE.Matrix4(); // identity — "parent" matrix for root nodes
+
+function syncGhostDisposeOne(g) {
+  g.alive = false; // orphans an in-flight glb load for THIS ghost only
+  scene.remove(g.group);
+  if (g.ring) { g.ring.geometry.dispose(); g.ring.material.dispose(); }
+  if (g.body) disposeGroup(g.body);
+  g.ring = null; g.body = null; g.nodes = null; g.mats = null;
+}
+
+window.syncGhostEnable = function (on) {
+  syncGhostOn = !!on;
+  // Always drop the live set — on enable the host immediately re-sends the
+  // partner list (the rig may have been reloaded and stale bone refs would
+  // bake garbage), on disable this is the teardown.
+  for (const g of syncGhosts) syncGhostDisposeOne(g);
+  syncGhosts = [];
+  requestRender();
+};
+
+// The partner body matches the ped already in the preview — the freemode
+// presets carry their variant in the root name, and GTA ped names mark
+// females with an "_f_" segment (mp_f_freemode_01, a_f_y_…). Anything
+// unrecognizable previews with the male body. Preview only — any ped can
+// accept in game.
+function syncGhostAutoVariant() {
+  const n = ((currentModel && currentModel.name) || '').toLowerCase();
+  return (n.includes('female') || /(^|[^a-z])f_/.test(n.replace(/^gtafreemodepreset_/, ''))) ? 'female' : 'male';
+}
+
+// Declarative partner list: [{front, side, height, heading}, ...] (object
+// or JSON string). Diffed against the live set — an offset move just
+// re-places the ghost; a count change (or the primary ped's gender having
+// changed since a ghost was built) rebuilds only the ghosts involved.
+window.syncGhostSetPartners = function (partners) {
+  if (!syncGhostOn) return;
+  let list = partners;
+  if (typeof list === 'string') {
+    try { list = JSON.parse(list); }
+    catch (e) { console.warn('syncGhostSetPartners: bad json', e); return; }
+  }
+  if (!Array.isArray(list)) return;
+  const v = syncGhostAutoVariant();
+  while (syncGhosts.length > list.length) syncGhostDisposeOne(syncGhosts.pop());
+  for (let i = 0; i < list.length; i++) {
+    const p = list[i] || {};
+    let g = syncGhosts[i];
+    if (g && g.variant !== v) { syncGhostDisposeOne(g); g = null; }
+    if (!g) { g = syncGhostCreate(v); syncGhosts[i] = g; }
+    g.front = +p.front || 0;
+    g.side = +p.side || 0;
+    g.height = +p.height || 0;
+    g.heading = +p.heading || 0;
+  }
+  syncGhostUpdate();
+  requestRender();
+};
+
+function syncGhostCreate(v) {
+  const g = {
+    alive: true, variant: v, group: new THREE.Group(),
+    ring: null, body: null, nodes: null, mats: null,
+    front: 1.0, side: 0, height: 0, heading: 180,
+  };
+
+  // Glowing ground ring — same visual language as the selection rings, so
+  // "a character stands HERE" is obvious even while the body streams in.
+  g.ring = new THREE.Mesh(
+    new THREE.RingGeometry(0.30, 0.40, 40),
+    new THREE.MeshBasicMaterial({
+      color: 0x2fe0b4, transparent: true, opacity: 0.65,
+      side: THREE.DoubleSide, depthTest: false,
+    }));
+  g.ring.rotation.x = -Math.PI / 2;
+  g.ring.position.y = 0.02;
+  g.ring.renderOrder = 997;
+  g.ring.frustumCulled = false;
+  g.group.add(g.ring);
+  scene.add(g.group);
+
+  // Partner body: the bundled freemode ped — a real silhouette reads far
+  // better than a stick figure — tinted sync-teal so it stays "the ghost".
+  // If the glb ever fails the ghost degrades to its ring, which still marks
+  // the spot.
+  new GLTFLoader().load(`./reference/freemode_${v}.glb`, gltf => {
+    if (!g.alive) return; // removed / body-swapped while streaming in
+    const root = gltf.scene;
+    root.name = 'SyncGhostBody_' + v;
+
+    // Same helper-strip pass as loadGtaSkeleton — the export bundles a
+    // Mixamo retarget rig, bone-widget gizmos and a floor plane.
+    const hideTopLevelNames = new Set(['MixamoSrc', 'cs_grp', 'Plane', 'IK_Root',
+                                       'LEG_L_IK', 'LEG_R_IK', 'LEG_L_POLE',
+                                       'LEG_R_POLE', 'IK_L_FA', 'IK_R_FA']);
+    const toRemove = [];
+    root.traverse(node => {
+      if (hideTopLevelNames.has(node.name)) toRemove.push(node);
+      if (node.isMesh && node.geometry && node.geometry.attributes.position) {
+        const pc = node.geometry.attributes.position.count;
+        if (pc <= 8 && node.name.toLowerCase().includes('plane')) toRemove.push(node);
+      }
+    });
+    for (const n of toRemove) { if (n.parent) n.parent.remove(n); }
+
+    const bodyMat = new THREE.MeshPhysicalMaterial({
+      color: 0x2fe0b4, metalness: 0.0, roughness: 0.55,
+      transparent: true, opacity: 0.75, side: THREE.DoubleSide, depthWrite: true,
+    });
+    root.traverse(node => {
+      if ((node.isMesh || node.isSkinnedMesh) && node.visible) {
+        node.material = bodyMat;
+        node.castShadow = false;
+        node.receiveShadow = false;
+        node.frustumCulled = false; // skinned bounds fail at extreme poses
+      }
+    });
+
+    // The mirror below drives every bone in PRIMARY-relative world space, so
+    // the glb root sits at identity inside the group — no male π spin, no
+    // ground-snap; the primary's own lift arrives through the bone matrices.
+    root.position.set(0, 0, 0);
+    root.rotation.set(0, 0, 0);
+    root.scale.set(1, 1, 1);
+
+    // DFS once: record every node with parent indices so the per-frame
+    // mirror never allocates. Pose-bone pairing is NOT resolved here —
+    // syncGhostPair() re-resolves it whenever the live rig's bone list
+    // changes identity (rig reload, pose-mode re-entry), so bindings can
+    // never go stale and a load that raced an empty bone list self-heals.
+    g.nodes = [];
+    g.mats = [];
+    (function walk(node, parentIdx) {
+      const idx = g.nodes.length;
+      g.nodes.push({ node, parentIdx, isBone: !!node.isBone, pose: null });
+      g.mats.push(new THREE.Matrix4());
+      for (const c of node.children) walk(c, idx);
+    })(root, -1);
+    g.pairedBones = null; // force a pairing pass on the next mirror
+
+    // Never show an unposed bind-pose body (it would sit half-buried at the
+    // pelvis pivot) — stay hidden until the first mirror pass lands; the
+    // ring already marks the spot.
+    root.visible = false;
+    g.body = root;
+    g.group.add(root);
+    syncGhostUpdate();
+    requestRender();
+  }, undefined, err => {
+    if (!g.alive) return;
+    console.warn('sync ghost freemode glb failed — ring-only partner marker:', err);
+  });
+  return g;
+}
+
+/// (Re)bind a ghost's nodes to same-named bones of the CURRENT rig. Cheap
+/// identity check per frame; the map rebuild only runs when poseBones is a
+/// different array than last time (rig reload / late ghost load).
+function syncGhostPair(g) {
+  if (!g.nodes || g.pairedBones === poseBones) return;
+  const byName = new Map();
+  if (poseBones) {
+    for (const b of poseBones) if (b && b.name && !byName.has(b.name)) byName.set(b.name, b);
+  }
+  g.matched = 0;
+  for (const it of g.nodes) {
+    it.pose = it.isBone ? (byName.get(it.node.name) || null) : null;
+    if (it.pose) g.matched++;
+  }
+  g.pairedBones = poseBones;
+}
+
+/// Mirror the CURRENT posed skeleton (relative to the model origin) onto
+/// every partner body, then place each group at its sync offset. Runs on
+/// every painted frame (see tick()) plus explicit refresh points.
+function syncGhostUpdate() {
+  if (!syncGhostOn || !poseMode || !currentModel || syncGhosts.length === 0) return;
+  currentModel.updateMatrixWorld(true);
+  currentModel.getWorldPosition(_syncO);
+  _syncM1.makeTranslation(-_syncO.x, -_syncO.y, -_syncO.z);
+  for (const g of syncGhosts) {
+    if (g.body && g.nodes) {
+      syncGhostPair(g);
+      // Freemode body: every same-named bone copies the primary bone's
+      // world transform (made primary-relative), parents before children so
+      // each bone's local falls out of its parent's already-mirrored world.
+      for (let i = 0; i < g.nodes.length; i++) {
+        const it = g.nodes[i];
+        const parentM = it.parentIdx < 0 ? _syncMI : g.mats[it.parentIdx];
+        const n = it.node;
+        if (it.pose) {
+          _syncM2.multiplyMatrices(_syncM1, it.pose.matrixWorld);
+          _syncM3.copy(parentM).invert();
+          n.matrix.multiplyMatrices(_syncM3, _syncM2);
+          n.matrix.decompose(n.position, n.quaternion, n.scale);
+          g.mats[i].copy(_syncM2);
+        } else {
+          _syncM2.compose(n.position, n.quaternion, n.scale);
+          g.mats[i].multiplyMatrices(parentM, _syncM2);
+        }
+      }
+      // Only show a body the mirror actually drives — an unmatched body
+      // would be a bind-pose statue half-buried at the pelvis pivot.
+      g.body.visible = g.matched > 0;
+    }
+    // RAGE→viewer axis map: X(right)→X, Y(forward)→−Z, Z(up)→Y. So
+    // GetOffsetFromEntityInWorldCoords(side, front, height) lands at
+    // (side, height, −front) relative to the initiator. Heading is
+    // SUBTRACTED from the initiator's heading in-game; the same relative
+    // turn about the up axis previews as a positive Y rotation here
+    // (180 = partners face each other, which is symmetric either way).
+    g.group.position.set(
+      _syncO.x + g.side,
+      _syncO.y + g.height,
+      _syncO.z - g.front);
+    g.group.rotation.y = THREE.MathUtils.degToRad(g.heading);
+  }
+}
+
+window.syncGhostDiag = function () {
+  return JSON.stringify({
+    on: syncGhostOn,
+    partners: syncGhosts.map(g => ({
+      variant: g.variant, body: !!g.body,
+      matched: g.nodes ? g.nodes.filter(n => n.pose).length : 0,
+      at: [+g.group.position.x.toFixed(2), +g.group.position.y.toFixed(2), +g.group.position.z.toFixed(2)],
+    })),
+    poseMode: !!poseMode, bones: poseBones ? poseBones.length : 0,
+    model: !!currentModel,
+  });
+};
+
+// ── Movement-mode preview mask ─────────────────────────────────────────
+// 'upper' = Upper body (can move): in game the AF_UPPERBODY flag drives only
+// spine-and-up, so the preview must do the same the instant the mode is
+// picked — lower body sits at rest while the upper body plays. 'inplace' and
+// 'root' play the full body (they differ only in root travel, handled by
+// poseSetRootMotionPreview).
+let poseMovementMode = 'root';
+let poseUpperMaskIdx = null;
+const POSE_UPPER_BODY_REGEX = /(spine|neck|head|clav|arm|hand|finger|thumb)/i;
+
+function poseUpperMask() {
+  if (poseUpperMaskIdx && poseUpperMaskIdx.length === poseBones.length) return poseUpperMaskIdx;
+  if (!poseBones || poseBones.length === 0) return null;
+  poseUpperMaskIdx = poseBones.map(b => POSE_UPPER_BODY_REGEX.test(b.name || ''));
+  return poseUpperMaskIdx;
+}
+
+/// Post-evaluation pass: pins the lower body to rest in Upper-body mode.
+/// Runs after playback/scrub evaluation AND inside the export sampler, so the
+/// preview and the .ycd agree with the in-game upper-body flag.
+function poseApplyMovementMask() {
+  if (poseMovementMode !== 'upper') return;
+  const mask = poseUpperMask();
+  if (!mask || !poseInitialQuats || !poseInitialPositions) return;
+  for (let i = 0; i < poseBones.length; i++) {
+    if (mask[i]) continue;
+    if (poseInitialQuats[i]) poseBones[i].quaternion.copy(poseInitialQuats[i]);
+    if (poseInitialPositions[i]) poseBones[i].position.copy(poseInitialPositions[i]);
+  }
+  // The ROOT is lower-body too: in game AF_UPPERBODY never moves the ped, so
+  // the clip's travel AND vertical bounce (jumps) must not play here either.
+  if (poseRootTarget && poseRootBase) {
+    poseRootTarget.position.set(poseRootBase.x, poseRootBase.y, poseRootBase.z);
+    poseApplyRootYaw(undefined);
+  }
+}
+
+window.poseSetMovementMode = function (mode) {
+  const m = mode === 'upper' ? 'upper' : mode === 'inplace' ? 'inplace' : 'root';
+  if (m === poseMovementMode) return;
+  poseMovementMode = m;
+  poseUpperMaskIdx = null; // rig may have changed since last derive
+  // Apply (or lift) the mask immediately — no play tick needed to see it.
+  if (m === 'upper') poseApplyMovementMask();
+  else if (poseMode) window.poseSetTime(poseTime, true);
+  requestRender();
+};
+
 window.poseSetRootMotionPreview = function (enabled) {
   poseRootMotionPreview = enabled !== false;
   try {
@@ -11851,15 +12151,26 @@ window.samplePoseClipForExport = function () {
   }
   const poses = [];
   const roots = [];
+  // Bake the secondary-motion spring into the export. In preview the play
+  // loop integrates poseSecondaryStep(dt) AFTER evaluation (soft head/hand/
+  // finger follow-through, on by default) — without stepping it here too the
+  // .ycd carried only the raw curves and read stiffer than the preview.
+  // Same gate as the play loop: springs run for keyframe/strip playback,
+  // never for the _rt sealed-player path.
+  const rtDriven = !!(_rt && _rt.timelineSync && _rt.tracks.length > 0);
+  const bakeSecondary = !rtDriven && poseSecondaryEnabled;
+  if (bakeSecondary) poseSecondaryReset();
   for (let f = 0; f < frames; f++) {
     const t = t0 + f / fps;
-    if (_rt && _rt.timelineSync && _rt.tracks.length > 0) {
+    if (rtDriven) {
       const frame = (poseDuration > 1e-6 && _rt.frames > 1)
         ? Math.round((t / poseDuration) * (_rt.frames - 1))
         : 0;
       _rtApply(frame);
     } else if (!poseEvaluateStrips(t)) poseEvaluate(t);
     else poseApplyUserLayer(t);
+    if (bakeSecondary) poseSecondaryStep(1 / fps);
+    poseApplyMovementMask();
     poses.push(JSON.parse(window.getPose()));
     if (poseRootTarget && poseRootBase) {
       roots.push([
@@ -11869,6 +12180,8 @@ window.samplePoseClipForExport = function () {
       ]);
     }
   }
+  // Leave no baked spring state behind for the live preview.
+  if (bakeSecondary) poseSecondaryReset();
   return JSON.stringify({
     fps, frames, duration: exportDur, poses, roots,
     source: exportSource, boneSpace: exportBoneSpace,
@@ -11885,7 +12198,9 @@ window.poseSetTime = function (t, scrubbing) {
       ? Math.round((poseTime / poseDuration) * (_rt.frames - 1))
       : 0;
     window.rtSeek(frame);
+    poseApplyMovementMask();
     poseSyncSkeletonMeshes();
+    syncGhostUpdate();
     poseSecondaryReset();
     // Onion skin does two full matrixWorld passes — skip during scrub.
     if (!isScrub) poseUpdateOnionSkin();
@@ -11903,7 +12218,9 @@ window.poseSetTime = function (t, scrubbing) {
   const stripsWrote = poseEvaluateStrips(poseTime);
   if (!stripsWrote) poseEvaluate(poseTime);
   else poseApplyUserLayer(poseTime);
+  poseApplyMovementMask();
   poseSyncSkeletonMeshes();
+  syncGhostUpdate();
   // Foot IK solve is noticeable on dense clips — skip mid-scrub, run on settle.
   if (!isScrub) poseApplyPreviewFootIk();
   // Scrubbing isn't continuous-time motion, so spring follow-through
@@ -11923,13 +12240,20 @@ window.poseSetTime = function (t, scrubbing) {
 };
 
 window.poseSetDuration = function (sec) {
-  poseDuration = Math.max(0.1, Math.min(60, +sec));
+  const next = Math.max(0.1, Math.min(60, +sec));
+  // No-op guard: the host pushes every duration change back down — including
+  // ones WE announced. Re-posting the full key list for an unchanged value fed
+  // an echo loop that fully rebuilt the host timeline repeatedly mid-playback.
+  if (Math.abs(next - poseDuration) < 1e-6) return;
+  poseDuration = next;
   if (poseTime > poseDuration) poseTime = poseDuration;
   postToHost({ kind: 'pose-timeline-update', keyframes: poseKeyframes.map(k => ({ time: k.time, id: k.id, ease: k.ease || 'auto' })), time: poseTime, duration: poseDuration, fps: poseFps, playing: posePlaying });
 };
 
 window.poseSetFps = function (fps) {
-  poseFps = Math.max(1, Math.min(120, Math.round(+fps)));
+  const next = Math.max(1, Math.min(120, Math.round(+fps)));
+  if (next === poseFps) return; // same no-op guard as poseSetDuration
+  poseFps = next;
   postToHost({ kind: 'pose-timeline-update', keyframes: poseKeyframes.map(k => ({ time: k.time, id: k.id, ease: k.ease || 'auto' })), time: poseTime, duration: poseDuration, fps: poseFps, playing: posePlaying });
 };
 
@@ -12060,6 +12384,8 @@ function poseTimelineTick() {
   // state via poseSecondaryReset so a drag doesn't smear motion
   // across silent frames.
   poseSecondaryStep(dt);
+  poseApplyMovementMask();
+  syncGhostUpdate();
   // Onion ghosts only re-pick when the scrubber crosses a key, but
   // re-painting every tick keeps them aligned even if a keyframe
   // pose was edited mid-playback (cheap).

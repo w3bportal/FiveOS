@@ -28,34 +28,49 @@ public partial class TxAdminOptimizeView : UserControl
 
     private TxAdminOptimizeViewModel? Vm => DataContext as TxAdminOptimizeViewModel;
 
-    private void OnBrowseServer(object sender, RoutedEventArgs e)
-    {
-        if (Vm == null) return;
-        var dlg = new OpenFolderDialog
-        {
-            Title = "Pick your FiveM server's resources folder",
-            InitialDirectory = ServerAssetResolver.ServerRoot()
-                ?? Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
-        };
-        if (dlg.ShowDialog() == true)
-        {
-            UserSettings.SaveServerResourceFolder(dlg.FolderName);
-            Vm.RefreshServerFolder();
-        }
-    }
+    // Off-thread dialogs (StaFileDialogs): on this app's contended UI thread
+    // the shell dialog took ~16 s to appear, which made Browse — the tab's
+    // MANDATORY first step — read as "the button did nothing". The guard stops
+    // a double-click from stacking two dialogs.
+    private bool _dialogOpen;
 
-    private void OnLoadLog(object sender, RoutedEventArgs e)
+    private async void OnBrowseServer(object sender, RoutedEventArgs e)
     {
-        if (Vm == null) return;
-        var dlg = new OpenFileDialog
-        {
-            Title = "Load a txAdmin / server console log",
-            Filter = "Log files (*.log;*.txt)|*.log;*.txt|All files (*.*)|*.*",
-        };
-        if (dlg.ShowDialog() != true) return;
+        if (Vm == null || _dialogOpen) return;
+        _dialogOpen = true;
         try
         {
-            Vm.LogText = File.ReadAllText(dlg.FileName);
+            var folder = await StaFileDialogs.OpenFolderAsync(Window.GetWindow(this), dlg =>
+            {
+                dlg.Title = "Pick your FiveM server's resources folder";
+                dlg.InitialDirectory = ServerAssetResolver.ServerRoot()
+                    ?? Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+            });
+            if (folder is null) return;
+            UserSettings.SaveServerResourceFolder(folder);
+            Vm.RefreshServerFolder();
+        }
+        finally { _dialogOpen = false; }
+    }
+
+    private async void OnLoadLog(object sender, RoutedEventArgs e)
+    {
+        if (Vm == null || _dialogOpen) return;
+        _dialogOpen = true;
+        string? file;
+        try
+        {
+            file = await StaFileDialogs.OpenAsync(Window.GetWindow(this), dlg =>
+            {
+                dlg.Title = "Load a txAdmin / server console log";
+                dlg.Filter = "Log files (*.log;*.txt)|*.log;*.txt|All files (*.*)|*.*";
+            });
+        }
+        finally { _dialogOpen = false; }
+        if (file is null) return;
+        try
+        {
+            Vm.LogText = File.ReadAllText(file);
             Vm.ParseAndResolve();
         }
         catch (Exception ex)

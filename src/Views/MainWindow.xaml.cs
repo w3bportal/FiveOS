@@ -169,6 +169,23 @@ public partial class MainWindow : FluentWindow
         // section, so it can't resurrect as a duplicate tab later.
         _vm.DetachEmoteDocument = id => EmotesWorkspace.DetachEmoteDocumentById(id);
         EmotesWorkspace.HistoryChanged += (_, _) => _vm.NotifyHistoryChanged();
+        // Emote workspace status (imports, exports) reports in the shared bottom
+        // status bar. Gated on the workspace being visible so a late-finishing
+        // job can't overwrite whatever view the user has since switched to.
+        EmotesWorkspace.StatusChanged += (text, busy) =>
+        {
+            if (_vm.ActiveView != AppView.Emotes) return;
+            _vm.StatusText = text;
+            _vm.IsStatusBusy = busy;
+        };
+        // Leaving the workspace drops its busy indicator — the gate above would
+        // otherwise swallow the "finished" event and spin the bar forever.
+        _vm.PropertyChanged += (_, e) =>
+        {
+            if (e.PropertyName == nameof(MainViewModel.ActiveView)
+                && _vm.ActiveView != AppView.Emotes)
+                _vm.IsStatusBusy = false;
+        };
         // WebView2 is initialized lazily on first model load (see EnsureWebViewAsync)
         // so the Edge process tree (manager + GPU + storage utility, ~40 MB)
         // doesn't spawn for users who never open the 3D viewer this session.
@@ -1036,6 +1053,60 @@ public partial class MainWindow : FluentWindow
         EmotesWorkspace.RunImportAnimation();
     }
 
+    private void OnFileEmoteExport(object sender, RoutedEventArgs e)
+    {
+        EnsureEmotesView();
+        EmotesWorkspace.RunExportPose();
+    }
+
+    private void OnFileEmoteExportSp(object sender, RoutedEventArgs e)
+    {
+        EnsureEmotesView();
+        EmotesWorkspace.RunExportSpMenyoo();
+    }
+
+    private void OnFileEmoteExportFiveM(object sender, RoutedEventArgs e)
+    {
+        EnsureEmotesView();
+        EmotesWorkspace.RunExportFiveM();
+    }
+
+    private void OnFileEmoteExportRpEmotes(object sender, RoutedEventArgs e)
+    {
+        EnsureEmotesView();
+        EmotesWorkspace.RunExportRpEmotes();
+    }
+
+    private void OnFileEmoteExportSyncedPair(object sender, RoutedEventArgs e)
+    {
+        EnsureEmotesView();
+        EmotesWorkspace.RunExportSyncedPair();
+    }
+
+    private void OnFileEmoteExportDpemotes(object sender, RoutedEventArgs e)
+    {
+        EnsureEmotesView();
+        EmotesWorkspace.RunExportDpemotes();
+    }
+
+    private void OnFileEmoteExportYcdXml(object sender, RoutedEventArgs e)
+    {
+        EnsureEmotesView();
+        EmotesWorkspace.RunExportYcdXml();
+    }
+
+    private void OnFileEmoteExportPoseJson(object sender, RoutedEventArgs e)
+    {
+        EnsureEmotesView();
+        EmotesWorkspace.RunExportPoseJson();
+    }
+
+    private void OnFileEmoteExportGif(object sender, RoutedEventArgs e)
+    {
+        EnsureEmotesView();
+        EmotesWorkspace.RunExportGif();
+    }
+
     private void OnFileEmoteReferencePhoto(object sender, RoutedEventArgs e)
     {
         EnsureEmotesView();
@@ -1126,7 +1197,7 @@ public partial class MainWindow : FluentWindow
     /// whole content column). The <see cref="SettingsView"/> is built on
     /// demand — so its on-load cache scan runs only when the user opens
     /// Settings — and handed the MainViewModel as DataContext for the few
-    /// bindings that need it (e.g. the addons list). <paramref name="onReady"/>
+    /// bindings that need it. <paramref name="onReady"/>
     /// runs once the window has rendered, for deep-links into a section.
     /// </summary>
     private void OpenSettingsModal(Action<SettingsView>? onReady = null)
@@ -1165,22 +1236,24 @@ public partial class MainWindow : FluentWindow
 
     private void OnFileOpenOutput(object sender, RoutedEventArgs e)
     {
-        // Both the 3D-to-Props zip and the Texture Optimize output land
-        // under the user's Downloads folder; just open that.
+        // Open the folder conversions actually target — the server
+        // resource folder when server mode is on, else the configured
+        // single-output folder (Downloads only as the default). A
+        // hardcoded Downloads here showed users an empty folder whenever
+        // output was routed anywhere else.
         try
         {
-            var downloads = Path.Combine(
-                Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
-                "Downloads");
+            var dest = Services.UserSettings.ResolveActiveOutputFolder();
+            Directory.CreateDirectory(dest);
             Process.Start(new ProcessStartInfo
             {
-                FileName = downloads,
+                FileName = dest,
                 UseShellExecute = true,
             });
         }
         catch (Exception ex)
         {
-            _vm.StatusText = $"Couldn't open Downloads: {ex.Message}";
+            _vm.StatusText = $"Couldn't open the output folder: {ex.Message}";
         }
     }
 
@@ -1209,31 +1282,45 @@ public partial class MainWindow : FluentWindow
     private void OnMenuOptimizeModeTxAdmin(object sender, RoutedEventArgs e)
         => _vm.OptimizeVm.Mode = OptimizeMode.TxAdmin;
 
-    private void OnMenuOptimizeAddFiles(object sender, RoutedEventArgs e)
+    // Off-thread dialogs (StaFileDialogs) — the UI-thread shell dialog took
+    // ~16 s to appear here; the guard stops double-click dialog stacking.
+    private bool _optimizePickerOpen;
+
+    private async void OnMenuOptimizeAddFiles(object sender, RoutedEventArgs e)
     {
-        var ov = _vm.OptimizeVm;
-        var dlg = new OpenFileDialog
+        if (_optimizePickerOpen) return;
+        _optimizePickerOpen = true;
+        try
         {
-            Title = ov.IsEmbeddedTexturesMode
+            var ov = _vm.OptimizeVm;
+            var title = ov.IsEmbeddedTexturesMode
                 ? "Add model files (.ydd / .ydr / .yft) to optimize"
-                : $"Add {ov.ActiveExtension.TrimStart('.').ToUpperInvariant()} files to optimize",
-            Filter = ov.ActiveBrowseFilter,
-            Multiselect = true,
-        };
-        if (dlg.ShowDialog(this) == true)
-            ov.AddPaths(dlg.FileNames);
+                : $"Add {ov.ActiveExtension.TrimStart('.').ToUpperInvariant()} files to optimize";
+            var filter = ov.ActiveBrowseFilter;
+            var files = await Services.StaFileDialogs.OpenManyAsync(this, dlg =>
+            {
+                dlg.Title = title;
+                dlg.Filter = filter;
+            });
+            if (files is { Length: > 0 }) ov.AddPaths(files);
+        }
+        finally { _optimizePickerOpen = false; }
     }
 
-    private void OnMenuOptimizeAddFolder(object sender, RoutedEventArgs e)
+    private async void OnMenuOptimizeAddFolder(object sender, RoutedEventArgs e)
     {
-        var dlg = new OpenFolderDialog
+        if (_optimizePickerOpen) return;
+        _optimizePickerOpen = true;
+        try
         {
-            Title = "Pick a folder (a resource or clothing pack) to optimize",
-            Multiselect = true,
-            InitialDirectory = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
-        };
-        if (dlg.ShowDialog(this) == true)
-            _vm.OptimizeVm.AddPaths(dlg.FolderNames);
+            var folders = await Services.StaFileDialogs.OpenFoldersAsync(this, dlg =>
+            {
+                dlg.Title = "Pick a folder (a resource or clothing pack) to optimize";
+                dlg.InitialDirectory = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+            });
+            if (folders is { Length: > 0 }) _vm.OptimizeVm.AddPaths(folders);
+        }
+        finally { _optimizePickerOpen = false; }
     }
 
     private void OnMenuVehiclesCarPack(object sender, RoutedEventArgs e)
@@ -6372,21 +6459,6 @@ public partial class MainWindow : FluentWindow
         if (b < 1024) return $"{b} B";
         if (b < 1024 * 1024) return $"{b / 1024.0:F1} KB";
         return $"{b / (1024.0 * 1024):F1} MB";
-    }
-
-    // ─────────────── Dashboard ───────────────
-
-    /// <summary>
-    /// Click handler shared by all four dashboard tiles. The Border's
-    /// <c>Tag</c> carries the <see cref="AppView"/> name as
-    /// a string; we hand that to the VM's OpenView command so navigation
-    /// stays in one place.
-    /// </summary>
-    private void OnDashboardCardClick(object sender, MouseButtonEventArgs e)
-    {
-        if (sender is not System.Windows.FrameworkElement fe) return;
-        if (fe.Tag is not string view) return;
-        _vm.OpenViewCommand.Execute(view);
     }
 
     private void OnRailMouseEnter(object sender, System.Windows.Input.MouseEventArgs e)

@@ -215,35 +215,48 @@ public partial class OptimizeView : UserControl
         e.Handled = true;
     }
 
-    private void OnDropZoneClick(object sender, RoutedEventArgs e)
+    // Off-thread dialogs — on this app's contended UI thread the shell dialog
+    // took ~16 s to appear, so Browse/Add clicks read as dead buttons. The
+    // guard stops a double-click from stacking two dialogs.
+    private bool _pickerOpen;
+
+    private async void OnDropZoneClick(object sender, RoutedEventArgs e)
     {
-        if (Vm == null) return;
-        var dlg = new OpenFileDialog
+        if (Vm == null || _pickerOpen) return;
+        _pickerOpen = true;
+        try
         {
-            Title = Vm.IsEmbeddedTexturesMode
+            var title = Vm.IsEmbeddedTexturesMode
                 ? "Add model files (.ydd / .ydr / .yft) to optimize"
-                : $"Add {Vm.ActiveExtension.TrimStart('.').ToUpperInvariant()} files to optimize",
-            Filter = Vm.ActiveBrowseFilter,
-            Multiselect = true,
-        };
-        if (dlg.ShowDialog() == true)
-            Vm.AddPaths(dlg.FileNames);
+                : $"Add {Vm.ActiveExtension.TrimStart('.').ToUpperInvariant()} files to optimize";
+            var filter = Vm.ActiveBrowseFilter;
+            var files = await Services.StaFileDialogs.OpenManyAsync(Window.GetWindow(this), dlg =>
+            {
+                dlg.Title = title;
+                dlg.Filter = filter;
+            });
+            if (files is { Length: > 0 }) Vm.AddPaths(files);
+        }
+        finally { _pickerOpen = false; }
     }
 
-    private void OnAddFolder(object sender, RoutedEventArgs e)
+    private async void OnAddFolder(object sender, RoutedEventArgs e)
     {
-        if (Vm == null) return;
-        // A folder picker is the natural way to throw a whole resource or
-        // clothing pack at the optimizer — AddPaths recurses it for every
-        // supported type (.ydr/.ydd/.ytd/.yft) and keeps the subfolders.
-        var dlg = new OpenFolderDialog
+        if (Vm == null || _pickerOpen) return;
+        _pickerOpen = true;
+        try
         {
-            Title = "Pick a folder (a resource or clothing pack) to optimize",
-            Multiselect = true,
-            InitialDirectory = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
-        };
-        if (dlg.ShowDialog() == true)
-            Vm.AddPaths(dlg.FolderNames);
+            // A folder picker is the natural way to throw a whole resource or
+            // clothing pack at the optimizer — AddPaths recurses it for every
+            // supported type (.ydr/.ydd/.ytd/.yft) and keeps the subfolders.
+            var folders = await Services.StaFileDialogs.OpenFoldersAsync(Window.GetWindow(this), dlg =>
+            {
+                dlg.Title = "Pick a folder (a resource or clothing pack) to optimize";
+                dlg.InitialDirectory = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+            });
+            if (folders is { Length: > 0 }) Vm.AddPaths(folders);
+        }
+        finally { _pickerOpen = false; }
     }
 
     private void OnClear(object sender, RoutedEventArgs e) => Vm?.ClearActive();

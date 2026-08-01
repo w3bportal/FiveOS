@@ -301,6 +301,13 @@
                                        Click="OnConvert"
                                        ToolTip="Import queued cars into a FiveM pack." />
                         </Grid>
+                        <ui:Button Content="Add to loaded pack"
+                                   Appearance="Secondary"
+                                   HorizontalAlignment="Stretch"
+                                   Margin="0,6,0,0"
+                                   IsEnabled="{Binding CanAddToLoadedPack}"
+                                   Click="OnAddToLoadedPack"
+                                   ToolTip="Merge the queued cars INTO the currently-loaded resource folder. The previous version is kept beside it as a timestamped .backup folder." />
 
                         <Grid Margin="0,0,0,10">
                             <Grid.ColumnDefinitions>

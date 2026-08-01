@@ -58,15 +58,21 @@ public partial class TxAdminOptimizeViewModel : ObservableObject
     [ObservableProperty] private string _serverFolderDisplay = "";
     [ObservableProperty] private bool _hasServerFolder;
 
-    /// <summary>Re-read the configured server resources folder, drop the
-    /// resolver cache, and re-resolve any rows already parsed.</summary>
+    private string? _lastResolvedRoot;
+
+    /// <summary>Re-read the configured server resources folder; only drop the
+    /// resolver cache and re-resolve when the root actually CHANGED — this is
+    /// called on every tab show, and re-walking a 100k-file server tree each
+    /// time froze the app just for switching back to the tab.</summary>
     public void RefreshServerFolder()
     {
         var root = ServerAssetResolver.ServerRoot();
         HasServerFolder = root != null;
         ServerFolderDisplay = root ?? "No server resources folder set — click Browse to point at your /resources.";
+        if (string.Equals(root, _lastResolvedRoot, StringComparison.OrdinalIgnoreCase)) return;
+        _lastResolvedRoot = root;
         ServerAssetResolver.InvalidateCache();
-        if (Rows.Count > 0) ResolveAll();
+        if (Rows.Count > 0) _ = ResolveAllAsync();
     }
 
     // ─── Options ─────────────────────────────────────────────────────────
@@ -140,22 +146,36 @@ public partial class TxAdminOptimizeViewModel : ObservableObject
         foreach (var w in warnings)
             Rows.Add(new TxAdminAssetRow(w));
 
-        ResolveAll();
-
         if (warnings.Count == 0)
         {
             Summary = "No streaming warnings found in that text. Paste the full console log including the \"uses … MiB of physical memory\" lines.";
+            RaiseQueueState();
         }
-        RaiseQueueState();
         _setStatus($"txAdmin: parsed {warnings.Count} warning(s)");
+        _ = ResolveAllAsync();
     }
 
     /// <summary>(Re)resolve every row against the current server folder and
-    /// refresh the summary counts.</summary>
-    private void ResolveAll()
+    /// refresh the summary counts. The tree walks run OFF the UI thread —
+    /// resolving dozens of rows against a big server used to freeze the app
+    /// with no feedback, which read as "the tab did nothing".</summary>
+    private async Task ResolveAllAsync()
     {
-        foreach (var row in Rows)
-            row.Resolve();
+        if (Rows.Count == 0) return;
+        var rows = Rows.ToList();
+        Summary = $"Resolving {rows.Count} asset(s) against the server folder…";
+        try
+        {
+            await Task.Run(() =>
+            {
+                foreach (var row in rows)
+                    row.Resolve();
+            });
+        }
+        catch (Exception ex)
+        {
+            FosLogger.Warn("txadmin", "resolve failed", ex);
+        }
 
         int resolved = Rows.Count(r => r.Found);
         int unsupported = Rows.Count(r => !r.Supported);
@@ -206,8 +226,7 @@ public partial class TxAdminOptimizeViewModel : ObservableObject
         // One backup root per run, created lazily on the first real write.
         string? backupRoot = BackupOriginals
             ? Path.Combine(
-                Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
-                "Downloads",
+                Services.UserSettings.GetDownloadsFolder(),
                 "FiveOS_txAdmin_Backup_" + DateTime.Now.ToString("yyyyMMdd-HHmmss"))
             : null;
 
@@ -307,6 +326,10 @@ public partial class TxAdminOptimizeViewModel : ObservableObject
 
     private static void BackupOriginal(TxAdminAssetRow row, string backupRoot)
     {
+        // No silent-swallow: the confirm dialog promises "originals will be
+        // backed up first", so a failed backup must ABORT this asset (the
+        // caller's per-asset catch marks the row failed) — never proceed to
+        // overwrite a file we couldn't back up.
         try
         {
             var dst = Path.Combine(backupRoot, row.ResourceName, row.FileName);
@@ -316,6 +339,7 @@ public partial class TxAdminOptimizeViewModel : ObservableObject
         catch (Exception ex)
         {
             FosLogger.Warn("txadmin", $"backup failed for {row.FileName}", ex);
+            throw new IOException($"backup failed — asset skipped ({ex.Message})", ex);
         }
     }
 

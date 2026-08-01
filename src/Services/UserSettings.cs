@@ -138,38 +138,6 @@ public static class UserSettings
         /// expands transiently when unpinned.</summary>
         public bool RailPinned { get; set; } = true;
 
-        /// <summary>Plugin ids the user has enabled. Discovered plugins
-        /// in <c>%AppData%\FiveOS\plugins\</c> are listed in Settings →
-        /// Addons but only render rail entries / load their views when
-        /// their id is in this set.</summary>
-        public List<string>? EnabledPluginIds { get; set; }
-
-        /// <summary>Plugin ids the user has explicitly trusted to run as
-        /// .NET DLLs. DLL plugins run with full process trust, so the
-        /// host pops a one-time confirmation dialog before first enable
-        /// and remembers the answer here. HTML plugins skip the gate
-        /// because they're sandboxed inside WebView2.
-        /// LEGACY field — kept so old installs that trusted plugins
-        /// before content-hash verification was added don't lose the
-        /// flag. New trust now writes <see cref="TrustedDllPluginHashes"/>;
-        /// the legacy bool here only kicks in as a one-time bridge.</summary>
-        public List<string>? TrustedDllPluginIds { get; set; }
-
-        /// <summary>Plugin-id → SHA-256 hex of the DLL bytes the user
-        /// trusted. Re-verified on every load: if the DLL on disk
-        /// hashes to a different value (rebuild, swap, tamper) the
-        /// trust is treated as invalid and the prompt re-fires. Closes
-        /// the "trust once, owned forever" hole where anyone with
-        /// write access to the plugins folder could swap a trusted DLL
-        /// for a malicious one and inherit the trust.</summary>
-        public Dictionary<string, string>? TrustedDllPluginHashes { get; set; }
-
-        /// <summary>Per-plugin key/value scratch space. Plugins read/write
-        /// via <see cref="IFiveOSHost.GetSetting"/>/<c>SetSetting</c>;
-        /// each plugin's bucket is its own inner dict so ids namespace
-        /// each other automatically.</summary>
-        public Dictionary<string, Dictionary<string, string>>? PluginSettings { get; set; }
-
         /// <summary>Most-recently-opened file paths (models the user picked),
         /// newest first, capped. Feeds the Welcome screen's Recent Files list.</summary>
         public List<string>? RecentFiles { get; set; }
@@ -188,6 +156,10 @@ public static class UserSettings
 
         /// <summary>Last <see cref="ViewModels.AppView"/> name (e.g. "Props", "Emotes").</summary>
         public string? LastActiveView { get; set; }
+
+        /// <summary>User's rpemotes-reborn resource folder for the
+        /// "Add to RPEmotes" export (remembered across sessions).</summary>
+        public string? RpEmotesFolder { get; set; }
 
         /// <summary>FiveOS Cloud Motion API base URL (e.g. http://localhost:5216).</summary>
         public string? MotionCloudBaseUrl { get; set; }
@@ -332,7 +304,7 @@ public static class UserSettings
                 // Atomic write: serialize to a temp file, then swap it in. A
                 // crash/power-loss mid-write leaves either the old file or the
                 // new one fully intact — never a truncated settings.json that
-                // Read() would discard, wiping output paths + plugin-trust hashes.
+                // Read() would discard, wiping output paths + API keys.
                 File.WriteAllText(tmp, json);
                 if (File.Exists(FilePath)) File.Replace(tmp, FilePath, null);
                 else File.Move(tmp, FilePath);
@@ -513,6 +485,15 @@ public static class UserSettings
 
     public static string? LoadLastActiveView() => Read().LastActiveView;
 
+    public static string? LoadRpEmotesFolder() => Read().RpEmotesFolder;
+
+    public static void SaveRpEmotesFolder(string? folder)
+    {
+        var b = Read();
+        b.RpEmotesFolder = string.IsNullOrWhiteSpace(folder) ? null : folder;
+        Write(b);
+    }
+
     public static void SaveWorkspaceSession(
         IEnumerable<WorkspaceSessionTabBlob> tabs,
         int activeIndex,
@@ -647,15 +628,68 @@ public static class UserSettings
     }
 
     /// <summary>Resolve the single-mode destination, falling back to the
-    /// user's Downloads folder when nothing is configured.</summary>
+    /// user's Downloads folder when nothing is configured. A configured
+    /// folder that doesn't exist yet is (re)created rather than silently
+    /// abandoned — otherwise output quietly reroutes to Downloads while
+    /// Settings still shows the custom path, and the user finds "nothing
+    /// there" in the folder they're watching.</summary>
     public static string ResolveSingleOutputFolder()
     {
         var p = LoadSingleOutputFolder();
-        if (!string.IsNullOrWhiteSpace(p) && Directory.Exists(p)) return p!;
+        if (!string.IsNullOrWhiteSpace(p))
+        {
+            try
+            {
+                Directory.CreateDirectory(p!);
+                return p!;
+            }
+            catch { /* unreachable drive / bad path — fall back below */ }
+        }
+        return GetDownloadsFolder();
+    }
+
+    /// <summary>The folder conversion output actually targets right now —
+    /// the server resource folder when server mode is active, else the
+    /// single-mode zip destination. This is the ONE path "Open output
+    /// folder" affordances should open; anything else shows the user an
+    /// empty folder while their output lands elsewhere.</summary>
+    public static string ResolveActiveOutputFolder()
+        => IsServerModeActive() ? LoadServerResourceFolder()! : ResolveSingleOutputFolder();
+
+    /// <summary>The user's REAL Downloads folder via the shell's known-
+    /// folder registry — respects Downloads being relocated to another
+    /// drive or into OneDrive. <c>%USERPROFILE%\Downloads</c> is only the
+    /// fallback; writing there unconditionally drops files into a phantom
+    /// folder the user's Explorer "Downloads" never shows.</summary>
+    public static string GetDownloadsFolder()
+    {
+        try
+        {
+            // FOLDERID_Downloads
+            var guid = new Guid("374DE290-123F-4565-9164-39C4925E467B");
+            int hr = SHGetKnownFolderPath(ref guid, 0, IntPtr.Zero, out var ptr);
+            if (hr == 0 && ptr != IntPtr.Zero)
+            {
+                try
+                {
+                    var path = System.Runtime.InteropServices.Marshal.PtrToStringUni(ptr);
+                    if (!string.IsNullOrWhiteSpace(path)) return path!;
+                }
+                finally
+                {
+                    System.Runtime.InteropServices.Marshal.FreeCoTaskMem(ptr);
+                }
+            }
+        }
+        catch { /* fall through to the profile-relative guess */ }
         return Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
             "Downloads");
     }
+
+    [System.Runtime.InteropServices.DllImport("shell32.dll")]
+    private static extern int SHGetKnownFolderPath(
+        ref Guid rfid, uint dwFlags, IntPtr hToken, out IntPtr ppszPath);
 
     // ─── Reference ped (scale-comparison preview) ─────────────────────
 
@@ -768,79 +802,6 @@ public static class UserSettings
     {
         var b = Read();
         b.EnableDiscordPresence = enable;
-        Write(b);
-    }
-
-    // ─── Third-party plugins ──────────────────────────────────────────
-
-    public static bool LoadPluginEnabled(string id)
-        => Read().EnabledPluginIds?.Contains(id) ?? false;
-
-    public static void SavePluginEnabled(string id, bool enable)
-    {
-        var b = Read();
-        b.EnabledPluginIds ??= new List<string>();
-        if (enable && !b.EnabledPluginIds.Contains(id))
-            b.EnabledPluginIds.Add(id);
-        else if (!enable)
-            b.EnabledPluginIds.RemoveAll(x => x == id);
-        Write(b);
-    }
-
-    public static bool LoadPluginTrusted(string id)
-        => Read().TrustedDllPluginIds?.Contains(id) ?? false;
-
-    public static void SavePluginTrusted(string id, bool trusted)
-    {
-        var b = Read();
-        b.TrustedDllPluginIds ??= new List<string>();
-        if (trusted && !b.TrustedDllPluginIds.Contains(id))
-            b.TrustedDllPluginIds.Add(id);
-        else if (!trusted)
-        {
-            b.TrustedDllPluginIds.RemoveAll(x => x == id);
-            // Also drop any stored hash so a re-grant requires the full
-            // prompt path, not just the legacy bool fallback.
-            b.TrustedDllPluginHashes?.Remove(id);
-        }
-        Write(b);
-    }
-
-    /// <summary>Look up the SHA-256 of the DLL the user trusted for
-    /// this plugin id. Null when no hash has been stored yet (fresh
-    /// install OR a legacy trust that pre-dates hash verification).</summary>
-    public static string? LoadPluginTrustedHash(string id)
-    {
-        var dict = Read().TrustedDllPluginHashes;
-        return dict != null && dict.TryGetValue(id, out var h) ? h : null;
-    }
-
-    /// <summary>Record the SHA-256 the user explicitly trusted. Pass
-    /// null to clear the binding (e.g. on un-trust).</summary>
-    public static void SavePluginTrustedHash(string id, string? sha256)
-    {
-        var b = Read();
-        b.TrustedDllPluginHashes ??= new Dictionary<string, string>();
-        if (sha256 == null) b.TrustedDllPluginHashes.Remove(id);
-        else                b.TrustedDllPluginHashes[id] = sha256;
-        Write(b);
-    }
-
-    public static string? LoadPluginSetting(string pluginId, string key)
-    {
-        var dict = Read().PluginSettings;
-        if (dict == null) return null;
-        return dict.TryGetValue(pluginId, out var bucket) && bucket.TryGetValue(key, out var v) ? v : null;
-    }
-
-    public static void SavePluginSetting(string pluginId, string key, string? value)
-    {
-        var b = Read();
-        b.PluginSettings ??= new Dictionary<string, Dictionary<string, string>>();
-        if (!b.PluginSettings.TryGetValue(pluginId, out var bucket))
-            b.PluginSettings[pluginId] = bucket = new Dictionary<string, string>();
-        if (value == null) bucket.Remove(key);
-        else bucket[key] = value;
         Write(b);
     }
 

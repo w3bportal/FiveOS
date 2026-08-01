@@ -106,8 +106,8 @@
                             <ComboBox SelectedIndex="{Binding AggressivenessIndex, Mode=TwoWay}"
                                       HorizontalAlignment="Stretch"
                                       ToolTip="How far Auto is allowed to push.">
-                                <ComboBoxItem Content="Just-enough (quality-first)" ToolTip="Stop the moment each asset is under 16 MiB; never downscale below 512px. Densest assets that can't clear within that cap are flagged for Manual." />
-                                <ComboBoxItem Content="Fully clear (more aggressive)" ToolTip="Keep escalating (incl. 512→256px / heavier decimation) until every asset is under 16 MiB. More visible quality loss." />
+                                <ComboBoxItem Content="Just-enough (quality-first)" ToolTip="Cap textures at 2048px, then 1024px if still over 16 MiB — never below 1024. Assets that can't clear within that cap are flagged for Manual." />
+                                <ComboBoxItem Content="Fully clear (more aggressive)" ToolTip="Keep escalating the texture cap (2048 → 1024 → 512px) and geometry decimation until every asset is under 16 MiB. More visible quality loss." />
                                 <ComboBoxItem Content="Only the severe &gt;48 MiB tier" ToolTip="Target ≤48 MiB — removes only the red 'Oversized assets WILL cause streaming issues' warnings. Near-lossless; leaves mild &gt;16 MiB ones." />
                             </ComboBox>
                         </StackPanel>

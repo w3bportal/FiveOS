@@ -648,16 +648,26 @@ public partial class PoseToEmoteViewModel : ObservableObject
     /// secondary bones (head, hands, hair, spine tip, tail). Default
     /// on. Pushes the toggle state down to the JS evaluator via the
     /// host's view-changed hook.</summary>
-    /// <summary>Emote playback mode: 0 = in place, 1 = upper body, 2 = root
-    /// motion (ped travels). Default is root motion — imported / library
-    /// clips should move. Static pose emotes force in-place on export.</summary>
-    // Default to Root motion (ped travels): imported clips keep their baked mover
-    // so the ped physically moves in-game. The Movement dropdown switches to
-    // In Place / Upper body when a clip should stay put.
+    /// <summary>Emote playback mode, stored as the <see cref="Services.EmoteMovement"/>
+    /// value (1 = upper body, 2 = root motion). In-place was retired from the
+    /// UI — a legacy saved 0 maps to root motion, and static pose emotes still
+    /// force in-place on export via <see cref="EffectiveExportMovement"/>.</summary>
     [ObservableProperty] private int _movementIndex = (int)Services.EmoteMovement.RootMotion;
 
     public Services.EmoteMovement Movement =>
-        (Services.EmoteMovement)System.Math.Clamp(MovementIndex, 0, (int)Services.EmoteMovement.RootMotion);
+        MovementIndex == (int)Services.EmoteMovement.UpperBody
+            ? Services.EmoteMovement.UpperBody
+            : Services.EmoteMovement.RootMotion;
+
+    /// <summary>The two-item Movement dropdown (0 = Upper body, 1 = Root
+    /// motion) mapped onto the enum-valued <see cref="MovementIndex"/>.</summary>
+    public int MovementComboIndex
+    {
+        get => Movement == Services.EmoteMovement.UpperBody ? 0 : 1;
+        set => MovementIndex = value == 0
+            ? (int)Services.EmoteMovement.UpperBody
+            : (int)Services.EmoteMovement.RootMotion;
+    }
 
     /// <summary>Movement used for export: static poses stay in-place; animated
     /// clips honour the combo (default root motion).</summary>
@@ -691,6 +701,7 @@ public partial class PoseToEmoteViewModel : ObservableObject
 
     partial void OnMovementIndexChanged(int value)
     {
+        OnPropertyChanged(nameof(MovementComboIndex));
         OnPropertyChanged(nameof(RootMotionScaleEnabled));
         OnPropertyChanged(nameof(FootPlantControlsEnabled));
     }

@@ -36,8 +36,6 @@
             <conv:NullToVisibilityConverter x:Key="NullToVisibility" />
             <conv:StringEqualsMultiConverter x:Key="StringEquals" />
             <conv:PathToImageSourceConverter x:Key="PathToImageSource" />
-            <conv:FileExistsToBoolConverter x:Key="FileExistsToBool" />
-            <conv:FileMissingToVisibilityConverter x:Key="FileMissingToVisibility" />
             <conv:MaterialPresetIsConverter x:Key="MaterialPresetIs" />
 
             <DataTemplate DataType="{x:Type vm:OptimizeViewModel}">

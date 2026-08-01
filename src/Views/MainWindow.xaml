@@ -390,8 +390,7 @@
                          ShowMinimize="True"
                          ShowClose="True" />
 
-            <!-- C4D-style: larger logo + "App vX - [document] - Main".
-                 Logo / title click returns to the dashboard (GoHome). -->
+            <!-- C4D-style: larger logo + "App vX - [document] - Main". -->
             <Button HorizontalAlignment="Left"
                     VerticalAlignment="Center"
                     Margin="8,0,0,0"
@@ -399,9 +398,7 @@
                     Panel.ZIndex="1"
                     Background="Transparent"
                     BorderThickness="0"
-                    Cursor="Hand"
-                    Command="{Binding GoHomeCommand}"
-                    ToolTip="Home — dashboard"
+                    IsHitTestVisible="False"
                     shell:WindowChrome.IsHitTestVisibleInChrome="True">
                 <StackPanel Orientation="Horizontal">
                     <Image Source="pack://application:,,,/Assets/Branding/FiveOS.png"
@@ -608,14 +605,6 @@
                     <!-- ── File ── -->
                     <MenuItem Header="{loc:Loc Menu.File}"
                               Style="{StaticResource C4DTopLevelMuted}">
-                        <MenuItem Header="Dashboard"
-                                  Style="{StaticResource C4DMenuCommand}"
-                                  Command="{Binding GoHomeCommand}"
-                                  ToolTip="Back to the home tile screen">
-                            <MenuItem.Icon>
-                                <ui:SymbolIcon Symbol="Home24" FontSize="14" />
-                            </MenuItem.Icon>
-                        </MenuItem>
                         <MenuItem Header="Welcome screen"
                                   Style="{StaticResource C4DMenuCommand}"
                                   Click="OnShowWelcome"
@@ -765,37 +754,6 @@
                         </MenuItem>
 
                         <!-- Emotes -->
-                        <MenuItem Header="Open"
-                                  Style="{StaticResource C4DMenuCommand}"
-                                  Visibility="{Binding IsEmotesView, Converter={StaticResource BooleanToVisibility}}">
-                            <MenuItem.Icon>
-                                <ui:SymbolIcon Symbol="FolderOpen24" FontSize="14" />
-                            </MenuItem.Icon>
-                            <MenuItem Header="Open Rig…"
-                                      Style="{StaticResource C4DMenuCommand}"
-                                      Click="OnFileEmoteOpenRig"
-                                      ToolTip="Load a rigged .glb / .fbx into Emotes">
-                                <MenuItem.Icon>
-                                    <ui:SymbolIcon Symbol="FolderOpen24" FontSize="14" />
-                                </MenuItem.Icon>
-                            </MenuItem>
-                            <MenuItem Header="GTA Male"
-                                      Style="{StaticResource C4DMenuCommand}"
-                                      Click="OnFileEmoteGtaMale"
-                                      ToolTip="Freemode male skeleton preset">
-                                <MenuItem.Icon>
-                                    <ui:SymbolIcon Symbol="Person24" FontSize="14" />
-                                </MenuItem.Icon>
-                            </MenuItem>
-                            <MenuItem Header="GTA Female"
-                                      Style="{StaticResource C4DMenuCommand}"
-                                      Click="OnFileEmoteGtaFemale"
-                                      ToolTip="Freemode female skeleton preset">
-                                <MenuItem.Icon>
-                                    <ui:SymbolIcon Symbol="Person24" FontSize="14" />
-                                </MenuItem.Icon>
-                            </MenuItem>
-                        </MenuItem>
                         <MenuItem Header="Import"
                                   Style="{StaticResource C4DMenuCommand}"
                                   Visibility="{Binding IsEmotesView, Converter={StaticResource BooleanToVisibility}}">
@@ -833,6 +791,78 @@
                                       ToolTip="New — FiveOS Motion: turn a video into an editable emote">
                                 <MenuItem.Icon>
                                     <ui:SymbolIcon Symbol="Sparkle24" FontSize="14" Foreground="#FFE0C070" />
+                                </MenuItem.Icon>
+                            </MenuItem>
+                        </MenuItem>
+                        <MenuItem Header="Export"
+                                  Style="{StaticResource C4DMenuCommand}"
+                                  Visibility="{Binding IsEmotesView, Converter={StaticResource BooleanToVisibility}}">
+                            <MenuItem.Icon>
+                                <ui:SymbolIcon Symbol="ArrowExportUp24" FontSize="14" />
+                            </MenuItem.Icon>
+                            <MenuItem Header="Single Player / Menyoo…"
+                                      Style="{StaticResource C4DMenuCommand}"
+                                      Click="OnFileEmoteExportSp"
+                                      ToolTip="Raw .ycd — drop into a dlc/mods rpf with OpenIV and play by dict name">
+                                <MenuItem.Icon>
+                                    <ui:SymbolIcon Symbol="Person24" FontSize="14" />
+                                </MenuItem.Icon>
+                            </MenuItem>
+                            <MenuItem Header="FiveM Resource…"
+                                      Style="{StaticResource C4DMenuCommand}"
+                                      Click="OnFileEmoteExportFiveM"
+                                      ToolTip="Self-contained resource folder — drop into resources/ and ensure it">
+                                <MenuItem.Icon>
+                                    <ui:SymbolIcon Symbol="Server24" FontSize="14" />
+                                </MenuItem.Icon>
+                            </MenuItem>
+                            <MenuItem Header="Add to RPEmotes"
+                                      Style="{StaticResource C4DMenuCommandNew}"
+                                      Click="OnFileEmoteExportRpEmotes"
+                                      ToolTip="New — install straight into your rpemotes-reborn resource as an addon emote">
+                                <MenuItem.Icon>
+                                    <ui:SymbolIcon Symbol="EmojiHand24" FontSize="14" Foreground="#FFE0C070" />
+                                </MenuItem.Icon>
+                            </MenuItem>
+                            <MenuItem Header="Synced Emote (2+ players)…"
+                                      Style="{StaticResource C4DMenuCommandNew}"
+                                      Click="OnFileEmoteExportSyncedPair"
+                                      ToolTip="New — shared emote for two players or a whole group: place the partner ghosts in the viewport, then install with the exact sync offsets">
+                                <MenuItem.Icon>
+                                    <ui:SymbolIcon Symbol="People24" FontSize="14" Foreground="#FFE0C070" />
+                                </MenuItem.Icon>
+                            </MenuItem>
+                            <MenuItem Header="dpemotes pack…"
+                                      Style="{StaticResource C4DMenuCommand}"
+                                      Click="OnFileEmoteExportDpemotes"
+                                      ToolTip="A .zip to merge into a classic dpemotes install">
+                                <MenuItem.Icon>
+                                    <ui:SymbolIcon Symbol="FolderZip24" FontSize="14" />
+                                </MenuItem.Icon>
+                            </MenuItem>
+                            <Separator Style="{StaticResource C4DMenuSeparator}" />
+                            <MenuItem Header="CodeWalker XML…"
+                                      Style="{StaticResource C4DMenuCommand}"
+                                      Click="OnFileEmoteExportYcdXml"
+                                      ToolTip="The .ycd.xml source — compile or inspect with CodeWalker">
+                                <MenuItem.Icon>
+                                    <ui:SymbolIcon Symbol="Code24" FontSize="14" />
+                                </MenuItem.Icon>
+                            </MenuItem>
+                            <MenuItem Header="Pose JSON…"
+                                      Style="{StaticResource C4DMenuCommand}"
+                                      Click="OnFileEmoteExportPoseJson"
+                                      ToolTip="Share a pose between FiveOS users without baking a .ycd">
+                                <MenuItem.Icon>
+                                    <ui:SymbolIcon Symbol="DocumentText24" FontSize="14" />
+                                </MenuItem.Icon>
+                            </MenuItem>
+                            <MenuItem Header="Animated GIF…"
+                                      Style="{StaticResource C4DMenuCommand}"
+                                      Click="OnFileEmoteExportGif"
+                                      ToolTip="Record one loop of the current clip as a shareable GIF">
+                                <MenuItem.Icon>
+                                    <ui:SymbolIcon Symbol="Gif24" FontSize="14" />
                                 </MenuItem.Icon>
                             </MenuItem>
                         </MenuItem>
@@ -1172,55 +1202,6 @@
                         </TextBlock>
                     </Border>
 
-                    <ItemsControl ItemsSource="{Binding EnabledPluginRailEntries}"
-                                  VerticalAlignment="Stretch">
-                        <ItemsControl.ItemsPanel>
-                            <ItemsPanelTemplate>
-                                <StackPanel Orientation="Horizontal" />
-                            </ItemsPanelTemplate>
-                        </ItemsControl.ItemsPanel>
-                        <ItemsControl.ItemTemplate>
-                            <DataTemplate>
-                                <Border Tag="{Binding RailTag}"
-                                        ToolTip="{Binding Name}"
-                                        MouseLeftButtonUp="OnRailItemClick">
-                                    <Border.Style>
-                                        <Style TargetType="Border" BasedOn="{StaticResource LayoutTab}">
-                                            <Style.Triggers>
-                                                <DataTrigger Value="True">
-                                                    <DataTrigger.Binding>
-                                                        <MultiBinding Converter="{StaticResource StringEquals}">
-                                                            <Binding Path="DataContext.ActivePluginId" RelativeSource="{RelativeSource AncestorType=Window}" />
-                                                            <Binding Path="Id" />
-                                                        </MultiBinding>
-                                                    </DataTrigger.Binding>
-                                                    <Setter Property="BorderBrush" Value="{DynamicResource SystemAccentColorBrush}" />
-                                                </DataTrigger>
-                                            </Style.Triggers>
-                                        </Style>
-                                    </Border.Style>
-                                    <TextBlock Text="{Binding Name}" TextTrimming="CharacterEllipsis" MaxWidth="100">
-                                        <TextBlock.Style>
-                                            <Style TargetType="TextBlock" BasedOn="{StaticResource LayoutTabLabel}">
-                                                <Style.Triggers>
-                                                    <DataTrigger Value="True">
-                                                        <DataTrigger.Binding>
-                                                            <MultiBinding Converter="{StaticResource StringEquals}">
-                                                                <Binding Path="DataContext.ActivePluginId" RelativeSource="{RelativeSource AncestorType=Window}" />
-                                                                <Binding Path="Id" />
-                                                            </MultiBinding>
-                                                        </DataTrigger.Binding>
-                                                        <Setter Property="FontStyle" Value="Italic" />
-                                                        <Setter Property="Foreground" Value="{DynamicResource TextFillColorPrimaryBrush}" />
-                                                    </DataTrigger>
-                                                </Style.Triggers>
-                                            </Style>
-                                        </TextBlock.Style>
-                                    </TextBlock>
-                                </Border>
-                            </DataTemplate>
-                        </ItemsControl.ItemTemplate>
-                    </ItemsControl>
                 </StackPanel>
             </Grid>
         </Border>
@@ -1232,85 +1213,6 @@
 
                 <!-- The actual view-swap container. -->
                 <Grid>
-
-                <!-- ════ DASHBOARD (landing screen) ════ -->
-                <Grid Visibility="{Binding IsDashboard, Converter={StaticResource BooleanToVisibility}}">
-                    <Grid.Resources>
-                        <Style x:Key="DashTile" TargetType="Border">
-                            <Setter Property="Width" Value="238" />
-                            <Setter Property="Height" Value="158" />
-                            <Setter Property="Margin" Value="9" />
-                            <Setter Property="Padding" Value="18,16" />
-                            <Setter Property="CornerRadius" Value="10" />
-                            <Setter Property="Background" Value="{DynamicResource ControlFillColorDefaultBrush}" />
-                            <Setter Property="BorderThickness" Value="1" />
-                            <Setter Property="BorderBrush" Value="{DynamicResource ControlElevationBorderBrush}" />
-                            <Setter Property="Cursor" Value="Hand" />
-                            <Style.Triggers>
-                                <Trigger Property="IsMouseOver" Value="True">
-                                    <Setter Property="Background" Value="{DynamicResource SubtleFillColorTertiaryBrush}" />
-                                    <Setter Property="BorderBrush" Value="{DynamicResource AccentControlElevationBorderBrush}" />
-                                </Trigger>
-                            </Style.Triggers>
-                        </Style>
-                    </Grid.Resources>
-                    <ScrollViewer VerticalScrollBarVisibility="Auto">
-                        <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center" Margin="24,28">
-                            <TextBlock Text="{loc:Loc Dashboard.Welcome}"
-                                       FontSize="30" FontWeight="SemiBold" HorizontalAlignment="Center" />
-                            <TextBlock Text="{loc:Loc Dashboard.Subtitle}"
-                                       FontSize="14" Opacity="0.6" HorizontalAlignment="Center" Margin="0,4,0,26" />
-                            <WrapPanel HorizontalAlignment="Center" MaxWidth="796">
-                                <Border Style="{StaticResource DashTile}" Tag="Props" MouseLeftButtonUp="OnDashboardCardClick">
-                                    <StackPanel>
-                                        <ui:SymbolIcon Symbol="Cube24" FontSize="26" />
-                                        <TextBlock Text="{loc:Loc Dashboard.PropsTitle}" FontSize="16" FontWeight="SemiBold" Margin="0,10,0,4" />
-                                        <TextBlock Text="{loc:Loc Dashboard.PropsDesc}" FontSize="11" Opacity="0.65" TextWrapping="Wrap" />
-                                    </StackPanel>
-                                </Border>
-                                <Border Style="{StaticResource DashTile}" Tag="Optimize" MouseLeftButtonUp="OnDashboardCardClick">
-                                    <StackPanel>
-                                        <ui:SymbolIcon Symbol="Sparkle24" FontSize="26" />
-                                        <TextBlock Text="{loc:Loc Dashboard.OptimizeTitle}" FontSize="16" FontWeight="SemiBold" Margin="0,10,0,4" />
-                                        <TextBlock Text="{loc:Loc Dashboard.OptimizeDesc}" FontSize="11" Opacity="0.65" TextWrapping="Wrap" />
-                                    </StackPanel>
-                                </Border>
-                                <Border Style="{StaticResource DashTile}" Tag="TxAdmin" MouseLeftButtonUp="OnDashboardCardClick"
-                                        Visibility="{Binding LevelStandardPlus, Converter={StaticResource BooleanToVisibility}}">
-                                    <StackPanel>
-                                        <ui:SymbolIcon Symbol="Server24" FontSize="26" />
-                                        <TextBlock Text="{loc:Loc Dashboard.TxAdminTitle}" FontSize="16" FontWeight="SemiBold" Margin="0,10,0,4" />
-                                        <TextBlock Text="{loc:Loc Dashboard.TxAdminDesc}" FontSize="11" Opacity="0.65" TextWrapping="Wrap" />
-                                    </StackPanel>
-                                </Border>
-                                <Border Style="{StaticResource DashTile}" Tag="Emotes" MouseLeftButtonUp="OnDashboardCardClick"
-                                        Visibility="{Binding LevelStandardPlus, Converter={StaticResource BooleanToVisibility}}">
-                                    <StackPanel>
-                                        <ui:SymbolIcon Symbol="EmojiHand24" FontSize="26" />
-                                        <TextBlock Text="{loc:Loc Dashboard.EmotesTitle}" FontSize="16" FontWeight="SemiBold" Margin="0,10,0,4" />
-                                        <TextBlock Text="{loc:Loc Dashboard.EmotesDesc}" FontSize="11" Opacity="0.65" TextWrapping="Wrap" />
-                                    </StackPanel>
-                                </Border>
-                                <Border Style="{StaticResource DashTile}" Tag="Vehicles" MouseLeftButtonUp="OnDashboardCardClick"
-                                        Visibility="{Binding LevelStandardPlus, Converter={StaticResource BooleanToVisibility}}">
-                                    <StackPanel>
-                                        <ui:SymbolIcon Symbol="VehicleCar24" FontSize="26" />
-                                        <TextBlock Text="{loc:Loc Dashboard.VehiclesTitle}" FontSize="16" FontWeight="SemiBold" Margin="0,10,0,4" />
-                                        <TextBlock Text="{loc:Loc Dashboard.VehiclesDesc}" FontSize="11" Opacity="0.65" TextWrapping="Wrap" />
-                                    </StackPanel>
-                                </Border>
-                                <Border Style="{StaticResource DashTile}" Tag="Rpf" MouseLeftButtonUp="OnDashboardCardClick"
-                                        Visibility="{Binding LevelStandardPlus, Converter={StaticResource BooleanToVisibility}}">
-                                    <StackPanel>
-                                        <ui:SymbolIcon Symbol="Archive24" FontSize="26" />
-                                        <TextBlock Text="{loc:Loc Dashboard.RpfTitle}" FontSize="16" FontWeight="SemiBold" Margin="0,10,0,4" />
-                                        <TextBlock Text="{loc:Loc Dashboard.RpfDesc}" FontSize="11" Opacity="0.65" TextWrapping="Wrap" />
-                                    </StackPanel>
-                                </Border>
-                            </WrapPanel>
-                        </StackPanel>
-                    </ScrollViewer>
-                </Grid>
 
                 <!-- ════ 3D → PROP VIEW ════ -->
                 <Grid Visibility="{Binding IsPropsView, Converter={StaticResource BooleanToVisibility}}">
@@ -3440,15 +3342,6 @@
                     <local:PoseToEmoteView x:Name="EmotesWorkspace" />
                 </Grid>
 
-                <!-- ════ PLUGIN HOST ════
-                     Renders the active third-party plugin's view. Mutually
-                     exclusive with the built-in views — IsPluginActive
-                     forces every IsXView flag false above so this Grid
-                     ends up alone on top. -->
-                <Grid Visibility="{Binding IsPluginActive, Converter={StaticResource BooleanToVisibility}}">
-                    <ContentControl Content="{Binding ActivePluginView}" />
-                </Grid>
-
                 </Grid>
                 <!-- /view-swap container -->
 
@@ -3520,13 +3413,23 @@
                     <ColumnDefinition Width="Auto" />
                 </Grid.ColumnDefinitions>
 
-                <TextBlock Grid.Column="0"
-                           Text="{Binding StatusText}"
-                           FontSize="12"
-                           Opacity="0.85"
-                           FontFamily="Consolas"
-                           VerticalAlignment="Center"
-                           TextTrimming="CharacterEllipsis" />
+                <!-- Busy strip + status line. The indeterminate bar is the only
+                     progress affordance for non-blocking work (animation
+                     imports, mocap) — they report here, not in a floating HUD. -->
+                <StackPanel Grid.Column="0" Orientation="Horizontal">
+                    <ProgressBar IsIndeterminate="True"
+                                 Width="52"
+                                 Height="4"
+                                 Margin="0,0,10,0"
+                                 VerticalAlignment="Center"
+                                 Visibility="{Binding IsStatusBusy, Converter={StaticResource BooleanToVisibility}}" />
+                    <TextBlock Text="{Binding StatusText}"
+                               FontSize="12"
+                               Opacity="0.85"
+                               FontFamily="Consolas"
+                               VerticalAlignment="Center"
+                               TextTrimming="CharacterEllipsis" />
+                </StackPanel>
 
                 <!-- (Update badge moved to the title bar's top-right corner.) -->
 

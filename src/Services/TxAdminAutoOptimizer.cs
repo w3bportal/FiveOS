@@ -98,33 +98,46 @@ public sealed class TxAdminAutoOptimizer
         var tempFile = Path.Combine(tempDir, Path.GetFileName(path));
         try
         {
-            // Threshold = (texture W+H) trigger: higher touches only the biggest
-            // textures, lower reaches smaller ones. JustEnough/SevereOnly stop
-            // at 2048 (1024px → 512px) so 512px-and-smaller textures stay sharp;
-            // FullyClear is allowed to push 256px-and-up down too.
-            ushort[] ladder = plan.Auto
+            // CAP ladder, not a trigger ladder. The old DownSize-only ladder
+            // halved each texture at most ONCE no matter the step — an 80 MiB
+            // 4K-heavy vehicle YTD could never get under the 16 MiB target, so
+            // the server printed the same oversized warnings after "optimizing"
+            // (the reported "txAdmin did nothing"). MaxSize halves REPEATEDLY
+            // until each texture fits the cap, so each ladder step genuinely
+            // escalates: 2048px cap → 1024 → 512 (FullyClear only).
+            int[] ladder = plan.Auto
                 ? plan.Level == Aggressiveness.FullyClear
-                    ? new ushort[] { 8192, 4096, 2048, 1024, 512 }
-                    : new ushort[] { 8192, 4096, 2048 }
-                : new[] { plan.ManualThreshold };
+                    ? new[] { 2048, 1024, 512 }
+                    : new[] { 2048, 1024 }
+                : new[] { 0 };   // manual: single pass with the user's trigger
 
             byte[]? bestBytes = null;
             float bestPhys = beforePhys;
             int bestTex = 0;
-            ushort bestThreshold = 0;
+            int bestThreshold = 0;
             bool cleared = false;
 
-            foreach (var threshold in ladder)
+            foreach (var cap in ladder)
             {
                 cancel.ThrowIfCancellationRequested();
                 File.WriteAllBytes(tempFile, original);   // pristine each step
 
-                var opts = new YtdOptimizer.Options(
-                    DownSize: plan.Auto || plan.ManualDownsize,
-                    FormatOptimization: !plan.Auto && plan.ManualFormatOpt,
-                    OptimizeSizeThreshold: threshold,
-                    OnlyOversized: false,
-                    BackupRoot: null);
+                // Auto: cap-based (trigger = 2×cap so anything over the cap is
+                // touched). Manual keeps the user's explicit single-halve pass.
+                var opts = plan.Auto
+                    ? new YtdOptimizer.Options(
+                        DownSize: true,
+                        FormatOptimization: false,
+                        OptimizeSizeThreshold: (ushort)System.Math.Min(ushort.MaxValue, cap * 2),
+                        OnlyOversized: false,
+                        BackupRoot: null,
+                        MaxSize: cap)
+                    : new YtdOptimizer.Options(
+                        DownSize: plan.ManualDownsize,
+                        FormatOptimization: plan.ManualFormatOpt,
+                        OptimizeSizeThreshold: plan.ManualThreshold,
+                        OnlyOversized: false,
+                        BackupRoot: null);
 
                 var r = _ytd.Optimize(tempDir, opts, onFile: null, progress: null, cancel: cancel)
                     .FirstOrDefault();
@@ -136,7 +149,7 @@ public sealed class TxAdminAutoOptimizer
                     bestBytes = File.ReadAllBytes(tempFile);
                     bestPhys = r.PhysicalMbAfter;
                     bestTex = r.TexturesOptimized;
-                    bestThreshold = threshold;
+                    bestThreshold = plan.Auto ? cap : plan.ManualThreshold;
                 }
 
                 if (r.PhysicalMbAfter <= target) { cleared = true; break; }
@@ -151,8 +164,12 @@ public sealed class TxAdminAutoOptimizer
 
             File.WriteAllBytes(path, bestBytes!);
             var detail = cleared
-                ? $"downscaled {PxLabel(bestThreshold)} · {bestTex} tex → {bestPhys:F1} MiB"
-                : $"downscaled {PxLabel(bestThreshold)} · {bestTex} tex → {bestPhys:F1} MiB (still > {target:F0}, needs Manual)";
+                ? (plan.Auto
+                    ? $"capped at {bestThreshold}px · {bestTex} tex → {bestPhys:F1} MiB"
+                    : $"downscaled {PxLabel((ushort)bestThreshold)} · {bestTex} tex → {bestPhys:F1} MiB")
+                : (plan.Auto
+                    ? $"capped at {bestThreshold}px · {bestTex} tex → {bestPhys:F1} MiB (still > {target:F0}, needs Manual)"
+                    : $"downscaled {PxLabel((ushort)bestThreshold)} · {bestTex} tex → {bestPhys:F1} MiB (still > {target:F0}, needs Manual)");
             return new Outcome(beforePhys, bestPhys, cleared, true, bestTex, 0, 0, detail, null);
         }
         finally { TryDeleteDir(tempDir); }
@@ -188,10 +205,13 @@ public sealed class TxAdminAutoOptimizer
                 // dictionary — escalate the embedded-TXD threshold and keep
                 // (nearly) all geometry. The decimator always trims ≥5%, which
                 // is visually negligible.
+                // Same cap-ladder rationale as the YTD path: TextureMaxSize
+                // halves repeatedly until each embedded texture fits the cap,
+                // where the old trigger-only ladder halved at most once.
                 ushort[] texLadder = plan.Auto
                     ? plan.Level == Aggressiveness.FullyClear
-                        ? new ushort[] { 8192, 4096, 2048, 1024 }
-                        : new ushort[] { 8192, 4096, 2048 }
+                        ? new ushort[] { 2048, 1024, 512 }
+                        : new ushort[] { 2048, 1024 }
                     : new[] { plan.ManualThreshold };
 
                 foreach (var t in texLadder)
@@ -203,8 +223,9 @@ public sealed class TxAdminAutoOptimizer
                         OptimizeEmbeddedTextures: true,
                         TextureDownsize: true,
                         TextureFormatOptimization: false,
-                        TextureSizeThreshold: t,
-                        TexturesOnly: true);   // leave geometry untouched — only the embedded TXD
+                        TextureSizeThreshold: plan.Auto ? (ushort)System.Math.Min(ushort.MaxValue, t * 2) : t,
+                        TexturesOnly: true,    // leave geometry untouched — only the embedded TXD
+                        TextureMaxSize: plan.Auto ? t : 0);
                     var r = RunDrawable(ext, origCopy, tempOut, opts);
                     if (r.Error != null) return new Outcome(before, before, false, false, 0, 0, 0, "drawable error", r.Error);
 

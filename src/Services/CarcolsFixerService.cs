@@ -448,8 +448,7 @@ public sealed class CarcolsFixerService
         var result = new ApplyResult();
         string? backupRoot = backup
             ? System.IO.Path.Combine(
-                Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
-                "Downloads",
+                UserSettings.GetDownloadsFolder(),
                 "FiveOS_Carcols_Backup_" + DateTime.Now.ToString("yyyyMMdd-HHmmss"))
             : null;
 

@@ -1069,7 +1069,7 @@ public partial class VehiclesViewModel : ObservableObject
         // Imported mods live under %TEMP% — nobody can find output there.
         // Default those (and packs built from them) into Downloads instead.
         if (IsUnderTemp(parent))
-            parent = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), "Downloads");
+            parent = Services.UserSettings.GetDownloadsFolder();
         // For a pack, prefer the pack name the user typed for the folder stem.
         var stem = MergeIntoPack && !string.IsNullOrWhiteSpace(PackName) ? PackName.Trim() : name;
         OutputPath = Path.Combine(parent, stem + "_fivem");
@@ -1109,6 +1109,7 @@ public partial class VehiclesViewModel : ObservableObject
     private void RaiseState()
     {
         OnPropertyChanged(nameof(HasInput));
+        OnPropertyChanged(nameof(CanAddToLoadedPack));
         OnPropertyChanged(nameof(HasRows));
         OnPropertyChanged(nameof(HasQueue));
         OnPropertyChanged(nameof(QueueCountText));
@@ -1171,6 +1172,103 @@ public partial class VehiclesViewModel : ObservableObject
     {
         _cts?.Cancel();
         PostStatus("Cancelling — finishing the current car…");
+    }
+
+    /// <summary>True when queued cars can be merged INTO the currently-loaded
+    /// resource folder (Load folder / New template first, then queue cars).</summary>
+    public bool CanAddToLoadedPack => !IsProcessing && HasInput
+        && !string.IsNullOrWhiteSpace(LastOutputPath)
+        && Directory.Exists(LastOutputPath)
+        && File.Exists(Path.Combine(LastOutputPath, "fxmanifest.lua"));
+
+    /// <summary>Merge the queued car mods into the LOADED pack: the existing
+    /// resource is fed to the converter as one more source alongside the new
+    /// mods, rebuilt under its own name in a temp dir, and swapped in — the
+    /// previous version stays next to it as a timestamped .backup folder.</summary>
+    public async Task AddToLoadedPackAsync()
+    {
+        if (!CanAddToLoadedPack) return;
+        var packDir = LastOutputPath.TrimEnd('\\', '/');
+        var packName = new DirectoryInfo(packDir).Name;
+        var tempRoot = Path.Combine(Path.GetTempPath(), "FiveOS", "vehpack-merge",
+            Guid.NewGuid().ToString("N")[..8]);
+
+        IsProcessing = true;
+        _cts = new CancellationTokenSource();
+        Rows.Clear();
+        ReviewNotes.Clear();
+        OnPropertyChanged(nameof(HasReviewNotes));
+        Summary = $"Adding {InputPaths.Count} car(s) to '{packName}'…";
+        RaiseState();
+        try
+        {
+            Directory.CreateDirectory(tempRoot);
+            var inputs = new List<string> { packDir };
+            inputs.AddRange(InputPaths);
+            var opts = new SpVehicleConverter.Options(packName, MergeAll: true);
+
+            var conv = new SpVehicleConverter();
+            SpVehicleConverter.Result? res = null;
+            var token = _cts.Token;
+            await Task.Run(() =>
+                res = conv.Convert(inputs, tempRoot, opts, msg => PostStatus(msg), token));
+
+            if (res == null) return;
+            foreach (var f in res.Files) Rows.Add(new RpfFileRow(f));
+            foreach (var w in res.Warnings) ReviewNotes.Add("⚠ " + w);
+            OnPropertyChanged(nameof(HasReviewNotes));
+
+            if (!res.Success || res.OutputPath == null)
+            {
+                Summary = $"Failed: {res.Error ?? "merge produced no output"}";
+                _setStatus(Summary);
+                return;
+            }
+
+            // Swap the rebuilt pack into place; keep the old one as a backup.
+            var backup = packDir + ".backup-" + DateTime.Now.ToString("yyyyMMdd-HHmmss");
+            Directory.Move(packDir, backup);
+            try
+            {
+                Directory.Move(res.OutputPath, packDir);
+            }
+            catch
+            {
+                // Restore the original on a failed swap — never leave the
+                // user's pack missing.
+                if (!Directory.Exists(packDir) && Directory.Exists(backup))
+                    Directory.Move(backup, packDir);
+                throw;
+            }
+
+            InputPaths.Clear();
+            Queue.Clear();
+            LoadResourceFolder(packDir);
+            Summary = $"Added to '{packName}' — now {res.Models.Count} vehicle(s): "
+                + $"{string.Join(", ", res.Models)}. Previous version kept at {Path.GetFileName(backup)}.";
+            _setStatus(Summary);
+        }
+        catch (OperationCanceledException)
+        {
+            Summary = "Cancelled.";
+        }
+        catch (Exception ex)
+        {
+            Summary = "Add to pack failed: " + ex.Message;
+            _setStatus(Summary);
+        }
+        finally
+        {
+            try
+            {
+                if (Directory.Exists(tempRoot)
+                    && tempRoot.StartsWith(Path.GetTempPath(), StringComparison.OrdinalIgnoreCase))
+                    Directory.Delete(tempRoot, recursive: true);
+            }
+            catch { /* best-effort temp cleanup */ }
+            IsProcessing = false;
+            RaiseState();
+        }
     }
 
     public async Task ConvertAsync()

@@ -25,10 +25,10 @@ public enum GizmoMode { Move, Rotate, Scale }
 public enum ExportMode { Prop }
 
 /// <summary>
-/// Top-level view shown by MainWindow. Replaces the previous tab strip:
-/// the app boots into <see cref="Dashboard"/> (4 home-screen tiles) and
-/// drills into one of the feature panes when a tile is clicked. The
-/// header back button (visible when not on Dashboard) returns to it.
+/// Top-level view shown by MainWindow. The app boots straight into the
+/// last-used feature pane (first run: Emotes) — navigation lives in the
+/// activity rail. <see cref="Dashboard"/> is retired UI; the member stays
+/// only so saved-view strings from older builds still parse.
 /// </summary>
 public enum AppView { Dashboard, Props, AnimatedProps, Optimize, Rpf, Vehicles, ImageTo3D, Emotes }
 
@@ -67,11 +67,6 @@ public partial class MainViewModel : ObservableObject
         // default for new users; controls across the app bind their
         // Always run in Advanced mode — beginner/standard tiers removed.
         _experienceLevel = 2;
-
-        // Discover third-party plugins from %AppData%\FiveOS\plugins\.
-        // Discovery is cheap (manifest reads only); each plugin's view is
-        // built lazily on first activation by the rail click handler.
-        RefreshPlugins();
 
         // Keep the GLASS sidebar section in sync with layer Material → Glass.
         ModelParts.CollectionChanged += OnModelPartsCollectionChanged;
@@ -167,7 +162,7 @@ public partial class MainViewModel : ObservableObject
         // Open a single tab for the last active page — not the whole prior
         // strip (Assets + leftover Emotes / GTA Male, etc.).
         var viewName = Services.UserSettings.LoadLastActiveView();
-        AppView view = AppView.Props;
+        AppView view = AppView.Emotes;   // first-run landing (dashboard retired)
         if (!string.IsNullOrWhiteSpace(viewName)
             && Enum.TryParse<AppView>(viewName, ignoreCase: true, out var parsed)
             && parsed is not AppView.Dashboard)
@@ -1475,13 +1470,18 @@ public partial class MainViewModel : ObservableObject
     [ObservableProperty]
     private string _statusText = "Ready — drop a 3D file or use File → Open";
 
+    /// <summary>True while a workspace reports a long-running step (animation
+    /// import, mocap). Drives the status bar's progress indicator — the work is
+    /// non-blocking, so nothing else in the UI is disabled by it.</summary>
+    [ObservableProperty]
+    private bool _isStatusBusy;
+
     /// <summary>Currently-shown top-level view. Defaults to <see cref="AppView.Dashboard"/>;
     /// the four IsXView projections below are what the XAML binds against
     /// for visibility, since DataTriggers comparing against an enum value
     /// in markup are awkward. <see cref="ActiveViewTitle"/> drives the
     /// header label.</summary>
     [ObservableProperty]
-    [NotifyPropertyChangedFor(nameof(IsDashboard))]
     [NotifyPropertyChangedFor(nameof(IsPropsView))]
     [NotifyPropertyChangedFor(nameof(IsAnimatedPropsView))]
     [NotifyPropertyChangedFor(nameof(IsOptimizeView))]
@@ -1523,161 +1523,26 @@ public partial class MainViewModel : ObservableObject
             OptimizeVm.Mode = OptimizeMode.Props;
     }
 
-    // All built-in IsXView flags suppress when a plugin is the active
-    // pane content — otherwise the previously-active built-in Grid would
-    // still render under the plugin host because Visibility binds to
-    // these flags directly. Same when Settings is open, so WebView2
+    // All built-in IsXView flags suppress when Settings is open, so WebView2
     // HwndHosts drop their native windows (airspace) and Settings paints cleanly.
-    public bool IsDashboard      => !IsPluginActive && !IsSettingsOpen && ActiveView == AppView.Dashboard;
     /// <summary>Static Props and Animated share the same convert workspace.</summary>
-    public bool IsPropsView      => !IsPluginActive && !IsSettingsOpen && ActiveView is AppView.Props or AppView.AnimatedProps;
-    public bool IsAnimatedPropsView => !IsPluginActive && !IsSettingsOpen && ActiveView == AppView.AnimatedProps;
-    public bool IsOptimizeView   => !IsPluginActive && !IsSettingsOpen && ActiveView == AppView.Optimize;
-    public bool IsRpfView        => !IsPluginActive && !IsSettingsOpen && ActiveView == AppView.Rpf;
-    public bool IsVehiclesView   => !IsPluginActive && !IsSettingsOpen && ActiveView == AppView.Vehicles;
-    public bool IsImageTo3DView  => !IsPluginActive && !IsSettingsOpen && ActiveView == AppView.ImageTo3D;
-    public bool IsEmotesView     => !IsPluginActive && !IsSettingsOpen && ActiveView == AppView.Emotes;
+    public bool IsPropsView      => !IsSettingsOpen && ActiveView is AppView.Props or AppView.AnimatedProps;
+    public bool IsAnimatedPropsView => !IsSettingsOpen && ActiveView == AppView.AnimatedProps;
+    public bool IsOptimizeView   => !IsSettingsOpen && ActiveView == AppView.Optimize;
+    public bool IsRpfView        => !IsSettingsOpen && ActiveView == AppView.Rpf;
+    public bool IsVehiclesView   => !IsSettingsOpen && ActiveView == AppView.Vehicles;
+    public bool IsImageTo3DView  => !IsSettingsOpen && ActiveView == AppView.ImageTo3D;
+    public bool IsEmotesView     => !IsSettingsOpen && ActiveView == AppView.Emotes;
     /// <summary>True when the Assets rail entry is active — Props and
     /// Animated (prop) share one rail slot and the top segmented toggle.
     /// Vehicles is its own rail peer.</summary>
-    public bool Is3DView         => !IsPluginActive && !IsSettingsOpen
+    public bool Is3DView         => !IsSettingsOpen
         && ActiveView is AppView.Props or AppView.AnimatedProps;
 
     /// <summary>True when Edit (undo/redo) applies — Assets prop workspace.</summary>
     public bool ShowAssetsEditMenu => Is3DView;
     /// <summary>True when View (reference ped / layers) applies.</summary>
     public bool ShowAssetsViewMenu => Is3DView;
-
-    /// <summary>True if any addon is enabled — drives the visibility of the
-    /// rail's "ADDONS" divider + caption so they only appear once at least
-    /// one addon row is going to show beneath them. Counts any enabled
-    /// discovered plugin.</summary>
-    public bool HasAnyAddons => EnabledPluginRailEntries.Count > 0;
-
-    // ── Plugins (third-party addons from %AppData%\FiveOS\plugins\) ───
-
-    /// <summary>Every plugin discovered on disk, regardless of enable state.
-    /// Drives the Settings → Addons list (each row gets its own enable
-    /// toggle).</summary>
-    public ObservableCollection<PluginRailEntry> AllPlugins { get; } = new();
-
-    /// <summary>Subset of <see cref="AllPlugins"/> the user has switched
-    /// on. Drives the rail's per-plugin entries; toggling a plugin in
-    /// Settings appends/removes a row here in lockstep.</summary>
-    public ObservableCollection<PluginRailEntry> EnabledPluginRailEntries { get; } = new();
-
-    /// <summary>Re-scan the plugins directory on disk and rebuild
-    /// <see cref="AllPlugins"/>. Async so the file I/O + JSON parsing
-    /// doesn't block the UI thread when the folder grows. Anything
-    /// currently enabled survives the rebuild as long as a plugin with
-    /// the same id is still discovered.</summary>
-    public async Task RefreshPluginsAsync()
-    {
-        foreach (var old in AllPlugins)
-            old.PropertyChanged -= OnPluginEntryChanged;
-
-        var records = await FiveOS.Plugins.PluginManager.DiscoverAsync();
-        AllPlugins.Clear();
-        EnabledPluginRailEntries.Clear();
-        foreach (var rec in records)
-        {
-            var entry = new PluginRailEntry(rec)
-            {
-                IsEnabled = Services.UserSettings.LoadPluginEnabled(rec.Id),
-            };
-            entry.PropertyChanged += OnPluginEntryChanged;
-            AllPlugins.Add(entry);
-            if (entry.IsEnabled && !rec.IsIncompatible)
-                EnabledPluginRailEntries.Add(entry);
-        }
-        OnPropertyChanged(nameof(HasAnyAddons));
-    }
-
-    /// <summary>Synchronous discovery for app startup — keeps the
-    /// constructor non-async. Replaced by <see cref="RefreshPluginsAsync"/>
-    /// at runtime when the user clicks Refresh.</summary>
-    public void RefreshPlugins()
-    {
-        foreach (var old in AllPlugins)
-            old.PropertyChanged -= OnPluginEntryChanged;
-
-        AllPlugins.Clear();
-        EnabledPluginRailEntries.Clear();
-        foreach (var rec in FiveOS.Plugins.PluginManager.Discover())
-        {
-            var entry = new PluginRailEntry(rec)
-            {
-                IsEnabled = Services.UserSettings.LoadPluginEnabled(rec.Id),
-            };
-            entry.PropertyChanged += OnPluginEntryChanged;
-            AllPlugins.Add(entry);
-            if (entry.IsEnabled && !rec.IsIncompatible)
-                EnabledPluginRailEntries.Add(entry);
-        }
-        OnPropertyChanged(nameof(HasAnyAddons));
-    }
-
-    private void OnPluginEntryChanged(object? sender, PropertyChangedEventArgs e)
-    {
-        if (sender is not PluginRailEntry entry) return;
-        if (e.PropertyName != nameof(PluginRailEntry.IsEnabled)) return;
-        Services.UserSettings.SavePluginEnabled(entry.Record.Id, entry.IsEnabled);
-
-        if (entry.IsEnabled)
-        {
-            if (!EnabledPluginRailEntries.Contains(entry)) EnabledPluginRailEntries.Add(entry);
-        }
-        else
-        {
-            EnabledPluginRailEntries.Remove(entry);
-            if (string.Equals(ActivePluginId, entry.Record.Id, System.StringComparison.OrdinalIgnoreCase))
-                ActiveView = AppView.Props;  // bounce out of a now-hidden plugin
-        }
-        OnPropertyChanged(nameof(HasAnyAddons));
-    }
-
-    /// <summary>Id of the currently-active plugin, or null when a built-in
-    /// view (Props/Optimize/ImageTo3D) is showing. The view-swap
-    /// container reads this to decide whether to show the plugin host.</summary>
-    [ObservableProperty]
-    [NotifyPropertyChangedFor(nameof(IsPluginActive))]
-    private string? _activePluginId;
-
-    public bool IsPluginActive => !string.IsNullOrEmpty(ActivePluginId);
-
-    partial void OnActivePluginIdChanged(string? value)
-    {
-        // Re-poke the IsXView projections — they all depend on
-        // IsPluginActive, but the source-generated NotifyPropertyChangedFor
-        // attributes on ActiveView don't fire when ActivePluginId changes.
-        OnPropertyChanged(nameof(IsDashboard));
-        OnPropertyChanged(nameof(IsPropsView));
-        OnPropertyChanged(nameof(IsAnimatedPropsView));
-        OnPropertyChanged(nameof(IsOptimizeView));
-        OnPropertyChanged(nameof(IsRpfView));
-        OnPropertyChanged(nameof(IsVehiclesView));
-        OnPropertyChanged(nameof(IsImageTo3DView));
-        OnPropertyChanged(nameof(IsEmotesView));
-        OnPropertyChanged(nameof(Is3DView));
-        OnPropertyChanged(nameof(ShowAssetsEditMenu));
-        OnPropertyChanged(nameof(ShowAssetsViewMenu));
-        OnPropertyChanged(nameof(ActivePluginView));
-    }
-
-    /// <summary>The view to host when a plugin is active. Looked up lazily
-    /// off <see cref="ActivePluginId"/> so plugins that aren't activated
-    /// never instantiate.</summary>
-    public System.Windows.Controls.UserControl? ActivePluginView
-    {
-        get
-        {
-            if (string.IsNullOrEmpty(ActivePluginId)) return null;
-            foreach (var p in AllPlugins)
-                if (string.Equals(p.Record.Id, ActivePluginId, System.StringComparison.OrdinalIgnoreCase))
-                    return p.GetOrCreateView();
-            return null;
-        }
-    }
 
     public string ActiveViewTitle => ActiveView switch
     {
@@ -1692,23 +1557,14 @@ public partial class MainViewModel : ObservableObject
     };
 
     /// <summary>Bound to dashboard tiles AND the rail click handler. Accepts
-    /// <see cref="AppView"/> names, the synthetic "3D" tag (restores last
-    /// 3D sub-mode), and "plugin:&lt;id&gt;" to activate a discovered plugin.
-    /// Built-in view targets clear <see cref="ActivePluginId"/> so the
-    /// plugin host collapses out of the way.</summary>
+    /// <see cref="AppView"/> names and the synthetic "3D" tag (restores last
+    /// 3D sub-mode).</summary>
     [RelayCommand]
     private void OpenView(string view)
     {
         if (string.IsNullOrEmpty(view)) return;
 
-        if (view.StartsWith("plugin:", System.StringComparison.OrdinalIgnoreCase))
-        {
-            ActivePluginId = view.Substring("plugin:".Length);
-            return;
-        }
-
-        // Built-in target — drop any active plugin / Settings pane first.
-        ActivePluginId = null;
+        // Built-in target — drop any open Settings pane first.
         IsSettingsOpen = false;
 
         // Assets rail entry — keep the current sub-mode if already inside
@@ -1845,14 +1701,6 @@ public partial class MainViewModel : ObservableObject
     /// mode. Consumed by MainWindow / PoseToEmoteView, then cleared.</summary>
     public bool OpenEmotesAsAnimLibrary { get; set; }
 
-    [RelayCommand]
-    private void GoHome()
-    {
-        IsSettingsOpen = false;
-        ActivePluginId = null;
-        ActiveView = AppView.Dashboard;
-    }
-
     // ── Activity rail (collapsible left nav) ───────────────────────
     //
     // The rail has two width states: 48 (icon-only) and 180 (icon +
@@ -1883,7 +1731,6 @@ public partial class MainViewModel : ObservableObject
     /// collapses and the Settings host fills the content column.</summary>
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(IsViewportVisible))]
-    [NotifyPropertyChangedFor(nameof(IsDashboard))]
     [NotifyPropertyChangedFor(nameof(IsPropsView))]
     [NotifyPropertyChangedFor(nameof(IsAnimatedPropsView))]
     [NotifyPropertyChangedFor(nameof(IsOptimizeView))]
@@ -1982,7 +1829,7 @@ public partial class MainViewModel : ObservableObject
     {
         get
         {
-            if (IsPluginActive || IsSettingsOpen) return false;
+            if (IsSettingsOpen) return false;
             if (ActiveView is AppView.Props or AppView.AnimatedProps)
                 return _undoStack.Count > 0;
             if (ActiveView == AppView.Emotes)
@@ -1995,7 +1842,7 @@ public partial class MainViewModel : ObservableObject
     {
         get
         {
-            if (IsPluginActive || IsSettingsOpen) return false;
+            if (IsSettingsOpen) return false;
             if (ActiveView is AppView.Props or AppView.AnimatedProps)
                 return _redoStack.Count > 0;
             if (ActiveView == AppView.Emotes)

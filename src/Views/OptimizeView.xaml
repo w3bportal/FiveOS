@@ -861,7 +861,7 @@
                                FontWeight="SemiBold"
                                IsEnabled="{Binding CanProcess}"
                                Click="OnRun"
-                               ToolTip="Run the optimizer on every file in the queue. Originals are preserved; optimized files land in your Downloads folder as {name}_opt.{ext}.">
+                               ToolTip="Run the optimizer on every file in the queue. Each file is OVERWRITTEN in place (or written into the server's stream folder in server mode) — back up first if you need the originals.">
                         <ui:Button.Icon>
                             <ui:SymbolIcon Symbol="Sparkle24" />
                         </ui:Button.Icon>

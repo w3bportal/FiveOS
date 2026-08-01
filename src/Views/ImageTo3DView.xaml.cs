@@ -131,8 +131,8 @@ public partial class ImageTo3DView : UserControl
         { AppDialog.NoInternet($"AI generation with {provider.DisplayName}", owner); return; }
 
         var outDir = Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
-            "Downloads", "FiveOS_meshes", "generated");
+            FiveOS.Services.UserSettings.GetDownloadsFolder(),
+            "FiveOS_meshes", "generated");
         var outPath = Path.Combine(outDir, outputLabel);
 
         try

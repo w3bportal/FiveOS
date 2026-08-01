@@ -616,9 +616,13 @@ public partial class OptimizeViewModel : ObservableObject
             match = results.FirstOrDefault(r => string.Equals(
                 Path.GetFileName(r.Path), Path.GetFileName(tempPath), StringComparison.OrdinalIgnoreCase));
 
+            // Copy back ONLY on a clean result — a failed/aborted optimize can
+            // leave a truncated temp file, and copying that over the pristine
+            // source is data loss. Errors keep the original untouched.
             var finalPath = Path.Combine(outDir, Path.GetFileName(item.Path));
-            File.Copy(tempPath, finalPath, overwrite: true);
-            outBytes = File.Exists(finalPath) ? new FileInfo(finalPath).Length : 0;
+            if (match is { Error: null })
+                File.Copy(tempPath, finalPath, overwrite: true);
+            outBytes = File.Exists(finalPath) ? new FileInfo(finalPath).Length : inputBytes;
         }
         finally
         {
@@ -639,6 +643,13 @@ public partial class OptimizeViewModel : ObservableObject
             {
                 item.StatusKind = OptimizeStatusKind.Skipped;
                 item.Status = "skipped (no triggers)";
+            }
+            else if (match is { TexturesOptimized: 0 })
+            {
+                // Honest no-op: nothing crossed the trigger, so painting the
+                // row green with "0 tex" claimed work that never happened.
+                item.StatusKind = OptimizeStatusKind.Skipped;
+                item.Status = "no texture over the trigger — lower it or set a Max cap";
             }
             else
             {

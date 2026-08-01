@@ -13,9 +13,9 @@
 
     <AssemblyName>FiveOS</AssemblyName>
     <RootNamespace>FiveOS</RootNamespace>
-    <Version>1.0.12</Version>
-    <FileVersion>1.0.12.0</FileVersion>
-    <AssemblyVersion>1.0.12.0</AssemblyVersion>
+    <Version>1.0.13</Version>
+    <FileVersion>1.0.13.0</FileVersion>
+    <AssemblyVersion>1.0.13.0</AssemblyVersion>
     <Authors>FiveOS</Authors>
     <Company>FiveOS</Company>
     <Product>FiveOS</Product>
@@ -78,24 +78,6 @@
       <Private>true</Private>
     </Reference>
   </ItemGroup>
-
-  <ItemGroup>
-    <!-- Plugin SDK. Stays as a separate DLL beside the host so plugin
-         authors can reference just this 5 KB assembly instead of the
-         128 MB single-file FiveOS.exe. -->
-    <ProjectReference Include="FiveOS.Plugins.Sdk\FiveOS.Plugins.Sdk.csproj" />
-  </ItemGroup>
-
-  <!-- After publish, copy the SDK DLL + a README into a `sdk/` subfolder
-       beside the published exe. Plugin authors download and reference
-       FiveOS.Plugins.Sdk.dll from there. -->
-  <Target Name="CopyPluginSdk" AfterTargets="Publish">
-    <ItemGroup>
-      <_SdkBuild Include="$(OutDir)FiveOS.Plugins.Sdk.dll" />
-      <_SdkBuild Include="$(OutDir)FiveOS.Plugins.Sdk.xml" Condition="Exists('$(OutDir)FiveOS.Plugins.Sdk.xml')" />
-    </ItemGroup>
-    <Copy SourceFiles="@(_SdkBuild)" DestinationFolder="$(PublishDir)sdk\" SkipUnchangedFiles="true" />
-  </Target>
 
   <ItemGroup>
     <!-- MVVM helpers -->
@@ -164,16 +146,6 @@
     <Compile Remove="Views\ThumbnailView.xaml.cs" />
     <Page Remove="Views\ThumbnailView.xaml" />
 
-    <!-- FiveOS.Plugins.Sdk/ is referenced as a separate project; exclude its
-         sources from the parent compile so we don't double-compile (which
-         produces duplicate AssemblyInfo attributes from its obj/). -->
-    <Compile Remove="FiveOS.Plugins.Sdk\**" />
-    <None Remove="FiveOS.Plugins.Sdk\**" />
-    <Page Remove="FiveOS.Plugins.Sdk\**" />
-    <Resource Remove="FiveOS.Plugins.Sdk\**" />
-    <ApplicationDefinition Remove="FiveOS.Plugins.Sdk\**" />
-    <EmbeddedResource Remove="FiveOS.Plugins.Sdk\**" />
-
     <!-- FiveOS Motion (proprietary): harmless no-op when files are absent. -->
     <Compile Remove="Services\MotionCloudClient.cs" Condition="'$(EnableFiveOSMotion)' != 'true'" />
     <Compile Remove="Services\VideoTranscoder.cs" Condition="'$(EnableFiveOSMotion)' != 'true'" />
@@ -183,6 +155,9 @@
     <Compile Remove="ViewModels\PoseToEmoteViewModel.Motion.cs" Condition="'$(EnableFiveOSMotion)' != 'true'" />
     <Compile Remove="Views\Motion\MotionHubPanel.xaml.cs" Condition="'$(EnableFiveOSMotion)' != 'true'" />
     <Page Remove="Views\Motion\MotionHubPanel.xaml" Condition="'$(EnableFiveOSMotion)' != 'true'" />
+    <Compile Remove="Views\Motion\ClipEditorWindow.xaml.cs" Condition="'$(EnableFiveOSMotion)' != 'true'" />
+    <Page Remove="Views\Motion\ClipEditorWindow.xaml" Condition="'$(EnableFiveOSMotion)' != 'true'" />
+    <Compile Remove="Views\Motion\VideoClipRender.cs" Condition="'$(EnableFiveOSMotion)' != 'true'" />
     <Resource Remove="Assets\Motion\framing-guide.png" Condition="'$(EnableFiveOSMotion)' != 'true'" />
   </ItemGroup>
 
