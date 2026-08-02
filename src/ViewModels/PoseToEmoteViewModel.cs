@@ -252,23 +252,39 @@ public partial class PoseToEmoteViewModel : ObservableObject
     [ObservableProperty]
     private string _statusText = "Open a rigged .glb / .fbx to start posing.";
 
-    // ── Unified right sidebar: one panel, three vertical tabs
-    //    (Emotes | FiveOS Motion | Outliner). SidebarTab drives which content
-    //    the single docked panel shows. Emotes and Motion share the library
-    //    panel body (IsMotionPanelSelected picks library vs motion rows).
-    public enum EmoteSidebarTab { Emotes, Motion, Outliner }
+    // ── Unified right sidebar: one panel, four vertical tabs
+    //    (Emotes | FiveOS Motion | Pack | Outliner). SidebarTab drives which
+    //    content the single docked panel shows. Emotes and Motion share the
+    //    library panel body (IsMotionPanelSelected picks library vs motion
+    //    rows); Outliner and Pack each own their own panel.
+    public enum EmoteSidebarTab { Emotes, Motion, Outliner, Pack }
 
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(SidebarShowsOutliner))]
     [NotifyPropertyChangedFor(nameof(SidebarShowsPanel))]
+    [NotifyPropertyChangedFor(nameof(SidebarShowsPack))]
     [NotifyPropertyChangedFor(nameof(TabIsEmotes))]
     [NotifyPropertyChangedFor(nameof(TabIsMotion))]
+    [NotifyPropertyChangedFor(nameof(TabIsPack))]
     private EmoteSidebarTab _sidebarTab = EmoteSidebarTab.Outliner;
 
     public bool SidebarShowsOutliner => SidebarTab == EmoteSidebarTab.Outliner;
-    public bool SidebarShowsPanel => SidebarTab != EmoteSidebarTab.Outliner;
+
+    /// <summary>The shared Library/Motion panel body. Listed explicitly rather
+    /// than as "not Outliner" — every tab that grows its own panel has to be
+    /// excluded here or two panels render into the same docked slot.</summary>
+    public bool SidebarShowsPanel =>
+        SidebarTab is EmoteSidebarTab.Emotes or EmoteSidebarTab.Motion;
+
+    public bool SidebarShowsPack => SidebarTab == EmoteSidebarTab.Pack;
     public bool TabIsEmotes => SidebarTab == EmoteSidebarTab.Emotes;
     public bool TabIsMotion => SidebarTab == EmoteSidebarTab.Motion;
+    public bool TabIsPack => SidebarTab == EmoteSidebarTab.Pack;
+
+    /// <summary>The emote pack queue, for the Pack panel's bindings. A
+    /// process-wide singleton (same shape as MainViewModel.PackSession for
+    /// props) so the queue survives switching workspaces.</summary>
+    public Services.EmotePackSession Pack => Services.EmotePackSession.Current;
 
     // ── Animation Library right sidebar (toggleable, default open) ───
     [ObservableProperty]

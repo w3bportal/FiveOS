@@ -851,6 +851,9 @@
                         <TextBlock Text="Sync Pair" FontSize="11" />
                     </StackPanel>
                 </ui:Button>
+                <!-- Add to Pack lives in the Pack sidebar panel, next to the
+                     queue it fills — same reason Save Pose sits in SAVED POSES.
+                     The toolbar stays one row of primary actions. -->
                 <ui:Button Click="OnMirrorPose"
                            Appearance="Secondary"
                            Padding="10,5"
@@ -1237,6 +1240,33 @@
                                         <Setter TargetName="Tb" Property="Background" Value="#FF3A3A3A" />
                                     </Trigger>
                                     <DataTrigger Binding="{Binding TabIsEmotes}" Value="True">
+                                        <Setter TargetName="Tb" Property="Background" Value="#FF2E2E2E" />
+                                        <Setter TargetName="Tb" Property="BorderBrush" Value="{DynamicResource SystemAccentColorBrush}" />
+                                        <Setter TargetName="Tb" Property="BorderThickness" Value="0,0,3,0" />
+                                        <Setter TargetName="Tt" Property="Foreground" Value="#FFFFFFFF" />
+                                    </DataTrigger>
+                                </ControlTemplate.Triggers>
+                            </ControlTemplate>
+                        </Button.Template>
+                    </Button>
+                    <Button Click="OnSidebarTabPack" Cursor="Hand" Focusable="False" Margin="0,0,0,3"
+                            ToolTip="Emote Pack — queue several baked emotes and export them as one FiveM resource.">
+                        <Button.Template>
+                            <ControlTemplate TargetType="Button">
+                                <Border x:Name="Tb" Background="#FF363636" CornerRadius="4,0,0,4" Padding="4,14"
+                                        BorderBrush="Transparent" BorderThickness="0">
+                                    <TextBlock x:Name="Tt" Text="{Binding Pack.TabLabel}" FontSize="11" FontWeight="SemiBold" Foreground="#FFC8C8C8"
+                                               HorizontalAlignment="Center">
+                                        <TextBlock.LayoutTransform>
+                                            <RotateTransform Angle="-90" />
+                                        </TextBlock.LayoutTransform>
+                                    </TextBlock>
+                                </Border>
+                                <ControlTemplate.Triggers>
+                                    <Trigger Property="IsMouseOver" Value="True">
+                                        <Setter TargetName="Tb" Property="Background" Value="#FF3A3A3A" />
+                                    </Trigger>
+                                    <DataTrigger Binding="{Binding TabIsPack}" Value="True">
                                         <Setter TargetName="Tb" Property="Background" Value="#FF2E2E2E" />
                                         <Setter TargetName="Tb" Property="BorderBrush" Value="{DynamicResource SystemAccentColorBrush}" />
                                         <Setter TargetName="Tb" Property="BorderThickness" Value="0,0,3,0" />
@@ -2213,6 +2243,280 @@
                         <ContentControl x:Name="MotionHubHost" Grid.Row="1" Grid.RowSpan="5"
                                         Background="#FF1E1E1E"
                                         Visibility="{Binding IsMotionMode, Converter={StaticResource BooleanToVisibility}}" />
+                    </Grid>
+                </Border>
+            </Grid>
+
+            <!-- ─── Emote Pack (sidebar tab) ───
+                 A session-only queue of BAKED emotes. The .ycd is captured the
+                 moment you hit "Add to Pack": the viewer can only sample the
+                 rig that's loaded right now, and swapping the model destroys
+                 the imported clips, so there is no such thing as a deferred
+                 bake. Export rolls the queue up into ONE standalone FiveM
+                 resource. Nothing here survives closing the app — same
+                 "session, not save file" intent as the props pack. -->
+            <Grid Grid.Column="1" Margin="30,0,0,0"
+                  Visibility="{Binding SidebarShowsPack, Converter={StaticResource BooleanToVisibility}}">
+                <Border Width="360"
+                        Background="#FF1E1E1E"
+                        BorderThickness="1,0,0,0"
+                        BorderBrush="#FF555555"
+                        ClipToBounds="True">
+                    <Grid>
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto" />              <!-- header -->
+                            <RowDefinition Height="Auto" />              <!-- pack name + add -->
+                            <RowDefinition Height="*" MinHeight="120" /> <!-- rows / empty state -->
+                            <RowDefinition Height="Auto" />              <!-- footer -->
+                        </Grid.RowDefinitions>
+
+                        <!-- Header -->
+                        <Border Grid.Row="0"
+                                Background="#FF2A2A2A"
+                                BorderBrush="#FF555555"
+                                BorderThickness="0,0,0,1"
+                                Padding="12,10">
+                            <Grid>
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="Auto" />
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="Auto" />
+                                </Grid.ColumnDefinitions>
+                                <ui:SymbolIcon Grid.Column="0"
+                                               Symbol="BoxMultiple24"
+                                               FontSize="15"
+                                               Foreground="#FFE0E0E0"
+                                               VerticalAlignment="Center"
+                                               Margin="0,0,8,0" />
+                                <TextBlock Grid.Column="1"
+                                           Text="Emote Pack"
+                                           FontSize="13"
+                                           FontWeight="SemiBold"
+                                           Foreground="#FFF0F0F0"
+                                           VerticalAlignment="Center" />
+                                <Border Grid.Column="2"
+                                        Background="#FF3A3A3A"
+                                        BorderBrush="#FF666666"
+                                        BorderThickness="1"
+                                        CornerRadius="4"
+                                        Padding="7,2"
+                                        VerticalAlignment="Center"
+                                        Visibility="{Binding Pack.HasEntries, Converter={StaticResource BooleanToVisibility}}">
+                                    <TextBlock Text="{Binding Pack.Count}"
+                                               FontSize="10"
+                                               FontWeight="SemiBold"
+                                               Foreground="#FFD8D8D8" />
+                                </Border>
+                            </Grid>
+                        </Border>
+
+                        <!-- Pack name → resource folder, `ensure` line, /<pack> command -->
+                        <Border Grid.Row="1"
+                                Background="#FF242424"
+                                BorderBrush="#FF555555"
+                                BorderThickness="0,0,0,1"
+                                Padding="10,8">
+                            <StackPanel>
+                                <TextBlock Text="RESOURCE NAME"
+                                           FontSize="10"
+                                           FontWeight="SemiBold"
+                                           Foreground="#FF9A9A9A"
+                                           Margin="0,0,0,5" />
+                                <ui:TextBox Text="{Binding Pack.PackName, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                                            PlaceholderText="my_emotes"
+                                            FontFamily="Consolas"
+                                            FontSize="11"
+                                            MaxLength="40"
+                                            ToolTip="Names the exported folder, the `ensure` line, the /&lt;name&gt; list command, and the streamed animation files. Lowercase letters, numbers and underscores." />
+
+                                <!-- The action that fills the list, sitting right
+                                     above it. Bakes the emote on screen NOW —
+                                     deferring isn't possible, since the viewer can
+                                     only sample the rig that's currently loaded. -->
+                                <ui:Button Appearance="Primary"
+                                           Padding="10,7"
+                                           Margin="0,8,0,0"
+                                           HorizontalAlignment="Stretch"
+                                           HorizontalContentAlignment="Center"
+                                           Click="OnAddToEmotePack"
+                                           IsEnabled="{Binding HasRig}"
+                                           ToolTip="Bake the pose or animation on screen right now and queue it in this pack.">
+                                    <StackPanel Orientation="Horizontal">
+                                        <ui:SymbolIcon Symbol="Add24" FontSize="13" Margin="0,0,6,0" />
+                                        <TextBlock Text="Add to Pack" FontSize="12" FontWeight="SemiBold" />
+                                    </StackPanel>
+                                </ui:Button>
+                            </StackPanel>
+                        </Border>
+
+                        <!-- Rows / empty state -->
+                        <Grid Grid.Row="2" Background="#FF1A1A1A">
+                            <StackPanel VerticalAlignment="Center"
+                                        Margin="24"
+                                        Visibility="{Binding Pack.IsEmpty, Converter={StaticResource BooleanToVisibility}}">
+                                <ui:SymbolIcon Symbol="BoxMultiple24"
+                                               FontSize="34"
+                                               Opacity="0.3"
+                                               HorizontalAlignment="Center"
+                                               Margin="0,0,0,10" />
+                                <TextBlock Text="No emotes queued yet."
+                                           FontSize="12"
+                                           FontWeight="SemiBold"
+                                           Foreground="#FFC0C0C0"
+                                           TextAlignment="Center"
+                                           Margin="0,0,0,6" />
+                                <TextBlock FontSize="11"
+                                           Foreground="#FF8A8A8A"
+                                           TextWrapping="Wrap"
+                                           TextAlignment="Center"
+                                           MaxWidth="250"
+                                           Text="Pose or import an emote, then hit Add to Pack above. Each add bakes the animation right there and then. Repeat, then export the lot as one resource." />
+                            </StackPanel>
+
+                            <ScrollViewer VerticalScrollBarVisibility="Auto"
+                                          HorizontalScrollBarVisibility="Disabled"
+                                          Padding="8"
+                                          Visibility="{Binding Pack.HasEntries, Converter={StaticResource BooleanToVisibility}}">
+                                <ItemsControl ItemsSource="{Binding Pack.Entries}">
+                                    <ItemsControl.ItemTemplate>
+                                        <DataTemplate>
+                                            <Border Background="#FF222222"
+                                                    BorderBrush="#FF555555"
+                                                    BorderThickness="1"
+                                                    CornerRadius="4"
+                                                    Padding="6,5"
+                                                    Margin="0,0,0,5"
+                                                    ToolTip="{Binding SourceSummary}">
+                                                <Border.Style>
+                                                    <Style TargetType="Border">
+                                                        <Style.Triggers>
+                                                            <DataTrigger Binding="{Binding IsIncluded}" Value="False">
+                                                                <Setter Property="Opacity" Value="0.4" />
+                                                            </DataTrigger>
+                                                        </Style.Triggers>
+                                                    </Style>
+                                                </Border.Style>
+                                                <Grid>
+                                                    <Grid.ColumnDefinitions>
+                                                        <ColumnDefinition Width="Auto" /> <!-- eye -->
+                                                        <ColumnDefinition Width="*" />    <!-- name + detail -->
+                                                        <ColumnDefinition Width="Auto" /> <!-- badge -->
+                                                        <ColumnDefinition Width="Auto" /> <!-- reorder -->
+                                                        <ColumnDefinition Width="Auto" /> <!-- remove -->
+                                                    </Grid.ColumnDefinitions>
+
+                                                    <!-- Eye off = left out of BOTH the Lua table and stream/ -->
+                                                    <ToggleButton Grid.Column="0"
+                                                                  Style="{StaticResource EyeToggle}"
+                                                                  IsChecked="{Binding IsIncluded, Mode=TwoWay}"
+                                                                  VerticalAlignment="Center"
+                                                                  ToolTip="Include this emote in the exported resource." />
+
+                                                    <StackPanel Grid.Column="1"
+                                                                VerticalAlignment="Center"
+                                                                Margin="4,0,6,0">
+                                                        <TextBox Text="{Binding CommandName, Mode=OneWay}"
+                                                                 Tag="{Binding}"
+                                                                 LostFocus="OnPackEntryNameCommitted"
+                                                                 KeyDown="OnPackEntryNameKeyDown"
+                                                                 Background="Transparent"
+                                                                 BorderThickness="0"
+                                                                 Padding="0"
+                                                                 FontFamily="Consolas"
+                                                                 FontSize="11.5"
+                                                                 MaxLength="40"
+                                                                 Foreground="#FFE8E8E8"
+                                                                 ToolTip="In-game command (/&lt;name&gt;). Safe to rename — the animation itself keeps the name it was baked with." />
+                                                        <TextBlock Text="{Binding DetailText}"
+                                                                   FontSize="9"
+                                                                   Foreground="#FF9A9A9A"
+                                                                   TextTrimming="CharacterEllipsis" />
+                                                    </StackPanel>
+
+                                                    <Border Grid.Column="2"
+                                                            Background="#FF1A2E28"
+                                                            BorderBrush="#FF2F6B5A"
+                                                            BorderThickness="1"
+                                                            CornerRadius="8"
+                                                            Padding="6,1"
+                                                            VerticalAlignment="Center"
+                                                            Margin="0,0,4,0">
+                                                        <TextBlock Text="{Binding BadgeText}"
+                                                                   FontSize="9"
+                                                                   FontWeight="SemiBold"
+                                                                   Foreground="#FF7DCFB6" />
+                                                    </Border>
+
+                                                    <StackPanel Grid.Column="3" VerticalAlignment="Center">
+                                                        <ui:Button Appearance="Transparent"
+                                                                   Padding="2"
+                                                                   Tag="{Binding}"
+                                                                   Click="OnPackEntryMoveUp"
+                                                                   ToolTip="Move up">
+                                                            <ui:SymbolIcon Symbol="ChevronUp24" FontSize="10" />
+                                                        </ui:Button>
+                                                        <ui:Button Appearance="Transparent"
+                                                                   Padding="2"
+                                                                   Tag="{Binding}"
+                                                                   Click="OnPackEntryMoveDown"
+                                                                   ToolTip="Move down">
+                                                            <ui:SymbolIcon Symbol="ChevronDown24" FontSize="10" />
+                                                        </ui:Button>
+                                                    </StackPanel>
+
+                                                    <ui:Button Grid.Column="4"
+                                                               Appearance="Transparent"
+                                                               Padding="4"
+                                                               VerticalAlignment="Center"
+                                                               Tag="{Binding}"
+                                                               Click="OnPackEntryRemove"
+                                                               ToolTip="Drop this emote from the pack. The baked animation is discarded.">
+                                                        <ui:SymbolIcon Symbol="Dismiss24" FontSize="11" Opacity="0.7" />
+                                                    </ui:Button>
+                                                </Grid>
+                                            </Border>
+                                        </DataTemplate>
+                                    </ItemsControl.ItemTemplate>
+                                </ItemsControl>
+                            </ScrollViewer>
+                        </Grid>
+
+                        <!-- Footer -->
+                        <Border Grid.Row="3"
+                                Background="#FF242424"
+                                BorderBrush="#FF555555"
+                                BorderThickness="0,1,0,0"
+                                Padding="12,10">
+                            <StackPanel>
+                                <TextBlock Text="{Binding Pack.StatusSummary}"
+                                           FontSize="10"
+                                           Foreground="#FFB8B8B8"
+                                           Margin="0,0,0,8"
+                                           Visibility="{Binding Pack.HasEntries, Converter={StaticResource BooleanToVisibility}}" />
+                                <ui:Button Appearance="Secondary"
+                                           Padding="10,8"
+                                           HorizontalAlignment="Stretch"
+                                           HorizontalContentAlignment="Center"
+                                           Click="OnExportEmotePack"
+                                           IsEnabled="{Binding Pack.CanExport}"
+                                           ToolTip="Write every included emote into ONE standalone FiveM resource folder — fxmanifest + client.lua + stream/*.ycd + README.">
+                                    <StackPanel Orientation="Horizontal">
+                                        <ui:SymbolIcon Symbol="Save24" FontSize="13" Margin="0,0,6,0" />
+                                        <TextBlock Text="Export Pack" FontSize="12" FontWeight="SemiBold" />
+                                    </StackPanel>
+                                </ui:Button>
+                                <ui:Button Appearance="Secondary"
+                                           Padding="10,6"
+                                           Margin="0,6,0,0"
+                                           HorizontalAlignment="Stretch"
+                                           HorizontalContentAlignment="Center"
+                                           Click="OnClearEmotePack"
+                                           IsEnabled="{Binding Pack.HasEntries}"
+                                           Content="Clear pack"
+                                           FontSize="11"
+                                           ToolTip="Empty the queue. The baked animations are discarded — this can't be undone." />
+                            </StackPanel>
+                        </Border>
                     </Grid>
                 </Border>
             </Grid>

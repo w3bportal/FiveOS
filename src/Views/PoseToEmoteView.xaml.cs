@@ -7539,6 +7539,8 @@ case "prop-loaded":
             _vm.StatusText = "No bones from this rig matched the GTA player skeleton.";
             return null;
         }
+        // A held pose never travels, so there is no mover either way.
+        _lastBakeHadRootMotion = false;
         _lastYcdXml = Services.YcdPoseBuilder.BuildXml(clipName, posed);
         return Services.YcdPoseBuilder.Build(clipName, posed);
     }
@@ -7709,6 +7711,7 @@ case "prop-loaded":
         }
         if (rootMotion != null) bonePositions.Add(rootMotion);
         var positions = bonePositions.Count > 0 ? bonePositions : null;
+        _lastBakeHadRootMotion = rootMotion != null;
         _lastYcdXml = Services.YcdAnimationBuilder.BuildXml(clipName, tracks, frames, fps, positions);
         _vm.LastExportMapped = perTag.Count;
         _vm.LastExportSkipped = 0;
@@ -7716,11 +7719,83 @@ case "prop-loaded":
         return Services.YcdAnimationBuilder.Build(clipName, tracks, frames, fps, positions);
     }
 
+    /// <summary>One finished bake of whatever the viewer is showing.</summary>
+    private readonly record struct BakedEmote(
+        byte[] Bytes, string? Xml, bool IsAnimated, int KeyframeCount, bool HadRootMotion);
+
+    /// <summary>
+    /// Bake what's on screen into .ycd bytes, choosing the same
+    /// animated-vs-single-pose path the direct exports use:
+    ///   * animated → window.samplePoseClipForExport() in the viewer, which
+    ///     samples the UNION of every timeline strip into one clip. It needs a
+    ///     live rig in pose mode — which is exactly why the emote pack has to
+    ///     bake when an emote is ADDED and can never defer to export time.
+    ///   * static   → BuildSinglePoseYcdBytes, pure C#, no viewer round-trip.
+    ///
+    /// Returns null on any bail; the inner builders have already put the
+    /// reason in StatusText by then, so callers just report and return.
+    /// </summary>
+    private async Task<BakedEmote?> BakeCurrentEmoteAsync(string clipName, string? poseJson = null)
+    {
+        poseJson ??= await GetPoseJsonForExportAsync();
+        if (string.IsNullOrEmpty(poseJson))
+        {
+            _vm.StatusText = "No pose to bake — load a rigged model first.";
+            return null;
+        }
+
+        string? kfJson = null;
+        try
+        {
+            kfJson = PeelScriptJson(await Viewport.CoreWebView2.ExecuteScriptAsync(
+                "window.getKeyframes && window.getKeyframes()"));
+        }
+        catch { /* fall through to the single-pose path */ }
+
+        int kfCount = 0;
+        if (!string.IsNullOrEmpty(kfJson))
+        {
+            try
+            {
+                using var kdoc = JsonDocument.Parse(kfJson);
+                if (kdoc.RootElement.TryGetProperty("keyframes", out var kfEl))
+                    kfCount = kfEl.GetArrayLength();
+            }
+            catch (Exception ex) { Services.FosLogger.Warn("pose", "keyframe count parse failed", ex); }
+        }
+
+        byte[]? bytes;
+        bool animated;
+        if (await HasAnimatedTimelineAsync())
+        {
+            bytes = await BuildAnimatedYcdBytesFromViewerAsync(clipName, kfJson ?? "{}");
+            animated = true;
+        }
+        else
+        {
+            bytes = BuildSinglePoseYcdBytes(clipName, poseJson);
+            animated = false;
+        }
+
+        if (bytes is null || bytes.Length == 0) return null;
+
+        // Read the scratch fields on the very next statement — the next bake
+        // overwrites both.
+        return new BakedEmote(bytes, _lastYcdXml, animated, kfCount, _lastBakeHadRootMotion);
+    }
+
     // Source XML of the last .ycd we built. Captured by the Build*YcdBytes
     // helpers and stamped onto the exported resource folder so the user
     // can compile via CodeWalker.exe as a fallback diagnostic when our
     // in-process binary writer produces bytes RAGE doesn't fully consume.
     private string? _lastYcdXml;
+
+    // Whether the last bake actually carried a SKEL_ROOT mover. The Movement
+    // combo defaults to root motion, so an animated emote can ask for flag
+    // 786433 (kinematic physics + mover extraction) over a clip with nothing
+    // to extract — which leaves the ped floating or sunk instead of walking.
+    // The pack reads this right after a bake and downgrades the stored mode.
+    private bool _lastBakeHadRootMotion;
 
     private void WriteJsonPose(string path, string poseJson)
     {
