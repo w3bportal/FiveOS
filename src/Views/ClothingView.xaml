@@ -1,0 +1,162 @@
+<UserControl x:Class="FiveOS.Views.ClothingView"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:ui="http://schemas.lepo.co/wpfui/2022/xaml"
+             xmlns:wv2="clr-namespace:Microsoft.Web.WebView2.Wpf;assembly=Microsoft.Web.WebView2.Wpf"
+             Loaded="OnViewLoaded">
+    <Grid Background="{DynamicResource ApplicationBackgroundBrush}">
+        <Grid.ColumnDefinitions>
+            <ColumnDefinition Width="*" MinWidth="420" />
+            <ColumnDefinition Width="Auto" />
+            <ColumnDefinition Width="480" MinWidth="360" />
+        </Grid.ColumnDefinitions>
+
+        <!-- 3D preview: the garment against the freemode body, so orientation
+             and placement can be judged before exporting rather than after. -->
+        <Grid Grid.Column="0">
+            <wv2:WebView2 x:Name="Viewport" />
+            <Border x:Name="ViewportOverlay" Background="#CC1A1A1A">
+                <StackPanel VerticalAlignment="Center" HorizontalAlignment="Center">
+                    <TextBlock x:Name="ViewportMessage" Text="Pick a garment mesh to preview it on the body."
+                               FontSize="12" Foreground="#FFBDBDBD" TextWrapping="Wrap"
+                               TextAlignment="Center" MaxWidth="320" />
+                </StackPanel>
+            </Border>
+        </Grid>
+
+        <GridSplitter Grid.Column="1" Width="4" HorizontalAlignment="Stretch"
+                      Background="{DynamicResource ControlElevationBorderBrush}" />
+
+        <ScrollViewer Grid.Column="2" VerticalScrollBarVisibility="Auto" Padding="0">
+            <StackPanel Margin="20,24,20,24">
+
+                <TextBlock Text="Auto-rig clothing" FontSize="20" FontWeight="SemiBold"
+                           Foreground="{DynamicResource TextFillColorPrimaryBrush}" Margin="0,0,0,6" />
+                <TextBlock TextWrapping="Wrap" FontSize="12" Margin="0,0,0,22"
+                           Foreground="{DynamicResource TextFillColorSecondaryBrush}"
+                           Text="Give it a garment modelled around the ped — a hoodie, jacket, vest or bag — and it works out the skin weights against the GTA body and writes a wearable .ydd with all three detail levels. The mesh needs no rig and no vertex groups. It does need to be positioned on the body, at GTA scale." />
+
+                <TextBlock Text="GARMENT MESH" FontSize="10" FontWeight="SemiBold" Opacity="0.6" Margin="0,0,0,6" />
+                <Grid Margin="0,0,0,16">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition /><ColumnDefinition Width="Auto" />
+                    </Grid.ColumnDefinitions>
+                    <ui:TextBox x:Name="MeshBox" FontSize="12"
+                                PlaceholderText=".fbx / .glb / .gltf / .obj / .dae" />
+                    <ui:Button Grid.Column="1" Content="Browse…" Margin="8,0,0,0" Padding="14,6"
+                               Appearance="Secondary" Click="OnBrowseMesh" />
+                </Grid>
+
+                <Grid Margin="0,0,0,16">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*" /><ColumnDefinition Width="*" />
+                    </Grid.ColumnDefinitions>
+                    <StackPanel Grid.Column="0" Margin="0,0,12,0">
+                        <TextBlock Text="BODY" FontSize="10" FontWeight="SemiBold" Opacity="0.6" Margin="0,0,0,6"
+                                   ToolTip="A garment has to be weighted separately for each body — their proportions differ." />
+                        <StackPanel Orientation="Horizontal">
+                            <RadioButton x:Name="BodyMale" Content="Male" IsChecked="True" FontSize="12" GroupName="Body" />
+                            <RadioButton x:Name="BodyFemale" Content="Female" FontSize="12" Margin="18,0,0,0" GroupName="Body" />
+                        </StackPanel>
+                    </StackPanel>
+                    <StackPanel Grid.Column="1">
+                        <TextBlock Text="COMPONENT" FontSize="10" FontWeight="SemiBold" Opacity="0.6" Margin="0,0,0,6"
+                                   ToolTip="jbib = tops and jackets · uppr = torso and arms · lowr = legs · task = vests · hand = bags · feet = shoes" />
+                        <ui:TextBox x:Name="ComponentBox" FontSize="12" Text="jbib_000_u" />
+                    </StackPanel>
+                </Grid>
+
+                <Grid Margin="0,0,0,14">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="Auto" /><ColumnDefinition Width="Auto" /><ColumnDefinition />
+                    </Grid.ColumnDefinitions>
+                    <CheckBox x:Name="ReduceBox" IsChecked="True" FontSize="12" VerticalAlignment="Center"
+                              Content="Reduce automatically to"
+                              ToolTip="GTA caps a garment at 65,535 vertices and vanilla clothing sits near 3,600. Open edges are pinned during reduction so hems and cuffs keep their shape." />
+                    <ui:TextBox x:Name="BudgetBox" Grid.Column="1" Text="20000" Width="80" FontSize="12"
+                                Margin="8,0,8,0" VerticalAlignment="Center" />
+                    <TextBlock Grid.Column="2" Text="vertices" FontSize="12" VerticalAlignment="Center"
+                               Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
+                </Grid>
+
+                <TextBlock Text="ORIENTATION" FontSize="10" FontWeight="SemiBold" Opacity="0.6" Margin="0,4,0,4"
+                           ToolTip="Scale is worked out automatically, but nothing in the mesh says which way it should face — set that here." />
+                <TextBlock TextWrapping="Wrap" FontSize="11" Margin="0,0,0,8"
+                           Foreground="{DynamicResource TextFillColorSecondaryBrush}"
+                           Text="Rotation is applied about the garment's own centre, then the offset moves it. If it came out lying on its side, try -90 on X." />
+                <Grid Margin="0,0,0,8">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="Auto" /><ColumnDefinition /><ColumnDefinition />
+                        <ColumnDefinition /><ColumnDefinition Width="Auto" />
+                    </Grid.ColumnDefinitions>
+                    <TextBlock Text="Rotate°" FontSize="11" VerticalAlignment="Center" Margin="0,0,8,0"
+                               Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
+                    <ui:TextBox x:Name="RotX" Grid.Column="1" Text="0" FontSize="12" Margin="0,0,6,0" />
+                    <ui:TextBox x:Name="RotY" Grid.Column="2" Text="0" FontSize="12" Margin="0,0,6,0" />
+                    <ui:TextBox x:Name="RotZ" Grid.Column="3" Text="0" FontSize="12" />
+                    <StackPanel Grid.Column="4" Orientation="Horizontal" Margin="8,0,0,0">
+                        <ui:Button Content="X-90" FontSize="10" Padding="8,4" Appearance="Secondary"
+                                   Click="OnQuickRotate" Tag="X-90" ToolTip="Common fix for a Y-up export" />
+                        <ui:Button Content="Z180" FontSize="10" Padding="8,4" Margin="4,0,0,0" Appearance="Secondary"
+                                   Click="OnQuickRotate" Tag="Z180" ToolTip="Turn it to face the other way" />
+                        <ui:Button Content="Reset" FontSize="10" Padding="8,4" Margin="4,0,0,0" Appearance="Secondary"
+                                   Click="OnQuickRotate" Tag="reset" />
+                    </StackPanel>
+                </Grid>
+                <Grid Margin="0,0,0,16">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="Auto" /><ColumnDefinition /><ColumnDefinition />
+                        <ColumnDefinition /><ColumnDefinition Width="Auto" /><ColumnDefinition Width="Auto" />
+                    </Grid.ColumnDefinitions>
+                    <TextBlock Text="Move m" FontSize="11" VerticalAlignment="Center" Margin="0,0,8,0"
+                               Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
+                    <ui:TextBox x:Name="OffX" Grid.Column="1" Text="0" FontSize="12" Margin="0,0,6,0" />
+                    <ui:TextBox x:Name="OffY" Grid.Column="2" Text="0" FontSize="12" Margin="0,0,6,0" />
+                    <ui:TextBox x:Name="OffZ" Grid.Column="3" Text="0" FontSize="12" />
+                    <TextBlock Grid.Column="4" Text="Scale ×" FontSize="11" VerticalAlignment="Center" Margin="12,0,6,0"
+                               Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
+                    <ui:TextBox x:Name="ScaleBox" Grid.Column="5" Text="1" Width="70" FontSize="12" />
+                </Grid>
+
+                <CheckBox x:Name="LodsBox" IsChecked="True" FontSize="12" Margin="0,0,0,20"
+                          Content="Generate Med and Low detail levels (recommended)"
+                          ToolTip="Without them the garment disappears once the player walks away — the most common fault in custom clothing." />
+
+                <StackPanel x:Name="ProgressPanel" Visibility="Collapsed" Margin="0,0,0,18">
+                    <Grid Margin="0,0,0,5">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition /><ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+                        <TextBlock x:Name="ProgressStage" FontSize="11" TextTrimming="CharacterEllipsis"
+                                   Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
+                        <TextBlock x:Name="ProgressPercent" Grid.Column="1" FontSize="11" FontFamily="Consolas"
+                                   Foreground="{DynamicResource TextFillColorSecondaryBrush}" Text="0%" />
+                    </Grid>
+                    <ProgressBar x:Name="ProgressBarCtl" Height="6" Minimum="0" Maximum="100" Value="0" />
+                    <TextBlock x:Name="ProgressHint" FontSize="10" Opacity="0.7" Margin="0,8,0,0"
+                               TextWrapping="Wrap" Visibility="Collapsed"
+                               Text="This is taking a while — usually that means the garment isn't sitting on the ped, so almost none of it matches the body and every vertex has to be solved instead. Worth checking its position and scale." />
+                </StackPanel>
+
+                <Border x:Name="ResultPanel" Visibility="Collapsed" Margin="0,0,0,18"
+                        Background="#22FFFFFF" CornerRadius="6" Padding="14,12">
+                    <StackPanel>
+                        <TextBlock x:Name="ResultTitle" FontSize="12" FontWeight="SemiBold" TextWrapping="Wrap" />
+                        <TextBlock x:Name="ResultDetail" FontSize="11" TextWrapping="Wrap" Margin="0,7,0,0"
+                                   Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
+                    </StackPanel>
+                </Border>
+
+                <Grid>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition /><ColumnDefinition Width="Auto" />
+                    </Grid.ColumnDefinitions>
+                    <TextBlock x:Name="StatusText" FontSize="10" Opacity="0.6"
+                               VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
+                    <ui:Button x:Name="RigBtn" Grid.Column="1" Content="Rig and export…" Appearance="Primary"
+                               MinWidth="150" Padding="14,8" Click="OnRig" />
+                </Grid>
+            </StackPanel>
+        </ScrollViewer>
+    </Grid>
+</UserControl>

@@ -724,6 +724,14 @@
                         </MenuItem>
 
                         <!-- RPF -->
+                        <MenuItem Header="Auto-rig Clothing…"
+                                  Style="{StaticResource C4DMenuCommandNew}"
+                                  Click="OnMenuAutoRigClothing"
+                                  ToolTip="New — turn an unrigged hoodie, jacket or bag into a wearable GTA clothing drawable: works out the skin weights against the freemode body and writes the .ydd with all three LODs">
+                            <MenuItem.Icon>
+                                <ui:SymbolIcon Symbol="PersonAccounts24" FontSize="14" Foreground="#FFE0C070" />
+                            </MenuItem.Icon>
+                        </MenuItem>
                         <MenuItem Header="Convert"
                                   Style="{StaticResource C4DMenuCommand}"
                                   Visibility="{Binding IsRpfView, Converter={StaticResource BooleanToVisibility}}">
@@ -1166,6 +1174,33 @@
                                 <Style TargetType="TextBlock" BasedOn="{StaticResource LayoutTabLabel}">
                                     <Style.Triggers>
                                         <DataTrigger Binding="{Binding IsVehiclesView}" Value="True">
+                                            <Setter Property="FontStyle" Value="Italic" />
+                                            <Setter Property="Foreground" Value="{DynamicResource TextFillColorPrimaryBrush}" />
+                                        </DataTrigger>
+                                    </Style.Triggers>
+                                </Style>
+                            </TextBlock.Style>
+                        </TextBlock>
+                    </Border>
+
+                    <Border Tag="Clothing"
+                            Visibility="{Binding LevelStandardPlus, Converter={StaticResource BooleanToVisibility}}"
+                            ToolTip="Clothing — auto-rig a garment mesh into wearable GTA clothing"
+                            MouseLeftButtonUp="OnRailItemClick">
+                        <Border.Style>
+                            <Style TargetType="Border" BasedOn="{StaticResource LayoutTab}">
+                                <Style.Triggers>
+                                    <DataTrigger Binding="{Binding IsClothingView}" Value="True">
+                                        <Setter Property="BorderBrush" Value="{DynamicResource SystemAccentColorBrush}" />
+                                    </DataTrigger>
+                                </Style.Triggers>
+                            </Style>
+                        </Border.Style>
+                        <TextBlock Text="Clothing">
+                            <TextBlock.Style>
+                                <Style TargetType="TextBlock" BasedOn="{StaticResource LayoutTabLabel}">
+                                    <Style.Triggers>
+                                        <DataTrigger Binding="{Binding IsClothingView}" Value="True">
                                             <Setter Property="FontStyle" Value="Italic" />
                                             <Setter Property="Foreground" Value="{DynamicResource TextFillColorPrimaryBrush}" />
                                         </DataTrigger>
@@ -3340,6 +3375,11 @@
                      ~40 MB Edge process doesn't spin up until first shown. -->
                 <Grid Visibility="{Binding IsEmotesView, Converter={StaticResource BooleanToVisibility}}">
                     <local:PoseToEmoteView x:Name="EmotesWorkspace" />
+                </Grid>
+
+                <!-- Clothing: unrigged garment mesh -> wearable skinned .ydd. -->
+                <Grid Visibility="{Binding IsClothingView, Converter={StaticResource BooleanToVisibility}}">
+                    <local:ClothingView x:Name="ClothingWorkspace" />
                 </Grid>
 
                 </Grid>

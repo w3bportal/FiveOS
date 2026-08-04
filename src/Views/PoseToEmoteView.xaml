@@ -758,9 +758,10 @@
                               SelectedIndex="{Binding MovementComboIndex, Mode=TwoWay}"
                               MinWidth="190"
                               VerticalAlignment="Center"
-                              ToolTip="How the emote coexists with player movement. Imported / library clips default to root motion so the ped travels. Static poses export as in-place.">
+                              ToolTip="How the emote coexists with player movement. Imported / library clips default to root motion so the ped travels. Static poses export as in-place. Pick In place for a ped that's attached to something.">
+                        <ComboBoxItem Content="In place (full body)" ToolTip="Full body, ped stays put. No mover baked into the .ycd and no physics flags — the only safe mode for a pose held while the ped is ATTACHED to something (hoverboard, seat, rig prop), where mover extraction fights the attachment and swings the ped. Dances and held poses too. (flag 1 looping, 2 one-shot)" />
                         <ComboBoxItem Content="Upper body (can move)" ToolTip="Only the upper body animates; legs keep walking/idling, so the player can move. Waves, salutes, gestures. This is dpemotes' 'EmoteMoving'. (flag 49 looping, 50 one-shot)" />
-                        <ComboBoxItem Content="Root motion (ped travels)" ToolTip="Full body + mover extraction — the ped physically walks along the clip's SKEL_ROOT path. Default for imported animations. Needs fxresource export for FiveM." />
+                        <ComboBoxItem Content="Root motion (ped travels)" ToolTip="Full body + mover extraction — the ped physically walks along the clip's SKEL_ROOT path. Default for imported animations. Needs fxresource export for FiveM. Do NOT use on an attached ped." />
                     </ComboBox>
                 </StackPanel>
                 <ScrollViewer HorizontalScrollBarVisibility="Auto"

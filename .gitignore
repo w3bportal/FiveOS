@@ -22,6 +22,10 @@ publish_fix/
 /FiveOS.exe
 *.exe.bak
 
+# ── Build output of the ydr-writer subproject (see BuildYdrWriter in
+#    src/FiveOS.csproj). Its source lives in src/ydr-writer/. ─────
+/src/Engine/ydr-writer.exe
+
 # ── Secrets — never commit ───────────────────────────────────
 **/appsettings.json
 **/appsettings.*.json

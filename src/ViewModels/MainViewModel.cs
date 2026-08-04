@@ -30,7 +30,7 @@ public enum ExportMode { Prop }
 /// activity rail. <see cref="Dashboard"/> is retired UI; the member stays
 /// only so saved-view strings from older builds still parse.
 /// </summary>
-public enum AppView { Dashboard, Props, AnimatedProps, Optimize, Rpf, Vehicles, ImageTo3D, Emotes }
+public enum AppView { Dashboard, Props, AnimatedProps, Optimize, Rpf, Vehicles, ImageTo3D, Emotes, Clothing }
 
 /// <summary>One rotation key on the Animated props timeline (degrees, seconds).</summary>
 public sealed partial class PropAnimKey : ObservableObject
@@ -213,6 +213,7 @@ public partial class MainViewModel : ObservableObject
             WorkspaceKind.Emotes => AppView.Emotes,
             WorkspaceKind.Vehicles => AppView.Vehicles,
             WorkspaceKind.Rpf => AppView.Rpf,
+            WorkspaceKind.Clothing => AppView.Clothing,
             _ => AppView.Props,
         };
     }
@@ -1489,6 +1490,7 @@ public partial class MainViewModel : ObservableObject
     [NotifyPropertyChangedFor(nameof(IsVehiclesView))]
     [NotifyPropertyChangedFor(nameof(IsImageTo3DView))]
     [NotifyPropertyChangedFor(nameof(IsEmotesView))]
+    [NotifyPropertyChangedFor(nameof(IsClothingView))]
     [NotifyPropertyChangedFor(nameof(Is3DView))]
     [NotifyPropertyChangedFor(nameof(ShowAssetsEditMenu))]
     [NotifyPropertyChangedFor(nameof(ShowAssetsViewMenu))]
@@ -1533,6 +1535,7 @@ public partial class MainViewModel : ObservableObject
     public bool IsVehiclesView   => !IsSettingsOpen && ActiveView == AppView.Vehicles;
     public bool IsImageTo3DView  => !IsSettingsOpen && ActiveView == AppView.ImageTo3D;
     public bool IsEmotesView     => !IsSettingsOpen && ActiveView == AppView.Emotes;
+    public bool IsClothingView   => !IsSettingsOpen && ActiveView == AppView.Clothing;
     /// <summary>True when the Assets rail entry is active — Props and
     /// Animated (prop) share one rail slot and the top segmented toggle.
     /// Vehicles is its own rail peer.</summary>
@@ -1553,6 +1556,7 @@ public partial class MainViewModel : ObservableObject
         AppView.Vehicles       => "Vehicles",
         AppView.ImageTo3D      => "Image → 3D",
         AppView.Emotes         => "Emotes",
+        AppView.Clothing       => "Clothing",
         _                      => "FiveOS",
     };
 
@@ -1612,6 +1616,13 @@ public partial class MainViewModel : ObservableObject
             || string.Equals(view, "Vehicles", System.StringComparison.OrdinalIgnoreCase))
         {
             ActiveView = AppView.Vehicles;
+            SyncWorkspaceTabForActiveView();
+            return;
+        }
+
+        if (string.Equals(view, "Clothing", System.StringComparison.OrdinalIgnoreCase))
+        {
+            ActiveView = AppView.Clothing;
             SyncWorkspaceTabForActiveView();
             return;
         }
@@ -1738,6 +1749,7 @@ public partial class MainViewModel : ObservableObject
     [NotifyPropertyChangedFor(nameof(IsVehiclesView))]
     [NotifyPropertyChangedFor(nameof(IsImageTo3DView))]
     [NotifyPropertyChangedFor(nameof(IsEmotesView))]
+    [NotifyPropertyChangedFor(nameof(IsClothingView))]
     [NotifyPropertyChangedFor(nameof(Is3DView))]
     [NotifyPropertyChangedFor(nameof(ShowAssetsEditMenu))]
     [NotifyPropertyChangedFor(nameof(ShowAssetsViewMenu))]

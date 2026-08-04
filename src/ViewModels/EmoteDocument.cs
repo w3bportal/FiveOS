@@ -41,7 +41,10 @@ public sealed partial class EmoteDocument : ObservableObject
     public int TimelineFps { get; set; } = 30;
     public double TimelineTime { get; set; }
     public bool TimelineLoop { get; set; } = true;
-    public int MovementIndex { get; set; }
+    /// <summary>Seeded to Root motion, not 0 — 0 is a real mode again (In
+    /// place), so a doc that never synced its movement would otherwise restore
+    /// as In place instead of the VM's default.</summary>
+    public int MovementIndex { get; set; } = (int)Services.EmoteMovement.RootMotion;
 
     public bool HasContent =>
         !string.IsNullOrEmpty(LoadedModelPath) || !string.IsNullOrEmpty(TimelineCaptureJson);

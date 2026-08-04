@@ -26,6 +26,8 @@ public partial class MainWindow : FluentWindow
     private static readonly string[] SupportedExtensions =
     {
         ".obj", ".glb", ".gltf", ".fbx", ".dae", ".ply", ".stl",
+        // Sims 4 packages aren't models — TryLoad unpacks them to a .glb first.
+        ".package",
     };
 
     private readonly MainViewModel _vm = new();
@@ -1076,6 +1078,10 @@ public partial class MainWindow : FluentWindow
         EnsureEmotesView();
         EmotesWorkspace.RunExportRpEmotes();
     }
+
+    /// <summary>Auto-rig clothing: opens the Clothing workspace tab.</summary>
+    private void OnMenuAutoRigClothing(object sender, RoutedEventArgs e)
+        => _vm.OpenViewCommand.Execute("Clothing");
 
     private void OnFileEmoteExportSyncedPair(object sender, RoutedEventArgs e)
     {
@@ -3769,8 +3775,9 @@ public partial class MainWindow : FluentWindow
         {
             Title = "Add props to convert queue",
             Multiselect = true,
-            Filter = "3D models (*.obj;*.glb;*.gltf;*.fbx;*.dae;*.ply;*.stl)|" +
-                     "*.obj;*.glb;*.gltf;*.fbx;*.dae;*.ply;*.stl|" +
+            Filter = "3D models (*.obj;*.glb;*.gltf;*.fbx;*.dae;*.ply;*.stl;*.package)|" +
+                     "*.obj;*.glb;*.gltf;*.fbx;*.dae;*.ply;*.stl;*.package|" +
+                     "Sims 4 package (*.package)|*.package|" +
                      "All files (*.*)|*.*"
         };
         if (dlg.ShowDialog(this) != true || dlg.FileNames.Length == 0) return;
@@ -3778,12 +3785,19 @@ public partial class MainWindow : FluentWindow
         // Land in the group selected in the outliner (loose when none) and
         // start converting right away — the Photoshop flow has no Run button.
         var group = _vm.TargetOutlinerGroup;
-        int added = _vm.PackSession.EnqueueConvertPaths(dlg.FileNames, group);
+        var skipped = new List<string>();
+        int added = _vm.PackSession.EnqueueConvertPaths(dlg.FileNames, group, skipped);
         _vm.StatusText = added == 0
-            ? "Nothing new queued (unsupported, missing, or already listed)."
+            // A Sims package that holds no geometry (a pose pack, say) has a
+            // real reason worth showing — "nothing queued" would read as a bug.
+            ? skipped.Count > 0
+                ? skipped[0].Replace('\n', ' ')
+                : "Nothing new queued (unsupported, missing, or already listed)."
             : group is null
                 ? $"Queued {added} file(s) as loose layers — converting…"
                 : $"Queued {added} file(s) into '{group}' — converting…";
+        if (added > 0 && skipped.Count > 0)
+            _vm.StatusText += $" ({skipped.Count} skipped)";
         TryAutoRunPackQueue();
     }
 
@@ -3950,8 +3964,9 @@ public partial class MainWindow : FluentWindow
         var dlg = new OpenFileDialog
         {
             Title = "Open 3D model",
-            Filter = "3D models (*.obj;*.glb;*.gltf;*.fbx;*.dae;*.ply;*.stl)|" +
-                     "*.obj;*.glb;*.gltf;*.fbx;*.dae;*.ply;*.stl|" +
+            Filter = "3D models (*.obj;*.glb;*.gltf;*.fbx;*.dae;*.ply;*.stl;*.package)|" +
+                     "*.obj;*.glb;*.gltf;*.fbx;*.dae;*.ply;*.stl;*.package|" +
+                     "Sims 4 package (*.package)|*.package|" +
                      "All files (*.*)|*.*"
         };
         if (dlg.ShowDialog(this) == true)
@@ -3972,6 +3987,26 @@ public partial class MainWindow : FluentWindow
             Services.FosLogger.Warn("load", $"unsupported format: {Path.GetExtension(path)}");
             _vm.StatusText = $"Unsupported format: {Path.GetExtension(path)}";
             return;
+        }
+
+        // A Sims .package isn't a model — unpack its meshes to a .glb first and
+        // load that. Everything downstream then treats it as an ordinary import.
+        if (string.Equals(Path.GetExtension(path), ".package", System.StringComparison.OrdinalIgnoreCase))
+        {
+            displayNameOverride ??= Path.GetFileNameWithoutExtension(path);
+            _vm.StatusText = "Unpacking Sims package…";
+            var sims = await Task.Run(() => Services.Sims.SimsPropImporter.Import(path));
+            if (!sims.Success || sims.GlbPath is null)
+            {
+                Services.FosLogger.Warn("load", $"sims unpack failed: {sims.Error}");
+                _vm.StatusText = sims.Error?.Replace('\n', ' ') ?? "Couldn't read that Sims package.";
+                return;
+            }
+            Services.FosLogger.Info("load",
+                $"sims unpack: {sims.MeshCount} mesh(es), {sims.TriangleCount} tris, " +
+                $"{sims.TexturePaths.Count} texture(s) → {sims.GlbPath}");
+            foreach (var w in sims.Warnings) Services.FosLogger.Info("load", "sims: " + w);
+            path = sims.GlbPath;
         }
 
         // Record real, user-picked opens for the Welcome screen's Recent list.

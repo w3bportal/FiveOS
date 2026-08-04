@@ -318,6 +318,17 @@ public static class GtaBoneTags
         n = System.Text.RegularExpressions.Regex.Replace(
             n, @"_(jnt|bind)$", "", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
 
+        // Second Life rigs are resolved up front, never by the heuristics
+        // below — SL's joint vocabulary means something different to every
+        // other rig we accept. A "Shoulder" is the UPPER ARM (its clavicle
+        // is a "Collar") and a "Hip" is the THIGH, so the generic rules
+        // collapse both arms into the neck and stack both legs on the
+        // pelvis. Anything recognisably SL that has no GTA counterpart
+        // (face/wing/tail bones, fitted-mesh collision volumes) is dropped
+        // here rather than left to fall through and mis-match.
+        if (TrySecondLife(n, out tag, out bool isSecondLifeBone)) return true;
+        if (isSecondLifeBone) { tag = 0; return false; }
+
         // Build a normalised lookup key (no SKEL_ prefix, no L/R prefix order)
         // and match against the canonical SKEL_* names by suffix.
         var bare = n;
@@ -468,5 +479,128 @@ public static class GtaBoneTags
         }
 
         return false;
+    }
+
+    /// <summary>Second Life fitted-mesh collision volumes. These carry a
+    /// garment's shape-slider weights, never animation, and several of them
+    /// (L_UPPER_ARM, L_HAND, L_CLAVICLE) look exactly like real joints — left
+    /// to the heuristics they'd claim a GTA tag and, via the one-bone-per-tag
+    /// dedup, lock the actually-animated mBone out of it. Matched
+    /// case-sensitively: SL spells these SHOUTY, so a lowercase "head" or
+    /// "chest" from any other rig is unaffected.</summary>
+    private static readonly HashSet<string> SecondLifeCollisionVolumes = new(System.StringComparer.Ordinal)
+    {
+        "PELVIS", "BELLY", "CHEST", "LEFT_PEC", "RIGHT_PEC", "BUTT",
+        "LEFT_HANDLE", "RIGHT_HANDLE", "LOWER_BACK", "UPPER_BACK",
+        "NECK", "HEAD", "SKULL", "MOUTH", "LEFT_EYEBALL", "RIGHT_EYEBALL",
+        "L_CLAVICLE", "R_CLAVICLE", "L_UPPER_ARM", "R_UPPER_ARM",
+        "L_LOWER_ARM", "R_LOWER_ARM", "L_HAND", "R_HAND",
+        "L_UPPER_LEG", "R_UPPER_LEG", "L_LOWER_LEG", "R_LOWER_LEG",
+        "L_FOOT", "R_FOOT",
+    };
+
+    /// <summary>
+    /// Map a Second Life bone name to a GTA tag. SL creators arrive with two
+    /// unrelated naming families and both are booby-trapped for the generic
+    /// heuristics:
+    /// <list type="bullet">
+    /// <item>the avatar skeleton, as seen in a rigged mesh .dae — lowercase
+    /// "m" then the joint: mPelvis, mCollarLeft, mShoulderLeft, mHipLeft;</item>
+    /// <item>the .bvh animation upload — a lowercase side letter then the
+    /// joint: lCollar, lShoulder, lThigh, plus unsided hip/abdomen/chest.</item>
+    /// </list>
+    /// <paramref name="isSecondLife"/> comes back true for any name in either
+    /// family even when the return is false, so the caller can stop instead of
+    /// handing an SL bone to rules written for Mixamo.
+    /// </summary>
+    private static bool TrySecondLife(string name, out ushort tag, out bool isSecondLife)
+    {
+        tag = 0;
+        isSecondLife = false;
+        if (name.Length < 2) return false;
+
+        if (SecondLifeCollisionVolumes.Contains(name)) { isSecondLife = true; return false; }
+
+        string joint;
+        bool left = false, right = false, avatarRig = false;
+
+        if (name[0] == 'm' && char.IsUpper(name[1]))
+        {
+            // Avatar skeleton. Bento's fingers (mHandThumb1Left, mHandMiddle2Right)
+            // are close enough to Mixamo's that the generic finger block already
+            // lands them on the right SKEL_*_FingerDJ — leave those alone.
+            joint = name.Substring(1);
+            if (joint.StartsWith("Hand", System.StringComparison.Ordinal)) return false;
+
+            left = joint.EndsWith("Left", System.StringComparison.Ordinal);
+            right = joint.EndsWith("Right", System.StringComparison.Ordinal);
+            if (left) joint = joint[..^4];
+            else if (right) joint = joint[..^5];
+            avatarRig = true;
+            isSecondLife = true;
+        }
+        else if ((name[0] == 'l' || name[0] == 'r') && char.IsUpper(name[1]))
+        {
+            // BVH upload. The single-letter camelCase prefix is what separates
+            // these from every other convention we handle — Rokoko's
+            // "leftShoulder" and Maya's "l_shoulder" both fail this test, which
+            // is the point: their Shoulder really is the clavicle.
+            left = name[0] == 'l';
+            right = !left;
+            joint = name.Substring(1);
+            isSecondLife = true;
+        }
+        else if (name.Equals("abdomen", System.StringComparison.OrdinalIgnoreCase)
+              || name.Equals("chest", System.StringComparison.OrdinalIgnoreCase))
+        {
+            // Unsided BVH torso joints. Shared with the Poser/DAZ lineage the
+            // CMU mocap sets come from, which spell the spine the same way.
+            joint = name;
+            isSecondLife = true;
+        }
+        else return false;
+
+        string? Sided(string bone) => left ? "SKEL_L_" + bone : right ? "SKEL_R_" + bone : null;
+
+        // Everything falling to null below is a real SL bone with no GTA
+        // counterpart — mFace*/mEye*/mSkull, the mWing*/mTail*/mHindLimb*
+        // attachment chains, mGroin — plus mToe, whose slot SKEL_*_Toe0 has
+        // already gone to mFoot (see the leg note).
+        string? key = joint.ToLowerInvariant() switch
+        {
+            // Torso. The classic chain is Pelvis→Torso→Chest; Bento inserted
+            // mSpine1/2 below the torso and mSpine3/4 above it, so they take
+            // GTA's spare spine links. Nothing is left for mSpine4, which
+            // doubles up on Spine2 and loses the dedup coin-toss — it is an
+            // unanimated filler joint in practice.
+            "pelvis" => "SKEL_Pelvis",
+            "spine1" => "SKEL_Spine_Root",
+            "spine2" => "SKEL_Spine0",
+            "torso" or "abdomen" => "SKEL_Spine1",
+            "spine3" or "spine4" => "SKEL_Spine2",
+            "chest" => "SKEL_Spine3",
+            "neck" => "SKEL_Neck_1",
+            "head" => "SKEL_Head",
+            // Arms. Collar is the clavicle and Shoulder the upper arm — the
+            // inversion that makes an untreated SL rig fold in on itself.
+            "collar" => Sided("Clavicle"),
+            "shoulder" => Sided("UpperArm"),
+            "elbow" or "forearm" => Sided("Forearm"),
+            "wrist" or "hand" => Sided("Hand"),
+            // Legs. Hip is the thigh, not the pelvis. The avatar skeleton then
+            // splits the foot three ways — ankle (joint) → foot (ball) → toe —
+            // against GTA's two, so mAnkle becomes the foot and mFoot the toe.
+            // A .bvh has no ankle and its lFoot is just the foot.
+            "hip" or "thigh" => Sided("Thigh"),
+            "knee" or "shin" => Sided("Calf"),
+            "ankle" => Sided("Foot"),
+            "foot" => avatarRig ? Sided("Toe0") : Sided("Foot"),
+            "toe" => avatarRig ? null : Sided("Toe0"),
+            _ => null,
+        };
+
+        if (key == null) return false;
+        tag = ByGtaName[key];
+        return true;
     }
 }

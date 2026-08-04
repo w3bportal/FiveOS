@@ -13,9 +13,9 @@
 
     <AssemblyName>FiveOS</AssemblyName>
     <RootNamespace>FiveOS</RootNamespace>
-    <Version>1.0.13</Version>
-    <FileVersion>1.0.13.0</FileVersion>
-    <AssemblyVersion>1.0.13.0</AssemblyVersion>
+    <Version>1.0.14</Version>
+    <FileVersion>1.0.14.0</FileVersion>
+    <AssemblyVersion>1.0.14.0</AssemblyVersion>
     <Authors>FiveOS</Authors>
     <Company>FiveOS</Company>
     <Product>FiveOS</Product>
@@ -103,7 +103,9 @@
     <PackageReference Include="AssimpNet" Version="5.0.0-beta1" />
 
     <!-- Pure-C# QEM decimation + triangle remesh (Reducer / Remesher).
-         Unofficial .NET 8 build of gradientspace/geometry3Sharp — MIT.
+         Unofficial .NET 8 build of gradientspace/geometry3Sharp — Boost
+         Software License 1.0 (the NuGet package mislabels it MIT; both are
+         permissive and GPL-3.0 compatible, but attribute it correctly).
          Used by the Mesh Optimize tab for quadric edge-collapse decimation,
          entirely in-process (no Python sidecar). -->
     <PackageReference Include="Geometry3Sharp.DotNet8.Unofficial" Version="1.0.0-d8" />
@@ -130,14 +132,18 @@
 
   <ItemGroup>
     <!-- ydr-writer/ is a sibling .NET project; its sources must not be
-         globbed into the FiveOS compile. The prebuilt ydr-writer.exe
-         ships from Engine/ instead. -->
+         globbed into the FiveOS compile. It is published separately by the
+         BuildYdrWriter target below, which drops ydr-writer.exe into Engine/
+         where the loose-copy and engine.zip globs pick it up. -->
     <Compile Remove="ydr-writer\**" />
     <None Remove="ydr-writer\**" />
     <Page Remove="ydr-writer\**" />
     <Resource Remove="ydr-writer\**" />
     <ApplicationDefinition Remove="ydr-writer\**" />
     <EmbeddedResource Remove="ydr-writer\**" />
+
+    <!-- Inputs for BuildYdrWriter's up-to-date check. -->
+    <_YdrWriterSource Include="ydr-writer\**\*.cs;ydr-writer\ydr-writer.csproj;ydr-writer\lib\*.dll" />
 
     <!-- Thumbnails addon: kept on-disk locally (see .gitignore) but NOT built
          into the shipped app. Remove-of-a-missing-file is a harmless no-op, so
@@ -204,6 +210,47 @@
       <CopyToPublishDirectory>Never</CopyToPublishDirectory>
     </None>
   </ItemGroup>
+
+  <!-- ── Engine\ydr-writer.exe is BUILT, never committed ────────────────
+       It is the self-contained single-file publish of the sibling
+       ydr-writer project — 39 MB of build output that has no business in a
+       repo that already ships its source. Published into Engine/ so the
+       loose-copy glob and the engine.zip staging below both find it exactly
+       where they always did; nothing downstream had to change.
+
+       Inputs/Outputs matter here: a self-contained single-file publish takes
+       ~40s, so it must run only when a ydr-writer source file is newer than
+       the exe, not on every incremental build. Always Release — this is a
+       shipped tool, not something the host build's Debug config should
+       weaken. Same _wpftmp guard as EmbedRuntimeAssetZips: the WPF markup
+       temp project copies this file and re-runs its targets concurrently. -->
+  <Target Name="BuildYdrWriter" BeforeTargets="EmbedRuntimeAssetZips"
+          Condition="!$(MSBuildProjectName.EndsWith('_wpftmp'))"
+          Inputs="@(_YdrWriterSource)"
+          Outputs="$(MSBuildProjectDirectory)\Engine\ydr-writer.exe">
+    <PropertyGroup>
+      <_YdrWriterOut>$([System.IO.Path]::GetFullPath('$(IntermediateOutputPath)ydr-writer-publish'))</_YdrWriterOut>
+    </PropertyGroup>
+    <Message Importance="high" Text="Publishing ydr-writer.exe (self-contained, ~40s) ..." />
+    <Exec Command="dotnet publish &quot;$(MSBuildProjectDirectory)\ydr-writer\ydr-writer.csproj&quot; -c Release -o &quot;$(_YdrWriterOut)&quot; --nologo" />
+    <Error Condition="!Exists('$(_YdrWriterOut)\ydr-writer.exe')"
+           Text="ydr-writer publish reported success but produced no ydr-writer.exe in $(_YdrWriterOut)." />
+    <Copy SourceFiles="$(_YdrWriterOut)\ydr-writer.exe"
+          DestinationFolder="$(MSBuildProjectDirectory)\Engine" />
+  </Target>
+
+  <!-- The Engine\**\* None glob above is evaluated at project load, so on a
+       clean clone (or the build that first generates the exe) it hasn't seen
+       ydr-writer.exe yet and the dev loose layout comes out missing it. Copy
+       it after Build, where the file and $(OutDir) are both guaranteed. Only
+       matters for F5 — a published app reads it out of engine.zip. -->
+  <Target Name="CopyYdrWriterToOutput" AfterTargets="Build"
+          Condition="!$(MSBuildProjectName.EndsWith('_wpftmp'))"
+          Inputs="$(MSBuildProjectDirectory)\Engine\ydr-writer.exe"
+          Outputs="$(OutDir)Engine\ydr-writer.exe">
+    <Copy SourceFiles="$(MSBuildProjectDirectory)\Engine\ydr-writer.exe"
+          DestinationFolder="$(OutDir)Engine" SkipUnchangedFiles="true" />
+  </Target>
 
   <!-- Zip Assets/Viewer/ + Engine/ into intermediate output and embed
        the archives into the assembly. RuntimeAssets extracts them to

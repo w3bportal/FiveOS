@@ -665,24 +665,38 @@ public partial class PoseToEmoteViewModel : ObservableObject
     /// on. Pushes the toggle state down to the JS evaluator via the
     /// host's view-changed hook.</summary>
     /// <summary>Emote playback mode, stored as the <see cref="Services.EmoteMovement"/>
-    /// value (1 = upper body, 2 = root motion). In-place was retired from the
-    /// UI — a legacy saved 0 maps to root motion, and static pose emotes still
-    /// force in-place on export via <see cref="EffectiveExportMovement"/>.</summary>
+    /// value (0 = in place, 1 = upper body, 2 = root motion). Static pose emotes
+    /// force in-place on export via <see cref="EffectiveExportMovement"/> whatever
+    /// is picked here.
+    ///
+    /// In place is the mode a clip needs when the ped is ATTACHED to something
+    /// (a board, a seat, a rig prop): it is the only mode that neither bakes a
+    /// SKEL_ROOT mover into the .ycd nor asks for AF_USE_MOVER_EXTRACTION +
+    /// AF_USE_KINEMATIC_PHYSICS, both of which fight AttachEntityToEntity and
+    /// throw the ped around. It was briefly retired from the dropdown; a clip
+    /// held on an attached ped has no way to say what it needs without it.</summary>
     [ObservableProperty] private int _movementIndex = (int)Services.EmoteMovement.RootMotion;
 
-    public Services.EmoteMovement Movement =>
-        MovementIndex == (int)Services.EmoteMovement.UpperBody
-            ? Services.EmoteMovement.UpperBody
-            : Services.EmoteMovement.RootMotion;
+    public Services.EmoteMovement Movement => MovementIndex switch
+    {
+        (int)Services.EmoteMovement.InPlace => Services.EmoteMovement.InPlace,
+        (int)Services.EmoteMovement.UpperBody => Services.EmoteMovement.UpperBody,
+        _ => Services.EmoteMovement.RootMotion,
+    };
 
-    /// <summary>The two-item Movement dropdown (0 = Upper body, 1 = Root
-    /// motion) mapped onto the enum-valued <see cref="MovementIndex"/>.</summary>
+    /// <summary>The Movement dropdown. Item order matches the enum (0 = In
+    /// place, 1 = Upper body, 2 = Root motion), so this is a pass-through that
+    /// exists only to pin a stale saved value onto a real mode.</summary>
     public int MovementComboIndex
     {
-        get => Movement == Services.EmoteMovement.UpperBody ? 0 : 1;
-        set => MovementIndex = value == 0
-            ? (int)Services.EmoteMovement.UpperBody
-            : (int)Services.EmoteMovement.RootMotion;
+        get => (int)Movement;
+        // A ComboBox reports -1 while its items are being rebuilt; taking that
+        // literally would silently drop the user back to In place.
+        set
+        {
+            if (value < 0) return;
+            MovementIndex = Math.Min(value, (int)Services.EmoteMovement.RootMotion);
+        }
     }
 
     /// <summary>Movement used for export: static poses stay in-place; animated

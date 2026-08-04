@@ -176,7 +176,8 @@ public sealed partial class PropPackSession : ObservableObject
 
     /// <summary>Enqueue source meshes for one-by-one convert. Converted
     /// props land in <paramref name="groupName"/> (null = loose layer).</summary>
-    public int EnqueueConvertPaths(IEnumerable<string> paths, string? groupName = null)
+    public int EnqueueConvertPaths(IEnumerable<string> paths, string? groupName = null,
+                                   IList<string>? skipped = null)
     {
         var group = string.IsNullOrWhiteSpace(groupName) ? null : groupName!.Trim();
         if (group is not null && !Groups.Contains(group, StringComparer.OrdinalIgnoreCase))
@@ -187,13 +188,31 @@ public sealed partial class PropPackSession : ObservableObject
         {
             if (string.IsNullOrWhiteSpace(raw) || !File.Exists(raw)) continue;
             if (!IsSupportedMesh(raw)) continue;
-            if (ConvertQueue.Any(q => string.Equals(q.SourcePath, raw, StringComparison.OrdinalIgnoreCase)))
+
+            // The queue tracks the ORIGINAL path so re-adding the same package
+            // is still caught as a duplicate, but converts from the unpacked
+            // .glb. Name the asset after the package, not the temp file.
+            var source = raw;
+            var stem = Path.GetFileNameWithoutExtension(raw) ?? "prop";
+            if (IsSimsPackage(raw))
+            {
+                if (ConvertQueue.Any(q => string.Equals(q.SourcePath, raw, StringComparison.OrdinalIgnoreCase)))
+                    continue;
+                var glb = UnpackSimsPackage(raw, out var reason);
+                if (glb is null)
+                {
+                    if (reason is not null) skipped?.Add(reason);
+                    continue;
+                }
+                source = glb;
+            }
+
+            if (ConvertQueue.Any(q => string.Equals(q.SourcePath, source, StringComparison.OrdinalIgnoreCase)))
                 continue;
             if (ConvertQueue.Count >= 30) break;
 
-            var stem = Path.GetFileNameWithoutExtension(raw) ?? "prop";
             var asset = UniqueQueueAssetName(Sanitize(stem));
-            ConvertQueue.Add(new PropPackQueueItem(raw, asset) { GroupName = group });
+            ConvertQueue.Add(new PropPackQueueItem(source, asset) { GroupName = group });
             added++;
         }
         NotifyAggregateChanged();
@@ -485,7 +504,55 @@ public sealed partial class PropPackSession : ObservableObject
     private static bool IsSupportedMesh(string path)
     {
         var ext = Path.GetExtension(path).ToLowerInvariant();
-        return ext is ".obj" or ".glb" or ".gltf" or ".fbx" or ".dae" or ".ply" or ".stl";
+        return ext is ".obj" or ".glb" or ".gltf" or ".fbx" or ".dae" or ".ply" or ".stl"
+                   or ".package";
+    }
+
+    private static bool IsSimsPackage(string path) =>
+        string.Equals(Path.GetExtension(path), ".package", StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>Where unpacked Sims meshes live for this session. One folder
+    /// per app run so a converted package's .glb and its textures stay
+    /// together and don't collide across imports.</summary>
+    private string? _simsUnpackDir;
+
+    private string SimsUnpackDir
+    {
+        get
+        {
+            if (_simsUnpackDir is null)
+            {
+                _simsUnpackDir = Path.Combine(Path.GetTempPath(),
+                    "fiveos_sims", Guid.NewGuid().ToString("N")[..8]);
+                Directory.CreateDirectory(_simsUnpackDir);
+            }
+            return _simsUnpackDir;
+        }
+    }
+
+    /// <summary>Unpack a Sims .package to a .glb the rest of the pipeline can
+    /// treat as an ordinary model. Returns null and a reason when the package
+    /// holds no convertible geometry — most often because it's a pose pack,
+    /// which is worth saying out loud rather than reporting as a bad file.</summary>
+    private string? UnpackSimsPackage(string path, out string? reason)
+    {
+        reason = null;
+        try
+        {
+            var dir = Path.Combine(SimsUnpackDir, Sanitize(Path.GetFileNameWithoutExtension(path)));
+            var result = Sims.SimsPropImporter.Import(path, dir);
+            if (!result.Success || result.GlbPath is null)
+            {
+                reason = $"{Path.GetFileName(path)}: {result.Error}";
+                return null;
+            }
+            return result.GlbPath;
+        }
+        catch (Exception ex)
+        {
+            reason = $"{Path.GetFileName(path)}: {ex.Message}";
+            return null;
+        }
     }
 
     private string UniqueQueueAssetName(string baseName)

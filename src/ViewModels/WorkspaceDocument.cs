@@ -14,6 +14,7 @@ public enum WorkspaceKind
     Emotes,
     Vehicles,
     Rpf,
+    Clothing,
 }
 
 /// <summary>One open document tab in the app chrome (C4D-style). Emotes
@@ -68,6 +69,7 @@ public sealed partial class WorkspaceDocument : ObservableObject
         WorkspaceKind.Emotes => "Untitled",
         WorkspaceKind.Vehicles => "Vehicles",
         WorkspaceKind.Rpf => "RPF",
+        WorkspaceKind.Clothing => "Clothing",
         _ => "Untitled",
     };
 
@@ -78,6 +80,7 @@ public sealed partial class WorkspaceDocument : ObservableObject
         AppView.Emotes => WorkspaceKind.Emotes,
         AppView.Vehicles => WorkspaceKind.Vehicles,
         AppView.Rpf => WorkspaceKind.Rpf,
+        AppView.Clothing => WorkspaceKind.Clothing,
         _ => null,
     };
 
@@ -88,6 +91,7 @@ public sealed partial class WorkspaceDocument : ObservableObject
         WorkspaceKind.Emotes => "Emotes",
         WorkspaceKind.Vehicles => "Vehicles",
         WorkspaceKind.Rpf => "Rpf",
+        WorkspaceKind.Clothing => "Clothing",
         _ => "Assets",
     };
 }

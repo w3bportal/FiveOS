@@ -31,7 +31,10 @@ internal static class GtaBoneTags
         ["SKEL_R_Clavicle"]      = 10706,
         ["SKEL_R_UpperArm"]      = 40269,
         ["SKEL_R_Forearm"]       = 28252,
-        ["SKEL_R_Hand"]          = 6286,
+        // 57005, NOT 6286 — 6286 is IK_R_Hand's tag. A stale value here tagged
+        // every exported right-hand channel as an IK helper bone, so the hand
+        // never animated in game.
+        ["SKEL_R_Hand"]          = 57005,
         ["SKEL_L_Thigh"]         = 58271,
         ["SKEL_L_Calf"]          = 63931,
         ["SKEL_L_Foot"]          = 14201,

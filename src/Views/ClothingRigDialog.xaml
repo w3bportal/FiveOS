@@ -1,0 +1,97 @@
+<ui:FluentWindow x:Class="FiveOS.Views.ClothingRigDialog"
+                 xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+                 xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+                 xmlns:ui="http://schemas.lepo.co/wpfui/2022/xaml"
+                 Title="Auto-rig clothing"
+                 Width="560" SizeToContent="Height"
+                 ResizeMode="NoResize"
+                 WindowStartupLocation="CenterOwner"
+                 WindowBackdropType="None"
+                 ExtendsContentIntoTitleBar="True">
+    <Grid Margin="18,4,18,16">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+        </Grid.RowDefinitions>
+
+        <ui:TitleBar Grid.Row="0" Title="Auto-rig clothing"
+                     ShowMaximize="False" ShowMinimize="False" />
+
+        <StackPanel Grid.Row="1" Margin="0,10,0,0">
+            <TextBlock TextWrapping="Wrap" FontSize="11" Foreground="#FF9A9A9A" Margin="0,0,0,14"
+                       Text="Give it a garment modelled around the ped — a hoodie, jacket, vest or bag — and it works out the skin weights against the GTA body and writes a wearable .ydd with all three LODs. The mesh needs no rig and no vertex groups; it does need to be positioned on the body, at GTA scale." />
+
+            <TextBlock Text="Garment mesh" FontSize="11" Foreground="#FFBDBDBD" Margin="0,0,0,4" />
+            <Grid Margin="0,0,0,12">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition /><ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+                <ui:TextBox x:Name="MeshBox" FontSize="12" PlaceholderText=".fbx / .glb / .gltf / .obj / .dae" />
+                <ui:Button Grid.Column="1" Content="Browse…" Margin="8,0,0,0" Padding="12,6"
+                           Appearance="Secondary" Click="OnBrowseMesh" />
+            </Grid>
+
+            <Grid Margin="0,0,0,12">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" /><ColumnDefinition Width="*" />
+                </Grid.ColumnDefinitions>
+                <StackPanel Grid.Column="0" Margin="0,0,10,0">
+                    <TextBlock Text="Body" FontSize="11" Foreground="#FFBDBDBD" Margin="0,0,0,4"
+                               ToolTip="A garment has to be weighted separately for each body — their proportions differ." />
+                    <StackPanel Orientation="Horizontal">
+                        <RadioButton x:Name="BodyMale" Content="Male" IsChecked="True" FontSize="12" GroupName="Body" />
+                        <RadioButton x:Name="BodyFemale" Content="Female" FontSize="12" Margin="16,0,0,0" GroupName="Body" />
+                    </StackPanel>
+                </StackPanel>
+                <StackPanel Grid.Column="1">
+                    <TextBlock Text="Component" FontSize="11" Foreground="#FFBDBDBD" Margin="0,0,0,4"
+                               ToolTip="The drawable name, e.g. jbib_042_u. jbib = tops and jackets, uppr = torso/arms, lowr = legs, task = vests, hand = bags." />
+                    <ui:TextBox x:Name="ComponentBox" FontSize="12" Text="jbib_000_u" />
+                </StackPanel>
+            </Grid>
+
+            <CheckBox x:Name="LodsBox" IsChecked="True" FontSize="12" Margin="0,0,0,14"
+                      Content="Generate Med and Low detail levels (recommended)"
+                      ToolTip="Without them the garment disappears once the player walks away — the most common fault in custom clothing." />
+
+            <Border x:Name="ResultPanel" Visibility="Collapsed"
+                    Background="#22FFFFFF" CornerRadius="6" Padding="12,10" Margin="0,0,0,14">
+                <StackPanel>
+                    <TextBlock x:Name="ResultTitle" FontSize="12" FontWeight="SemiBold" TextWrapping="Wrap" />
+                    <TextBlock x:Name="ResultDetail" FontSize="11" Foreground="#FFBDBDBD"
+                               TextWrapping="Wrap" Margin="0,6,0,0" />
+                </StackPanel>
+            </Border>
+
+            <StackPanel x:Name="ProgressPanel" Visibility="Collapsed" Margin="0,0,0,12">
+                <Grid Margin="0,0,0,4">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition /><ColumnDefinition Width="Auto" />
+                    </Grid.ColumnDefinitions>
+                    <TextBlock x:Name="ProgressStage" FontSize="11" Foreground="#FFBDBDBD"
+                               TextTrimming="CharacterEllipsis" />
+                    <TextBlock x:Name="ProgressPercent" Grid.Column="1" FontSize="11" FontFamily="Consolas"
+                               Foreground="#FFBDBDBD" HorizontalAlignment="Right" Text="0%" />
+                </Grid>
+                <ProgressBar x:Name="ProgressBarCtl" Height="6" Minimum="0" Maximum="100" Value="0" />
+                <TextBlock x:Name="ProgressHint" FontSize="10" Foreground="#FF808080" Margin="0,6,0,0"
+                           TextWrapping="Wrap" Visibility="Collapsed"
+                           Text="This is taking a while — usually that means the garment isn't sitting on the ped, so almost none of it matches the body and every vertex has to be solved instead. Worth checking its position and scale." />
+            </StackPanel>
+
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition /><ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+                <TextBlock x:Name="StatusText" FontSize="10" Foreground="#FF808080"
+                           VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
+                <StackPanel Grid.Column="1" Orientation="Horizontal">
+                    <ui:Button Content="Close" Appearance="Secondary" MinWidth="80" Padding="10,6"
+                               Margin="0,0,8,0" Click="OnClose" />
+                    <ui:Button x:Name="RigBtn" Content="Rig and export…" Appearance="Primary"
+                               MinWidth="130" Padding="10,6" Click="OnRig" />
+                </StackPanel>
+            </Grid>
+        </StackPanel>
+    </Grid>
+</ui:FluentWindow>
