@@ -70,14 +70,35 @@ public static class YcdAnimationBuilder
             if (b.PerFrame is null || b.PerFrame.Length != frames)
                 throw new ArgumentException($"Bone tag {b.BoneTag} has {b.PerFrame?.Length ?? 0} samples; clip needs {frames}.");
 
-        // Optional position (mover) tracks — SKEL_ROOT root motion. Track-major
-        // ordering means these come BEFORE the rotation block in both BoneIds
-        // and SequenceData (Sollumz sort key boneId | track<<16).
+        // Optional per-bone position tracks. Track-major ordering means these
+        // come BEFORE the rotation block in both BoneIds and SequenceData
+        // (Sollumz sort key boneId | track<<16).
         var posTracks = positions?.Where(p => p.PerFrame is { Length: > 0 }).OrderBy(p => p.BoneTag).ToList()
                         ?? new List<PosedPositionTrack>();
         foreach (var p in posTracks)
             if (p.PerFrame.Length != frames)
                 throw new ArgumentException($"Position track tag {p.BoneTag} has {p.PerFrame.Length} samples; clip needs {frames}.");
+
+        // The entity MOVER (Track 5 translation + Track 6 rotation, BoneId 0).
+        // Every vanilla ped clip carries one; FiveOS clips shipped none, which
+        // left the ped's root unauthored. That is invisible on solid ground —
+        // whatever plays underneath the clip is static too — but on a moving
+        // attached entity (hoverboard, train deck, boat) the underlying motion
+        // state has velocity, so the game keeps solving root lean and heading
+        // and the posed body swings around as a rigid unit while the bone pose
+        // itself stays frozen. Authoring the mover hands that authority back
+        // to the clip.
+        //
+        // A clip that genuinely travels arrives with a SKEL_ROOT (tag 0)
+        // position track — that IS the mover, so it MOVES here out of the
+        // Track 0 bone block (where FiveOS used to bake it) instead of being
+        // duplicated across both. AF_USE_MOVER_EXTRACTION reads Track 5, so
+        // travelling clips land on the channel the game actually extracts.
+        // Clips that don't travel get a zero translation: that is not "freeze
+        // the ped", it's "this clip does not move the ped relative to its own
+        // entity" — the bone animation plays in full either way.
+        var moverTranslation = posTracks.FirstOrDefault(p => p.BoneTag == 0)?.PerFrame;
+        if (moverTranslation != null) posTracks.RemoveAll(p => p.BoneTag == 0);
 
         var safe = SanitizeClipName(clipName);
         var animDataName = "hash_" + (YcdPoseBuilder.Joaat(safe) + 1).ToString("X8");
@@ -113,12 +134,14 @@ public static class YcdAnimationBuilder
         sb.AppendLine($"   <Unknown1C>{animDataName}</Unknown1C>");
 
         // BoneIds — Unk0 is the track FORMAT: 0=Vector3 (position), 1=Quaternion
-        // (rotation). Position (mover) tracks first, then the rotation block.
+        // (rotation). Track-major: bone positions, bone rotations, then the
+        // mover pair (5 translation, 6 rotation) which sorts last.
         sb.AppendLine("   <BoneIds>");
         foreach (var p in posTracks)
             sb.AppendLine($"    <Item><BoneId value=\"{p.BoneTag}\" /><Track value=\"0\" /><Unk0 value=\"0\" /></Item>");
         foreach (var b in sorted)
             sb.AppendLine($"    <Item><BoneId value=\"{b.BoneTag}\" /><Track value=\"1\" /><Unk0 value=\"1\" /></Item>");
+        YcdPoseBuilder.AppendMoverBoneIds(sb);
         sb.AppendLine("   </BoneIds>");
 
         sb.AppendLine("   <Sequences>");
@@ -151,6 +174,11 @@ public static class YcdAnimationBuilder
                 sb.AppendLine("      </Channels></Item>");
             }
         }
+
+        // Mover pair, mirroring the BoneIds order 1:1.
+        if (moverTranslation != null) AppendPositionItem(sb, moverTranslation);
+        else YcdPoseBuilder.AppendNeutralMoverTranslation(sb);
+        YcdPoseBuilder.AppendMoverRotation(sb);
 
         sb.AppendLine("     </SequenceData>");
         sb.AppendLine("    </Item>");

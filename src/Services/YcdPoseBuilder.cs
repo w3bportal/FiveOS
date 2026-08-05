@@ -118,11 +118,13 @@ public static class YcdPoseBuilder
         // Track-major BoneIds, each entry's Unk0 = the track's value FORMAT:
         //   Track=0 position -> Unk0=0 (Vector3)
         //   Track=1 rotation -> Unk0=1 (Quaternion)   <-- the critical one
+        //   Track=5/6 mover  -> the entity mover pair, sorts last
         sb.AppendLine("   <BoneIds>");
         foreach (var b in positioned)
             sb.AppendLine($"    <Item><BoneId value=\"{b.BoneTag}\" /><Track value=\"0\" /><Unk0 value=\"0\" /></Item>");
         foreach (var b in sorted)
             sb.AppendLine($"    <Item><BoneId value=\"{b.BoneTag}\" /><Track value=\"1\" /><Unk0 value=\"1\" /></Item>");
+        AppendMoverBoneIds(sb);
         sb.AppendLine("   </BoneIds>");
 
         sb.AppendLine("   <Sequences>");
@@ -142,6 +144,11 @@ public static class YcdPoseBuilder
             if (q.W < 0f) q = new Quaternion(-q.X, -q.Y, -q.Z, -q.W);
             sb.AppendLine($"      <Item><Channels><Item><Type value=\"StaticQuaternion\" /><Value x=\"{F(q.X)}\" y=\"{F(q.Y)}\" z=\"{F(q.Z)}\" w=\"{F(q.W)}\" /></Item></Channels></Item>");
         }
+        // A held pose never travels, so the mover is neutral — but it still has
+        // to be PRESENT, or the ped's root stays unauthored and swings whenever
+        // the entity underneath it moves.
+        AppendNeutralMoverTranslation(sb);
+        AppendMoverRotation(sb);
         sb.AppendLine("     </SequenceData>");
         sb.AppendLine("    </Item>");
         sb.AppendLine("   </Sequences>");
@@ -151,6 +158,29 @@ public static class YcdPoseBuilder
 
         return sb.ToString();
     }
+
+    /// <summary>BoneIds entries for the entity mover: Track 5 translation
+    /// (Vector3 format) and Track 6 rotation (Quaternion format), both on
+    /// BoneId 0. Every vanilla ped clip carries this pair — it is what tells
+    /// the game the clip owns the ped's root, instead of leaving the root to
+    /// whatever motion state is playing underneath.</summary>
+    internal static void AppendMoverBoneIds(StringBuilder sb)
+    {
+        sb.AppendLine("    <Item><BoneId value=\"0\" /><Track value=\"5\" /><Unk0 value=\"0\" /></Item>");
+        sb.AppendLine("    <Item><BoneId value=\"0\" /><Track value=\"6\" /><Unk0 value=\"1\" /></Item>");
+    }
+
+    /// <summary>Zero mover translation — "this clip does not move the ped
+    /// relative to its own entity". Not a freeze: the bone tracks still play
+    /// in full, and an entity the ped is attached to still carries it along.</summary>
+    internal static void AppendNeutralMoverTranslation(StringBuilder sb) =>
+        sb.AppendLine("      <Item><Channels><Item><Type value=\"StaticVector3\" /><Value x=\"0\" y=\"0\" z=\"0\" /></Item></Channels></Item>");
+
+    /// <summary>Identity mover rotation. FiveOS bakes no heading change into a
+    /// clip, so this is the truthful value — and stating it stops the game
+    /// solving a heading of its own while the clip plays.</summary>
+    internal static void AppendMoverRotation(StringBuilder sb) =>
+        sb.AppendLine("      <Item><Channels><Item><Type value=\"StaticQuaternion\" /><Value x=\"0\" y=\"0\" z=\"0\" w=\"1\" /></Item></Channels></Item>");
 
     /// <summary>Jenkins one-at-a-time (joaat) over the lowercased name —
     /// the hash RAGE uses for asset/clip names.</summary>
