@@ -2626,6 +2626,11 @@ function postToHost(payload) {
     if (payload && payload.kind === 'pose-timeline-update') {
       if (poseSquelchTimelineEcho) return;
       payload.rev = ++_timelineEchoRev;
+      // The host derives IsAnimatedExport (Bake gate, movement mode, the
+      // Animated/Static chip) from this echo. Hand-recorded keys live in
+      // their own store and are absent from `keyframes` — stamp their
+      // count here, once, so keyed-by-hand timelines never read as static.
+      payload.userKeyCount = poseUserKeyframes.length;
     } else if (payload && (payload.kind === 'timeline-document-snapshot'
         || payload.kind === 'pose-timeline-tick')) {
       payload.rev = ++_timelineEchoRev;
@@ -8714,7 +8719,39 @@ function generatePoseClipName() {
   return `Pose Clip ${n}`;
 }
 
+// Fold the hand-recorded user layer into poseKeyframes so bake consumes
+// the COMPOSITED timeline. Samples the SAME layered evaluator the preview
+// plays (base + per-bone user ownership masking) at the union of both
+// stores' key times — the baked clip is exactly what the user watched.
+// Keyed-by-hand-only timelines (the "pose it yourself" flow) have an
+// EMPTY poseKeyframes and bake entirely through this path.
+function poseFoldUserLayerForBake() {
+  if (!poseUserKeyframes.length) return;
+  const byTime = new Map();
+  for (const k of poseKeyframes) {
+    const t = +(+k.time).toFixed(3);
+    byTime.set(t, { time: t, ease: k.ease || 'auto', root: k.root || null });
+  }
+  for (const k of poseUserKeyframes) {
+    const t = +(+k.time).toFixed(3);
+    const m = byTime.get(t);
+    if (m) m.ease = k.ease || m.ease;   // user owns the segment's feel
+    else byTime.set(t, { time: t, ease: k.ease || 'auto', root: null });
+  }
+  const merged = Array.from(byTime.values()).sort((a, b) => a.time - b.time);
+  for (const m of merged) {
+    poseEvaluate(m.time);
+    m.bones = poseSnapshot();
+    poseEnsureKeyId(m);
+  }
+  poseKeyframes = merged;
+  poseUserKeyframes = [];
+  // Leave the live rig at the playhead, not at the last sampled key.
+  poseEvaluate(poseTime);
+}
+
 window.poseBakeToClip = function (name, metadata) {
+  poseFoldUserLayerForBake();
   if (poseKeyframes.length < 2) {
     throw new Error('Need at least 2 keyframes to bake a clip');
   }
@@ -8975,9 +9012,11 @@ window.poseActiveStripId = function () {
   return poseStrips.length === 1 ? poseStrips[0].id : null;
 };
 
-// True when the timeline has something to play or export.
+// True when the timeline has something to play or export. Hand-recorded
+// keys live in their own store (poseUserKeyframes) and count too — a
+// keyed-by-hand-only timeline is animated content, same as the play gate.
 window.poseHasAnimatedContent = function () {
-  return poseKeyframes.length >= 2 || poseStrips.length > 0;
+  return poseKeyframes.length + poseUserKeyframes.length >= 2 || poseStrips.length > 0;
 };
 
 function poseSampleClipRoot(clipEntry, localT) {
@@ -12102,7 +12141,12 @@ window.getKeyframes = function () {
       index: i,
       name: b.name || ('bone_' + i),
     })),
-    keyframes: poseKeyframes.map(k => ({
+    // Export-only payload (host reads the count + root-motion fallback):
+    // merge the hand-recorded user layer in so keyed-by-hand timelines
+    // report their real keyframe count instead of 0.
+    keyframes: [...poseKeyframes, ...poseUserKeyframes]
+      .sort((a, b) => a.time - b.time)
+      .map(k => ({
       time: k.time,
       // Sparse: only the bones the keyframe actually changed -- but
       // since poseAddKeyframe snapshots all bones, this is currently
@@ -12132,7 +12176,7 @@ window.samplePoseClipForExport = function () {
   // the UNION of all strips (multi-layer stacks/staggered strips must all
   // land in the export, not just the longest one). Source/boneSpace
   // metadata still comes from the longest strip's clip.
-  if (poseKeyframes.length < 2 && poseStrips.length > 0) {
+  if (poseKeyframes.length + poseUserKeyframes.length < 2 && poseStrips.length > 0) {
     t0 = Math.min(...poseStrips.map(s => s.start));
     t1 = Math.max(...poseStrips.map(s => s.start + s.duration));
     const s = poseStrips.reduce((a, b) => (a.duration > b.duration ? a : b));

@@ -1085,21 +1085,29 @@ public partial class PoseToEmoteViewModel : ObservableObject
 
     private string TimelineStripsLabel()
     {
-        if (Strips.Count > 0 && TimelineKeyframes.Count < 2)
+        int keyCount = TimelineKeyframes.Count + UserKeyframeCount;
+        if (Strips.Count > 0 && keyCount < 2)
         {
             var s = Strips[0];
             return Strips.Count == 1
                 ? $"Clip · {s.ClipName} · {s.Duration:F1}s"
                 : $"Clips · {Strips.Count} on timeline · {TimelineDuration:F1}s";
         }
-        if (TimelineKeyframes.Count >= 2)
-            return $"Animated · {TimelineKeyframes.Count} KFs · {TimelineDuration:F1}s @ {TimelineFps}fps";
-        if (TimelineKeyframes.Count == 1)
+        if (keyCount >= 2)
+            return $"Animated · {keyCount} KFs · {TimelineDuration:F1}s @ {TimelineFps}fps";
+        if (keyCount == 1)
             return "Static · 1 KF won't animate (need 2+)";
         return "Static pose";
     }
 
-    public bool IsAnimatedExport => TimelineKeyframes.Count >= 2 || Strips.Count > 0;
+    /// <summary>Hand-recorded (user-layer) key count, mirrored from the
+    /// viewer's pose-timeline-update echo. User keys live in their own store
+    /// and never appear in TimelineKeyframes — without this the Bake gate,
+    /// movement mode and chip all read a keyed-by-hand timeline as static.</summary>
+    public int UserKeyframeCount { get; set; }
+
+    public bool IsAnimatedExport =>
+        TimelineKeyframes.Count + UserKeyframeCount >= 2 || Strips.Count > 0;
     public bool ShowKeyframeLane => TimelineKeyframes.Count > 0;
 
     /// <summary>True when Clear all has something to destroy. Gates the button
@@ -1107,7 +1115,8 @@ public partial class PoseToEmoteViewModel : ObservableObject
     /// pose itself isn't counted: it can't be observed from here, and Revert
     /// already covers "just reset the rig".</summary>
     public bool HasAnythingToClear =>
-        Strips.Count > 0 || ClipLibrary.Count > 0 || TimelineKeyframes.Count > 0;
+        Strips.Count > 0 || ClipLibrary.Count > 0
+        || TimelineKeyframes.Count > 0 || UserKeyframeCount > 0;
 
     /// <summary>Helper for code-behind to fire change notifications on
     /// the derived chip text/state whenever keyframes mutate.</summary>

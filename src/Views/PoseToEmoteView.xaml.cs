@@ -1061,6 +1061,16 @@ public partial class PoseToEmoteView : UserControl
                             _vm.TimelinePlaying = pEl.GetBoolean();
                         if (rootUpd.TryGetProperty("loop", out var lEl))
                             _vm.TimelineLoop = lEl.GetBoolean();
+                        // Hand-recorded keys are echoed as a bare count (they
+                        // never ride in `keyframes`) — the Bake gate, movement
+                        // mode and chip need it to see keyed-by-hand timelines.
+                        if (rootUpd.TryGetProperty("userKeyCount", out var ukEl)
+                            && ukEl.TryGetInt32(out var ukCount)
+                            && ukCount != _vm.UserKeyframeCount)
+                        {
+                            _vm.UserKeyframeCount = ukCount;
+                            _vm.NotifyAnimatedChipChanged();
+                        }
                         if (rootUpd.TryGetProperty("keyframes", out var kEl))
                             structural |= RebuildKeyframeMarkers(kEl);
                         MarkActiveEmoteDirty();
@@ -6689,8 +6699,16 @@ case "prop-loaded":
         {
             // Empty name => JS auto-generates a timestamped slug. M2's
             // strip editor (or a right-click rename) can adjust later.
-            await Viewport.CoreWebView2.ExecuteScriptAsync("window.poseBakeToClip('')");
-            _vm.StatusText = "Baked current keyframes into clip library.";
+            // A JS throw does NOT raise here (ExecuteScriptAsync just
+            // returns "null") — catch it viewer-side and surface the real
+            // reason instead of reporting success over a silent no-op.
+            var raw = await Viewport.CoreWebView2.ExecuteScriptAsync(
+                "(function(){try{return window.poseBakeToClip('');}catch(e){return 'ERR:' + (e && e.message ? e.message : e);}})()");
+            if (raw is not null && raw.StartsWith("\"ERR:", StringComparison.Ordinal))
+                _vm.StatusText = "Bake failed: " +
+                    (JsonSerializer.Deserialize<string>(raw) ?? "").Substring(4);
+            else
+                _vm.StatusText = "Baked current keyframes into clip library.";
         }
         catch (Exception ex)
         {
@@ -9202,10 +9220,12 @@ case "prop-loaded":
         _vm.Rigs.Clear();
         _vm.NotifyBonesChanged();
         _vm.TimelineKeyframes.Clear();
+        _vm.UserKeyframeCount = 0;
         _vm.TimelineTracks.Clear();
         _vm.Strips.Clear();
         _vm.TimelineTime = 0;
         _vm.TimelineDuration = 4;
+        _vm.NotifyAnimatedChipChanged();
         ScheduleRedrawTimeline();
     }
 
