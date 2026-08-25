@@ -87,7 +87,22 @@ public sealed class EngineRunner
         /// <summary>Optional JSON path of authored rotation keys
         /// ([{t,rx,ry,rz},...]). When set with AnimatedProp, the engine
         /// builds the .ycd from these keys instead of auto-spin / source clip.</summary>
-        string? AnimKeysPath = null);
+        string? AnimKeysPath = null,
+        /// <summary>Which game the prop is being built for. GTA V produces a
+        /// ready-to-drop FiveM resource (.ydr/.ybn/.ytyp + fxmanifest); GTA IV
+        /// produces loose RAGE resources (.wdr/.wbn, optional .wtd) plus the
+        /// editable OpenFormats source, because IV has no resource-folder
+        /// concept — assets are installed into an .img instead.</summary>
+        GameTarget Target = GameTarget.GtaV);
+
+    /// <summary>Export target. The two paths share this project's whole front
+    /// end — import, gizmo transform, axis correction, texture discovery — and
+    /// diverge only at the writer.</summary>
+    public enum GameTarget
+    {
+        GtaV,
+        GtaIv,
+    }
 
     public sealed record ConvertOutcome(
         bool Success,
@@ -141,6 +156,9 @@ public sealed class EngineRunner
 
         var workDir = Path.Combine(Path.GetTempPath(), "FiveOS", Guid.NewGuid().ToString("N")[..8]);
         Directory.CreateDirectory(workDir);
+
+        if (req.Target == GameTarget.GtaIv)
+            return await RunGtaIvAsync(req, workDir, onLog, cancel, deliverToDir);
 
         var args = new List<string>
         {
@@ -330,6 +348,244 @@ public sealed class EngineRunner
             try { Directory.Delete(workDir, recursive: true); } catch { /* swallow */ }
         }
         return outcome;
+    }
+
+    // ─── GTA IV ───────────────────────────────────────────────────────
+
+    /// <summary>Drive the engine's <c>wdr</c> subcommand.
+    ///
+    /// GTA IV has no resource-folder equivalent of a FiveM resource: props are
+    /// installed into an .img and declared in an .ide. So the deliverable is
+    /// the loose set of files the engine writes — .wdr, .wbn, optionally .wtd,
+    /// plus the OpenFormats source and a README with the install steps — and
+    /// the FiveM-shaped delivery modes (server folder, shared stream/, pack
+    /// session) don't apply.</summary>
+    private static async Task<ConvertOutcome> RunGtaIvAsync(
+        ConvertRequest req,
+        string workDir,
+        Action<string>? onLog,
+        CancellationToken cancel,
+        string? deliverToDir)
+    {
+        var ci = System.Globalization.CultureInfo.InvariantCulture;
+        var args = new List<string>
+        {
+            "wdr",
+            req.SourcePath,
+            "-o", workDir,
+            "--name", req.AssetName,
+            "--up", req.Up switch
+            {
+                UpAxis.YUp => "y_up",
+                UpAxis.ZUp => "z_up",
+                _ => "auto",
+            },
+            "--collision-mat", string.IsNullOrWhiteSpace(req.CollisionMaterial) ? "CONCRETE" : req.CollisionMaterial,
+            "--scale", $"{req.ScaleHint.X.ToString(ci)},{req.ScaleHint.Y.ToString(ci)},{req.ScaleHint.Z.ToString(ci)}",
+            "--pos", req.PositionHint,
+            "--rot", req.RotationHint,
+        };
+
+        if (!req.IncludeCollision) args.Add("--no-collision");
+
+        bool hasPartDiffuse = req.PartDiffuseTextures is { Count: > 0 };
+        if (!req.ExtractTextures && !hasPartDiffuse) args.Add("--no-textures");
+
+        // IV keeps reduced detail in a separate resource rather than extra
+        // tiers, so --lods produces a companion <name>_lod.wdr.
+        if (req.GenerateLods) args.Add("--lods");
+
+        if (req.ExcludeMeshes is { Count: > 0 })
+        {
+            args.Add("--exclude-mesh");
+            args.Add(string.Join(",", req.ExcludeMeshes));
+        }
+
+        if (req.PartMaterials is { Count: > 0 })
+        {
+            foreach (var kv in req.PartMaterials)
+            {
+                if (string.IsNullOrWhiteSpace(kv.Key) || string.IsNullOrWhiteSpace(kv.Value)) continue;
+                args.Add("--part-mat");
+                args.Add($"{kv.Key}={kv.Value}");
+            }
+        }
+
+        // Same sidecar-JSON trick the GTA V path uses so Windows paths with
+        // spaces and backslashes survive argv splitting.
+        string? partDiffuseJson = null;
+        if (hasPartDiffuse)
+        {
+            try
+            {
+                partDiffuseJson = Path.Combine(workDir, "part-diffuse.json");
+                File.WriteAllText(partDiffuseJson,
+                    System.Text.Json.JsonSerializer.Serialize(req.PartDiffuseTextures));
+                args.Add("--part-diffuse");
+                args.Add(partDiffuseJson);
+            }
+            catch { /* fall back to whatever Assimp resolves on its own */ }
+        }
+
+        // The compiler is a third-party tool we deliberately don't bundle.
+        // When it isn't configured the engine looks in its own conventional
+        // locations, and failing that stops at OpenFormats — which is still a
+        // usable hand-off, so this is never fatal.
+        var rb = UserSettings.LoadIvResourceBuilderPath();
+        if (!string.IsNullOrWhiteSpace(rb))
+        {
+            args.Add("--resource-builder");
+            args.Add(rb!);
+        }
+
+        var (exitCode, log, launchError) = await RunEngineProcessAsync(args, workDir, onLog, cancel);
+        if (launchError != null)
+            return new ConvertOutcome(false, null, OutputMode.SingleZip, log, launchError);
+        if (exitCode != 0)
+            return new ConvertOutcome(false, null, OutputMode.SingleZip, log,
+                $"Engine returned exit code {exitCode}. See log.");
+
+        // Drop the sidecar so it doesn't ship with the prop.
+        if (partDiffuseJson != null) { try { File.Delete(partDiffuseJson); } catch { /* */ } }
+
+        if (!File.Exists(Path.Combine(workDir, req.AssetName + ".wdr"))
+            && !Directory.EnumerateFiles(workDir, "*.odr").Any())
+        {
+            return new ConvertOutcome(false, null, OutputMode.SingleZip, log,
+                "Engine reported success but produced no GTA IV resources.");
+        }
+
+        try
+        {
+            if (deliverToDir != null)
+            {
+                Directory.CreateDirectory(deliverToDir);
+                CopyDirectory(workDir, deliverToDir);
+                return new ConvertOutcome(true, deliverToDir, OutputMode.ServerPerAsset, log, null);
+            }
+
+            var dest = UserSettings.ResolveSingleOutputFolder();
+            Directory.CreateDirectory(dest);
+            var zipPath = Path.Combine(dest, $"{req.AssetName}_gta4.zip");
+            if (File.Exists(zipPath)) File.Delete(zipPath);
+            System.IO.Compression.ZipFile.CreateFromDirectory(workDir, zipPath);
+            return new ConvertOutcome(true, zipPath, OutputMode.SingleZip, log, null);
+        }
+        catch (Exception ex)
+        {
+            return new ConvertOutcome(false, null, OutputMode.SingleZip, log,
+                $"Converted, but delivering the files failed: {ex.Message}");
+        }
+        finally
+        {
+            try { Directory.Delete(workDir, recursive: true); } catch { /* swallow */ }
+        }
+    }
+
+    /// <summary>Outcome of a .ymap to .wpl conversion.</summary>
+    public sealed record PlacementOutcome(
+        bool Success, string? WplPath, string? IdePath, string Log, string? Error);
+
+    /// <summary>Convert a GTA V map placement file into a GTA IV one.
+    ///
+    /// Standalone from the model pipeline on purpose: a .ymap holds no
+    /// geometry, so there is nothing to preview, bake or compile — it reads a
+    /// list of positions and writes a list of positions. The .ide that comes
+    /// with it lists every model the placements reference, which is the part
+    /// the user still has to convert separately.</summary>
+    /// <param name="namesFolder">Optional extra source of model names — a GTA V
+    /// install, a folder of assets, or a newline-separated list. A .ymap
+    /// identifies models by hash only, and without a name to match against, an
+    /// entry cannot be written into an .ide at all.</param>
+    public static async Task<PlacementOutcome> ConvertYmapToWplAsync(
+        string ymapPath,
+        string outputDir,
+        string? namesFolder = null,
+        Action<string>? onLog = null,
+        CancellationToken cancel = default)
+    {
+        if (!IsEngineAvailable())
+            return new PlacementOutcome(false, null, null, "",
+                $"Engine binary not found at {EnginePath}. The FiveOS install is incomplete.");
+
+        var stem = Path.GetFileNameWithoutExtension(ymapPath);
+        Directory.CreateDirectory(outputDir);
+        var wplPath = Path.Combine(outputDir, stem + ".wpl");
+        var idePath = Path.Combine(outputDir, stem + ".ide");
+
+        var args = new List<string>
+        {
+            "wpl-from-ymap", ymapPath,
+            "-o", wplPath,
+            "--ide", idePath,
+        };
+        if (!string.IsNullOrWhiteSpace(namesFolder))
+        {
+            args.Add("--names");
+            args.Add(namesFolder!);
+        }
+
+        var (exitCode, log, launchError) = await RunEngineProcessAsync(args, outputDir, onLog, cancel);
+        if (launchError != null) return new PlacementOutcome(false, null, null, log, launchError);
+        if (exitCode != 0)
+            return new PlacementOutcome(false, null, null, log,
+                $"Engine returned exit code {exitCode}. See log.");
+        if (!File.Exists(wplPath))
+            return new PlacementOutcome(false, null, null, log,
+                "Engine reported success but wrote no .wpl.");
+
+        return new PlacementOutcome(true, wplPath, File.Exists(idePath) ? idePath : null, log, null);
+    }
+
+    /// <summary>Start the engine, stream its output to <paramref name="onLog"/>,
+    /// and wait. Returns the exit code plus the captured log; a non-null third
+    /// element means the process never ran (or was cancelled).</summary>
+    private static async Task<(int ExitCode, string Log, string? LaunchError)> RunEngineProcessAsync(
+        IEnumerable<string> args, string workDir, Action<string>? onLog, CancellationToken cancel)
+    {
+        var psi = new ProcessStartInfo
+        {
+            FileName = EnginePath,
+            WorkingDirectory = workDir,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            UseShellExecute = false,
+            CreateNoWindow = true,
+        };
+        foreach (var a in args) psi.ArgumentList.Add(a);
+
+        var log = new StringBuilder();
+        using var proc = new Process { StartInfo = psi, EnableRaisingEvents = true };
+        proc.OutputDataReceived += (_, e) =>
+        {
+            if (e.Data == null) return;
+            log.AppendLine(e.Data);
+            onLog?.Invoke(e.Data);
+        };
+        proc.ErrorDataReceived += (_, e) =>
+        {
+            if (e.Data == null) return;
+            log.AppendLine("[err] " + e.Data);
+            onLog?.Invoke(e.Data);
+        };
+
+        try
+        {
+            proc.Start();
+            proc.BeginOutputReadLine();
+            proc.BeginErrorReadLine();
+            await proc.WaitForExitAsync(cancel);
+        }
+        catch (OperationCanceledException)
+        {
+            try { if (!proc.HasExited) proc.Kill(entireProcessTree: true); } catch { /* already gone */ }
+            return (-1, log.ToString(), "Cancelled.");
+        }
+        catch (Exception ex)
+        {
+            return (-1, log.ToString(), $"Failed to launch engine: {ex.Message}");
+        }
+        return (proc.ExitCode, log.ToString(), null);
     }
 
     // ─── Output delivery strategies ───────────────────────────────────

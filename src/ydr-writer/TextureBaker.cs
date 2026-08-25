@@ -1056,7 +1056,10 @@ public static class TextureBaker
         return colorType == 4 || colorType == 6;
     }
 
-    private static string LocateTexconv()
+    // internal, not private: the GTA IV backend re-encodes BC5 normal maps
+    // to DXT5 (IV predates BC5 and its resource builder rejects the format)
+    // and needs the same bundled binary.
+    internal static string LocateTexconv()
     {
         var here = AppContext.BaseDirectory;
         foreach (var rel in new[] { "tools/texconv.exe", "../tools/texconv.exe", "Engine/tools/texconv.exe" })

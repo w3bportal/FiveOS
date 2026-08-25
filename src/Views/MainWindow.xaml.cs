@@ -26,6 +26,8 @@ public partial class MainWindow : FluentWindow
     private static readonly string[] SupportedExtensions =
     {
         ".obj", ".glb", ".gltf", ".fbx", ".dae", ".ply", ".stl",
+        // GTA V drawable — previewed via a generated .glb, converted natively.
+        ".ydr",
         // Sims 4 packages aren't models — TryLoad unpacks them to a .glb first.
         ".package",
     };
@@ -510,7 +512,9 @@ public partial class MainWindow : FluentWindow
         if (Viewport?.CoreWebView2 == null || !_viewerReady) return;
         var inv = System.Globalization.CultureInfo.InvariantCulture;
         var payload =
-            "{" +
+            "{3D models (*.obj;*.glb;*.gltf;*.fbx;*.dae;*.ply;*.stl;*.ydr;*.package)|" +
+                     "*.obj;*.glb;*.gltf;*.fbx;*.dae;*.ply;*.stl;*.ydr;*.package|" +
+                     "GTA V drawable (*.ydr)|*.ydr|" +
             $"\"pos\":[{_vm.TransformPosX.ToString(inv)},{_vm.TransformPosY.ToString(inv)},{_vm.TransformPosZ.ToString(inv)}]," +
             $"\"rot\":[{_vm.TransformRotX.ToString(inv)},{_vm.TransformRotY.ToString(inv)},{_vm.TransformRotZ.ToString(inv)}]," +
             $"\"scale\":[{_vm.TransformScaleX.ToString(inv)},{_vm.TransformScaleY.ToString(inv)},{_vm.TransformScaleZ.ToString(inv)}]" +
@@ -2205,7 +2209,7 @@ public partial class MainWindow : FluentWindow
         bool routeToPack)
     {
         return new EngineRunner.ConvertRequest(
-            SourcePath: _vm.SourcePath!,
+            SourcePath: _vm.ConvertSourcePath ?? _vm.SourcePath!,
             AssetName: assetName,
             Up: _vm.UpAxisIndex switch
             {
@@ -2248,7 +2252,91 @@ public partial class MainWindow : FluentWindow
             SpinAxis: _vm.SpinAxisIndex switch { 0 => "X", 1 => "Y", _ => "Z" },
             SpinSeconds: _vm.SpinSeconds,
             SpinReverse: _vm.SpinReverse,
-            AnimKeysPath: WritePropAnimKeysSidecar());
+            AnimKeysPath: WritePropAnimKeysSidecar(),
+            Target: _vm.IsGtaIvTarget
+                ? EngineRunner.GameTarget.GtaIv
+                : EngineRunner.GameTarget.GtaV);
+    }
+
+    /// <summary>Point FiveOS at the user's copy of the GTA IV resource
+    /// compiler. Not bundled — third-party tool of unclear licence — so this
+    /// is a one-off pick that persists in user settings.</summary>
+    private async void BrowseIvResourceBuilder_Click(object sender, RoutedEventArgs e)
+    {
+        var picked = await StaFileDialogs.OpenAsync(this, dlg =>
+        {
+            dlg.Title = "Select the GTA IV resource compiler";
+            dlg.Filter = "ResourceBuilder (*.exe)|*.exe|All files (*.*)|*.*";
+            dlg.CheckFileExists = true;
+            var current = _vm.IvResourceBuilderPath;
+            if (!string.IsNullOrWhiteSpace(current))
+            {
+                try
+                {
+                    var dir = Directory.Exists(current) ? current : Path.GetDirectoryName(current);
+                    if (!string.IsNullOrEmpty(dir) && Directory.Exists(dir)) dlg.InitialDirectory = dir;
+                }
+                catch { /* fall back to the shell default */ }
+            }
+        });
+
+        if (!string.IsNullOrWhiteSpace(picked))
+            _vm.IvResourceBuilderPath = picked;
+    }
+
+    /// <summary>Convert a GTA V .ymap into a GTA IV .wpl.
+    ///
+    /// Deliberately not routed through the model pipeline: a .ymap contains no
+    /// geometry, so there is nothing to load into the viewport and nothing to
+    /// bake — it is a list of positions in, a list of positions out. Output
+    /// lands beside the source, where a map's other files already live.</summary>
+    private async void ConvertYmapToWpl_Click(object sender, RoutedEventArgs e)
+    {
+        var picked = await StaFileDialogs.OpenAsync(this, dlg =>
+        {
+            dlg.Title = "Select a GTA V placement file";
+            dlg.Filter = "GTA V map placements (*.ymap)|*.ymap|All files (*.*)|*.*";
+            dlg.CheckFileExists = true;
+        });
+        if (string.IsNullOrWhiteSpace(picked)) return;
+
+        var outDir = Path.GetDirectoryName(Path.GetFullPath(picked));
+        if (string.IsNullOrEmpty(outDir)) return;
+
+        // A .ymap stores model hashes, never names, and an .ide entry needs a
+        // name. Point the engine at the configured GTA V install so stock
+        // props resolve — without it only models shipped beside the .ymap can
+        // be identified.
+        var names = Services.GtaInstall.Resolve();
+
+        _vm.StatusText = "Converting placements…";
+        Services.EngineRunner.PlacementOutcome result;
+        try
+        {
+            result = await Services.EngineRunner.ConvertYmapToWplAsync(
+                picked!, outDir, names,
+                line => Services.FosLogger.Info("wpl", line));
+        }
+        catch (Exception ex)
+        {
+            Services.FosLogger.Warn("wpl", $"ymap convert failed: {ex.Message}");
+            _vm.StatusText = $"Couldn't convert that .ymap: {ex.Message}";
+            return;
+        }
+
+        if (!result.Success)
+        {
+            _vm.StatusText = result.Error ?? "Couldn't convert that .ymap.";
+            return;
+        }
+
+        _vm.StatusText = result.IdePath != null
+            ? $"Wrote {Path.GetFileName(result.WplPath!)} and {Path.GetFileName(result.IdePath)} " +
+              "— convert the models it lists, then merge both files into your .img's .ide/.wpl."
+            : $"Wrote {Path.GetFileName(result.WplPath!)}.";
+
+        try { Process.Start(new ProcessStartInfo("explorer.exe", $"/select,\"{result.WplPath}\"") { UseShellExecute = true }); }
+        catch { /* the status line already says where it went */ }
     }
 
     /// <summary>Snapshot the per-part material presets the user picked
@@ -3775,8 +3863,9 @@ public partial class MainWindow : FluentWindow
         {
             Title = "Add props to convert queue",
             Multiselect = true,
-            Filter = "3D models (*.obj;*.glb;*.gltf;*.fbx;*.dae;*.ply;*.stl;*.package)|" +
-                     "*.obj;*.glb;*.gltf;*.fbx;*.dae;*.ply;*.stl;*.package|" +
+            Filter = "3D models (*.obj;*.glb;*.gltf;*.fbx;*.dae;*.ply;*.stl;*.ydr;*.package)|" +
+                     "*.obj;*.glb;*.gltf;*.fbx;*.dae;*.ply;*.stl;*.ydr;*.package|" +
+                     "GTA V drawable (*.ydr)|*.ydr|" +
                      "Sims 4 package (*.package)|*.package|" +
                      "All files (*.*)|*.*"
         };
@@ -3947,6 +4036,9 @@ public partial class MainWindow : FluentWindow
         _vm.HasModel = false;
         _vm.IsModelLoading = false;
         _vm.SourcePath = null;
+        // Clear the .ydr override too, or a later convert would still read a
+        // drawable the user has already cleared out of the workspace.
+        _vm.ConvertSourcePath = null;
         _vm.PropName = string.Empty;
         _vm.ResultZipPath = null;
         _vm.Verts = 0;
@@ -3964,8 +4056,9 @@ public partial class MainWindow : FluentWindow
         var dlg = new OpenFileDialog
         {
             Title = "Open 3D model",
-            Filter = "3D models (*.obj;*.glb;*.gltf;*.fbx;*.dae;*.ply;*.stl;*.package)|" +
-                     "*.obj;*.glb;*.gltf;*.fbx;*.dae;*.ply;*.stl;*.package|" +
+            Filter = "3D models (*.obj;*.glb;*.gltf;*.fbx;*.dae;*.ply;*.stl;*.ydr;*.package)|" +
+                     "*.obj;*.glb;*.gltf;*.fbx;*.dae;*.ply;*.stl;*.ydr;*.package|" +
+                     "GTA V drawable (*.ydr)|*.ydr|" +
                      "Sims 4 package (*.package)|*.package|" +
                      "All files (*.*)|*.*"
         };
@@ -3987,6 +4080,30 @@ public partial class MainWindow : FluentWindow
             Services.FosLogger.Warn("load", $"unsupported format: {Path.GetExtension(path)}");
             _vm.StatusText = $"Unsupported format: {Path.GetExtension(path)}";
             return;
+        }
+
+        // A GTA V drawable is previewed through a generated .glb, but the
+        // EXPORT still reads the .ydr itself — the engine's native importer
+        // keeps vertex colours, tangents and the source shader names that a
+        // .glb round trip would discard. ConvertSourcePath carries the .ydr
+        // forward while the viewport gets the .glb.
+        _vm.ConvertSourcePath = null;
+        if (string.Equals(Path.GetExtension(path), ".ydr", System.StringComparison.OrdinalIgnoreCase))
+        {
+            displayNameOverride ??= Path.GetFileNameWithoutExtension(path);
+            _vm.StatusText = "Reading GTA V drawable…";
+            var ydrPath = path;
+            var preview = await Task.Run(() => Services.YdrPreviewImporter.Import(ydrPath));
+            if (!preview.Success || preview.GlbPath is null)
+            {
+                Services.FosLogger.Warn("load", $"ydr preview failed: {preview.Error}");
+                _vm.StatusText = preview.Error ?? "Couldn't read that .ydr.";
+                return;
+            }
+            Services.FosLogger.Info("load",
+                $"ydr preview: {preview.MeshCount} mesh(es), {preview.TriangleCount} tris → {preview.GlbPath}");
+            _vm.ConvertSourcePath = ydrPath;
+            path = preview.GlbPath;
         }
 
         // A Sims .package isn't a model — unpack its meshes to a .glb first and

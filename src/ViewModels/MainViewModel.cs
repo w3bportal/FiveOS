@@ -743,6 +743,62 @@ public partial class MainViewModel : ObservableObject
     [ObservableProperty]
     private int _upAxisIndex;
 
+    /// <summary>0 = GTA V (FiveM resource), 1 = GTA IV (loose RAGE resources).
+    /// Bound to the sidebar's "Game" ComboBox SelectedIndex.</summary>
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(IsGtaIvTarget))]
+    [NotifyPropertyChangedFor(nameof(IsGtaVTarget))]
+    [NotifyPropertyChangedFor(nameof(ShowAnimatedPropControls))]
+    private int _gameTargetIndex;
+
+    /// <summary>True when exporting for GTA IV. Drives the sidebar's
+    /// visibility switches: the options GTA IV has no equivalent for
+    /// (.ytyp, embedded collision, breakable glass, animated props) hide
+    /// rather than sit there doing nothing.</summary>
+    public bool IsGtaIvTarget => GameTargetIndex == 1;
+
+    /// <summary>Inverse of <see cref="IsGtaIvTarget"/>, for XAML that needs
+    /// to show GTA V-only controls.</summary>
+    public bool IsGtaVTarget => GameTargetIndex != 1;
+
+    /// <summary>The file the exporter should actually read, when that differs
+    /// from what the viewport is showing.
+    ///
+    /// A GTA V .ydr is previewed through a generated .glb, but converting that
+    /// .glb would round-trip the geometry and throw away vertex colours,
+    /// tangents and the source shader names — the engine reads .ydr natively
+    /// and much better. So the viewport gets the .glb and this keeps the .ydr.
+    /// Null means "use SourcePath", which is the normal case.</summary>
+    [ObservableProperty]
+    private string? _convertSourcePath;
+
+    /// <summary>Whether to offer the animated-prop controls at all.
+    ///
+    /// The GTA IV writer has no animation path — it emits a static drawable
+    /// and there is no .ycd equivalent wired up — so leaving these switches
+    /// live under a GTA IV export would silently discard whatever the user
+    /// set. Hide them instead of accepting input we throw away.</summary>
+    public bool ShowAnimatedPropControls => !IsAnimatedPropsView && IsGtaVTarget;
+
+    /// <summary>Where the external GTA IV resource compiler lives. Not
+    /// bundled — it's a third-party tool — so the user points at their own
+    /// copy once and it sticks.</summary>
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(IvCompilerStatus))]
+    private string? _ivResourceBuilderPath = UserSettings.LoadIvResourceBuilderPath();
+
+    /// <summary>One-line description of the compiler situation, shown under
+    /// the Game picker. Deliberately reassuring when unset: an export without
+    /// the compiler still produces collision and the editable source, so this
+    /// is a "you'll get less" state, not an error.</summary>
+    public string IvCompilerStatus
+        => string.IsNullOrWhiteSpace(IvResourceBuilderPath)
+            ? "Not set — exports stop at OpenFormats source (+ collision)"
+            : System.IO.Path.GetFileName(IvResourceBuilderPath!.TrimEnd('\\', '/'));
+
+    partial void OnIvResourceBuilderPathChanged(string? value)
+        => UserSettings.SaveIvResourceBuilderPath(value);
+
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(IsCollisionEmbeddable))]
     private bool _includeCollision = true;
@@ -1485,6 +1541,7 @@ public partial class MainViewModel : ObservableObject
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(IsPropsView))]
     [NotifyPropertyChangedFor(nameof(IsAnimatedPropsView))]
+    [NotifyPropertyChangedFor(nameof(ShowAnimatedPropControls))]
     [NotifyPropertyChangedFor(nameof(IsOptimizeView))]
     [NotifyPropertyChangedFor(nameof(IsRpfView))]
     [NotifyPropertyChangedFor(nameof(IsVehiclesView))]
@@ -1744,6 +1801,7 @@ public partial class MainViewModel : ObservableObject
     [NotifyPropertyChangedFor(nameof(IsViewportVisible))]
     [NotifyPropertyChangedFor(nameof(IsPropsView))]
     [NotifyPropertyChangedFor(nameof(IsAnimatedPropsView))]
+    [NotifyPropertyChangedFor(nameof(ShowAnimatedPropControls))]
     [NotifyPropertyChangedFor(nameof(IsOptimizeView))]
     [NotifyPropertyChangedFor(nameof(IsRpfView))]
     [NotifyPropertyChangedFor(nameof(IsVehiclesView))]
