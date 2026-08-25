@@ -89,6 +89,13 @@ public static class UserSettings
         /// = auto-detect (Steam / common paths).</summary>
         public string? GtaFolder { get; set; }
 
+        /// <summary>Path to the external GTA IV resource compiler
+        /// (ResourceBuilder.exe), or its folder. Null = let the engine
+        /// auto-detect. Without it a GTA IV export still produces the
+        /// editable OpenFormats source and its collision, just not the
+        /// compiled .wdr.</summary>
+        public string? IvResourceBuilderPath { get; set; }
+
         public string? ReferenceModelPath { get; set; }
         public bool ShowReferencePed { get; set; } = true;
 
@@ -554,6 +561,16 @@ public static class UserSettings
     {
         var b = Read();
         b.GtaFolder = string.IsNullOrWhiteSpace(folder) ? null : folder;
+        Write(b);
+    }
+
+    /// <summary>Path to the GTA IV resource compiler, or null to let the
+    /// engine look for it. Accepts the .exe itself or the folder holding it.</summary>
+    public static string? LoadIvResourceBuilderPath() => Read().IvResourceBuilderPath;
+    public static void SaveIvResourceBuilderPath(string? path)
+    {
+        var b = Read();
+        b.IvResourceBuilderPath = string.IsNullOrWhiteSpace(path) ? null : path;
         Write(b);
     }
 

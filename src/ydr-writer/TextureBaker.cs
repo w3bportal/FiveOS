@@ -824,6 +824,31 @@ public static class TextureBaker
             //      check missed those, so every AI model came out untextured.
             //   2. EXTERNAL sidecar files (FBX/OBJ referencing real PNGs on disk).
             var emb = scene.GetEmbeddedTexture(path);
+            // Assimp's EmbedTextures step CORRUPTS the material's texture path
+            // when the original had a directory prefix: it writes the "*N"
+            // token over the front of the existing string instead of replacing
+            // it, so "tex/wood.png" comes back as "*0 /wood.png" and
+            // "tex/brick.png" as "*10 brick.png" — the token length decides how
+            // much of the prefix survives. Neither form resolves, and neither
+            // is a real file, so a model whose textures sit in a subfolder used
+            // to lose most of them silently. Measured on a 24-material
+            // building: 10 of 22 maps survived, and the 10 only made it by
+            // accident through the sidecar fallback.
+            //
+            // Take the leading digits after '*' as the index and go straight to
+            // the embedded table.
+            if (emb == null && path.Length > 1 && path[0] == '*')
+            {
+                int end = 1;
+                while (end < path.Length && char.IsAsciiDigit(path[end])) end++;
+                if (end > 1
+                    && int.TryParse(path.AsSpan(1, end - 1), out var embIndex)
+                    && scene.Textures != null
+                    && embIndex >= 0 && embIndex < scene.TextureCount)
+                {
+                    emb = scene.Textures[embIndex];
+                }
+            }
             if (emb != null && emb.HasCompressedData && emb.CompressedData is { Length: > 0 })
             {
                 srcBytes = emb.CompressedData;
@@ -1031,7 +1056,10 @@ public static class TextureBaker
         return colorType == 4 || colorType == 6;
     }
 
-    private static string LocateTexconv()
+    // internal, not private: the GTA IV backend re-encodes BC5 normal maps
+    // to DXT5 (IV predates BC5 and its resource builder rejects the format)
+    // and needs the same bundled binary.
+    internal static string LocateTexconv()
     {
         var here = AppContext.BaseDirectory;
         foreach (var rel in new[] { "tools/texconv.exe", "../tools/texconv.exe", "Engine/tools/texconv.exe" })

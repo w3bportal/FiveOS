@@ -1738,7 +1738,7 @@
                             <ui:SymbolIcon Symbol="PersonStar24" FontSize="36"
                                            HorizontalAlignment="Center" VerticalAlignment="Center" />
                         </Border>
-                        <TextBlock Text="Pose -> Emote"
+                        <TextBlock Text="Create an Emote"
                                    FontSize="20"
                                    FontWeight="SemiBold"
                                    HorizontalAlignment="Center"
@@ -1747,7 +1747,7 @@
                                    TextAlignment="Center"
                                    FontSize="12"
                                    Opacity="0.65"
-                                   Text="Drop a rigged .glb / .fbx (player or ped with bones), pose the joints with the gizmo, then export to JSON. .ycd export is coming in a future build." />
+                                   Text="Pick GTA Male or GTA Female above, or drop in your own rigged .glb / .fbx. Pose the bones, keyframe the timeline, then export a FiveM-ready emote pack." />
                     </StackPanel>
                 </Border>
             </Grid>

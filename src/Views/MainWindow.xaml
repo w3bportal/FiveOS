@@ -1551,6 +1551,50 @@
                                            Foreground="{DynamicResource TextFillColorPrimaryBrush}"
                                            VerticalAlignment="Center" />
                             </DockPanel>
+                            <TextBlock Text="Game" Style="{StaticResource FieldLabel}" />
+                            <ComboBox SelectedIndex="{Binding GameTargetIndex, Mode=TwoWay}"
+                                      HorizontalAlignment="Stretch"
+                                      Margin="0,0,0,8"
+                                      ToolTip="Which game to build the prop for. GTA V produces a drop-in FiveM resource; GTA IV produces loose RAGE resources (.wdr + .wbn collision) you install into an .img with OpenIV.">
+                                <ComboBoxItem Content="GTA V / FiveM" ToolTip="Ready-to-drop resource: .ydr + .ybn + .ytyp + fxmanifest.lua." />
+                                <ComboBoxItem Content="GTA IV" ToolTip="Loose resources: .wdr model with embedded textures, .wbn collision, plus the editable OpenFormats source and a README with install steps." />
+                            </ComboBox>
+
+                            <!-- The IV resource compiler is a third-party tool
+                                 we don't ship, so it's pointed at once here.
+                                 Without it the export still yields collision
+                                 and the editable source. -->
+                            <StackPanel Margin="0,0,0,8"
+                                        Visibility="{Binding IsGtaIvTarget, Converter={StaticResource BooleanToVisibility}}">
+                                <TextBlock Text="IV resource compiler" Style="{StaticResource FieldLabel}" />
+                                <DockPanel>
+                                    <Button DockPanel.Dock="Right"
+                                            Content="Browse…"
+                                            Margin="6,0,0,0"
+                                            Padding="10,3"
+                                            Click="BrowseIvResourceBuilder_Click"
+                                            ToolTip="Point at ResourceBuilder.exe (or the folder holding it)." />
+                                    <TextBlock Text="{Binding IvCompilerStatus}"
+                                               VerticalAlignment="Center"
+                                               TextTrimming="CharacterEllipsis"
+                                               Opacity="0.7" FontSize="11"
+                                               ToolTip="{Binding IvResourceBuilderPath}" />
+                                </DockPanel>
+
+                                <!-- A .ymap carries no geometry, so it can't
+                                     go through the model pipeline above — it
+                                     converts on its own. -->
+                                <TextBlock Text="Map placements"
+                                           Style="{StaticResource FieldLabel}"
+                                           Margin="0,10,0,0" />
+                                <Button Content="Convert .ymap → .wpl…"
+                                        HorizontalAlignment="Stretch"
+                                        HorizontalContentAlignment="Center"
+                                        Padding="10,4"
+                                        Click="ConvertYmapToWpl_Click"
+                                        ToolTip="Turn a GTA V map placement file into a GTA IV one. Positions and rotations carry across directly; the .ide written alongside lists every model the placements reference, which you still convert separately." />
+                            </StackPanel>
+
                             <TextBlock Text="Up axis" Style="{StaticResource FieldLabel}" />
                             <ComboBox SelectedIndex="{Binding UpAxisIndex, Mode=TwoWay}"
                                       HorizontalAlignment="Stretch"
@@ -1598,6 +1642,7 @@
                             <ui:ToggleSwitch IsChecked="{Binding EmbedCollision}"
                                              Content="Embed in YDR (no .ybn)"
                                              IsEnabled="{Binding IsCollisionEmbeddable}"
+                                             Visibility="{Binding IsGtaVTarget, Converter={StaticResource BooleanToVisibility}}"
                                              ToolTip="Attach the BoundComposite to Drawable.Bound so the YDR ships visual + collision in one file. Recommended for .ymap-placed static props (RAGE loads the bound from the same drawable resource it pulled for the visual). Off ships a sibling scene.ybn — useful if you want to swap in a Sollumz-built .ybn later."
                                              Margin="0,0,0,8" />
                             <TextBlock Text="Collision material" Style="{StaticResource FieldLabel}" />
@@ -1668,6 +1713,7 @@
                             <ui:ToggleSwitch IsChecked="{Binding BreakableGlass}"
                                              Content="Breakable glass (shatters when shot)"
                                              Margin="0,8,0,0"
+                                             Visibility="{Binding IsGtaVTarget, Converter={StaticResource BooleanToVisibility}}"
                                              ToolTip="Glass parts get GLASS_SHOOT_THROUGH collision — bullets pass through and the engine plays the glass-shatter VFX + sound on hit. Off keeps glass solid. Shatter-on-shot, not a physically-fragmenting .yft fragment." />
                         </StackPanel>
                         </StackPanel>
@@ -1708,6 +1754,7 @@
                             <ui:ToggleSwitch IsChecked="{Binding IncludeYtyp}"
                                              Content="Generate .ytyp metadata"
                                              Margin="0,0,0,8"
+                                             Visibility="{Binding IsGtaVTarget, Converter={StaticResource BooleanToVisibility}}"
                                              ToolTip="Write a .ytyp file that registers your prop as a placeable archetype. Without this you can spawn the model from script (CreateObject) but it can't be placed in a .ymap via CodeWalker." />
                             <ui:ToggleSwitch IsChecked="{Binding ExtractTextures}"
                                              Content="Extract embedded textures"
@@ -1716,7 +1763,7 @@
                             <ui:ToggleSwitch IsChecked="{Binding AnimatedProp}"
                                              Content="Animated prop (rig + animation)"
                                              Margin="0,0,0,8"
-                                             Visibility="{Binding IsAnimatedPropsView, Converter={StaticResource InverseBooleanToVisibility}}"
+                                             Visibility="{Binding ShowAnimatedPropControls, Converter={StaticResource BooleanToVisibility}}"
                                              ToolTip="If your model ships a rig AND an animation clip, export it as an ANIMATED prop: the engine attaches a skeleton, rigidly binds each part to a bone, writes a matching .ycd, and sets the ytyp's Auto Start Anim flag so a placed prop plays on its own. Falls back to a normal static prop when there's no animation. Rigid binding animates WHOLE parts, so it suits mechanical models whose moving pieces are separate meshes — verify the motion on your FiveM server." />
 
                             <!-- Auto-spin sub-options: only relevant when

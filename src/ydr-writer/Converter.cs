@@ -525,14 +525,14 @@ public static class Converter
 
     /// <summary>Up-axis convention of the source mesh — drives whether we
     /// rotate Y-up → Z-up before handing to CodeWalker.</summary>
-    private enum SourceUp { YUp, ZUp }
+    internal enum SourceUp { YUp, ZUp }
 
     /// <summary>Resolve the source up axis from the user's CLI choice plus
     /// (for "auto") the file extension and FBX metadata. Default is Y-up
     /// because that's what Assimp normalises glTF/OBJ/DAE/PLY to. FBX gets
     /// special treatment: the file header carries an explicit UpAxis enum
     /// (0=X, 1=Y, 2=Z) which Assimp surfaces via scene root metadata.</summary>
-    private static SourceUp ResolveSourceUpAxis(ConvertOptions opts, Scene scene)
+    internal static SourceUp ResolveSourceUpAxis(ConvertOptions opts, Scene scene)
     {
         var up = (opts.Up ?? "auto").ToLowerInvariant();
         if (up == "y_up") return SourceUp.YUp;
@@ -562,7 +562,7 @@ public static class Converter
     /// rotation only (uniform scale preserves direction; translation
     /// doesn't apply to directions). Skips itself when all three are
     /// identity to avoid pointless float churn on every export.</summary>
-    private static void ApplyUserTransform(Scene scene, ConvertOptions opts)
+    internal static void ApplyUserTransform(Scene scene, ConvertOptions opts)
     {
         // Per-axis scale. Identity (1,1,1) skips the multiply entirely.
         // Non-uniform values require the inverse-scale + renormalize trick
@@ -703,7 +703,7 @@ public static class Converter
     /// scene.RootNode.Transform — meshes are written in their local-space
     /// vertex coordinates, with the node hierarchy emitted as metadata
     /// that CodeWalker.FbxConverter doesn't currently apply.</summary>
-    private static void ApplyYupToZupTransform(Scene scene)
+    internal static void ApplyYupToZupTransform(Scene scene)
     {
         foreach (var mesh in scene.Meshes)
         {

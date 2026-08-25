@@ -201,7 +201,7 @@ public sealed class DrawableMeshExtractor
         var decl = vd.Info;
         if (decl != null)
         {
-            bool hasNormal = decl.GetComponentType(CompNormal) == VertexComponentType.Float3;
+            bool hasNormal = TypeOf(decl, CompNormal) == VertexComponentType.Float3;
             try
             {
                 if (hasNormal)
@@ -240,9 +240,24 @@ public sealed class DrawableMeshExtractor
         return new Part(pos, nrm, uv, indices, texFile, kind, bucket, paintColor);
     }
 
+    /// <summary>The type of a vertex component, or Nothing when the buffer
+    /// does not actually carry it.
+    ///
+    /// A RAGE vertex declaration stores a 4-bit type code for all sixteen
+    /// slots whether or not the buffer holds them, so every drawable reads
+    /// back "normal = Float3" and "texcoord0 = Float2" regardless. Presence
+    /// lives in the separate flags bitmask. Testing the type alone claims
+    /// attributes that are not there, and reading one does not throw - the
+    /// offset simply lands past the end of the vertex and returns the next
+    /// one's bytes.</summary>
+    private static VertexComponentType TypeOf(VertexDeclaration? decl, int component)
+        => decl != null && ((uint)decl.Flags & (1u << component)) != 0
+            ? decl.GetComponentType(component)
+            : VertexComponentType.Nothing;
+
     private static float[]? ReadUv(VertexData vd, VertexDeclaration decl, int component, int vc)
     {
-        var uvType = decl.GetComponentType(component);
+        var uvType = TypeOf(decl, component);
         if (uvType is not (VertexComponentType.Float2 or VertexComponentType.Half2)) return null;
         var uv = new float[vc * 2];
         for (int i = 0; i < vc; i++)
