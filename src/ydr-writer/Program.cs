@@ -17,7 +17,6 @@ if (args.Length < 1 || args[0] == "--help" || args[0] == "-h")
     Console.Error.WriteLine(
         "usage: ydr-writer <input> -o <out_dir> --name <name> [flags]\n" +
         "  Inputs: .obj .glb .gltf .fbx .dae .ply .stl\n" +
-        "  GTA IV: ydr-writer wdr <input> -o <out_dir> --name <name>\n" +
         "  Debug:  ydr-writer dump-ybn <in.ybn>   # writes XML to stdout");
     return args.Length == 0 ? 2 : 0;
 }
@@ -118,99 +117,11 @@ if (args[0] == "merge-pack")
     return YdrWriter.YtypMerger.Run(args[1..]);
 }
 
-// GTA IV prop export. Shares this project's Assimp front end but writes
-// OpenFormats text and hands it to the external IV resource compiler
-// instead of building a .ydr through CodeWalker.
-if (args[0] == "wdr")
-{
-    YdrWriter.NativeAssimpLoader.Preload();
-    try
-    {
-        return YdrWriter.GtaIv.WdrCommand.Run(args[1..]);
-    }
-    catch (Exception ex)
-    {
-        Console.Error.WriteLine($"[ydr-writer] FATAL {ex.GetType().Name}: {ex.Message}");
-        Console.Error.WriteLine(ex.StackTrace);
-        return 1;
-    }
-}
-
-// Pack per-prop bounds into a GTA IV bounds dictionary (.wbd) - the container
-// a prop's collision is actually looked up in.
-if (args[0] == "wbd")
-{
-    return YdrWriter.GtaIv.IvWbdCommand.Run(args[1..]);
-}
-
-// GTA IV collision debug: parse a .wbn/.wbd, or parse and re-save it.
-if (args[0] == "dump-wbn")
-{
-    return YdrWriter.GtaIv.IvBoundCommand.RunDump(args[1..]);
-}
-if (args[0] == "rebuild-wbn")
-{
-    return YdrWriter.GtaIv.IvBoundCommand.RunRebuild(args[1..]);
-}
-
-// List the .odr shader line for every preset the GTA IV backend can emit.
-if (args[0] == "dump-iv-shaders")
-{
-    return YdrWriter.GtaIv.WdrCommand.RunDumpShaders();
-}
-
-// Report what the importer sees per material (texture slot + resolution).
-if (args[0] == "dump-materials")
-{
-    YdrWriter.NativeAssimpLoader.Preload();
-    return YdrWriter.GtaIv.WdrCommand.RunDumpMaterials(args[1..]);
-}
-
-// Round-trip a GTA IV placement file to prove the reader/writer is faithful.
-if (args[0] == "rebuild-wpl")
-{
-    return YdrWriter.GtaIv.IvBoundCommand.RunRebuildWpl(args[1..]);
-}
-
-// Inspect a GTA IV placement file (.wpl), optionally naming objects from an .ide.
-if (args[0] == "dump-wpl")
-{
-    return YdrWriter.GtaIv.IvBoundCommand.RunDumpWpl(args[1..]);
-}
-
 // Print the real per-vertex layout of a GTA V drawable, flagging any component
 // the declaration places past the end of its own vertex.
 if (args[0] == "dump-vertex-decl")
 {
-    return YdrWriter.GtaIv.VertexDeclCommand.Run(args[1..]);
-}
-
-// Convert a GTA V placement file (.ymap) into a GTA IV one (.wpl).
-if (args[0] == "wpl-from-ymap")
-{
-    try
-    {
-        return YdrWriter.GtaIv.IvPlacementCommand.Run(args[1..]);
-    }
-    catch (Exception ex)
-    {
-        Console.Error.WriteLine($"[ydr-writer] FATAL {ex.GetType().Name}: {ex.Message}");
-        return 1;
-    }
-}
-
-// Recompile an existing (possibly hand-edited) OpenFormats file.
-if (args[0] == "compile-odr")
-{
-    try
-    {
-        return YdrWriter.GtaIv.WdrCommand.RunCompile(args[1..]);
-    }
-    catch (Exception ex)
-    {
-        Console.Error.WriteLine($"[ydr-writer] FATAL {ex.GetType().Name}: {ex.Message}");
-        return 1;
-    }
+    return YdrWriter.VertexDeclCommand.Run(args[1..]);
 }
 
 if (args[0] == "retexture")

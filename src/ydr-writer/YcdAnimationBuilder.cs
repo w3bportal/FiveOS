@@ -19,6 +19,11 @@ namespace YdrWriter;
 /// <summary>One bone's full per-frame local rotation track.</summary>
 internal sealed record PosedBoneTrack(ushort BoneTag, Quaternion[] PerFrame);
 
+/// <summary>One bone's per-frame local POSITION track (parent-relative
+/// metres, Z-up). Only bones that actually translate get one — a zero
+/// position track would collapse the bone onto its parent.</summary>
+internal sealed record PosedPositionTrack(ushort BoneTag, Vector3[] PerFrame);
+
 /// <summary>
 /// Multi-frame .ycd writer matching the layout Sollumz exports and vanilla
 /// clips use (see FiveOS.Services.YcdPoseBuilder for the full recipe notes):
@@ -35,14 +40,19 @@ internal sealed record PosedBoneTrack(ushort BoneTag, Quaternion[] PerFrame);
 /// </summary>
 internal static class YcdAnimationBuilder
 {
-    public static byte[] Build(string clipName, IReadOnlyList<PosedBoneTrack> bones, int frames, int fps)
+    public static byte[] Build(string clipName, IReadOnlyList<PosedBoneTrack> bones, int frames, int fps,
+        IReadOnlyList<PosedPositionTrack>? positions = null)
     {
-        var xml = BuildXml(clipName, bones, frames, fps);
+        var xml = BuildXml(clipName, bones, frames, fps, positions);
         var ycd = XmlYcd.GetYcd(xml);
         return ycd.Save();
     }
 
-    public static string BuildXml(string clipName, IReadOnlyList<PosedBoneTrack> bones, int frames, int fps)
+    /// <param name="positions">Optional per-bone position tracks. Entity
+    /// clips played with PlayEntityAnim carry no mover, so these are plain
+    /// bone tracks (Track 0) — exactly what the app writes for vehicles.</param>
+    public static string BuildXml(string clipName, IReadOnlyList<PosedBoneTrack> bones, int frames, int fps,
+        IReadOnlyList<PosedPositionTrack>? positions = null)
     {
         if (string.IsNullOrWhiteSpace(clipName))
             throw new ArgumentException("clipName must be non-empty.", nameof(clipName));
@@ -57,6 +67,15 @@ internal static class YcdAnimationBuilder
 
         var safe = SanitizeClipName(clipName);
         var animDataName = "hash_" + (Joaat(safe) + 1).ToString("X8");
+
+        // Track-major ordering: position tracks (Track 0) come BEFORE the
+        // rotation block in both BoneIds and SequenceData (Sollumz sort key
+        // boneId | track<<16).
+        var posTracks = positions?.Where(p => p.PerFrame is { Length: > 0 }).OrderBy(p => p.BoneTag).ToList()
+            ?? new List<PosedPositionTrack>();
+        foreach (var p in posTracks)
+            if (p.PerFrame.Length != frames)
+                throw new ArgumentException($"Position track tag {p.BoneTag} has {p.PerFrame.Length} samples; clip needs {frames}.");
 
         var duration = (frames / (float)fps).ToString("0.######", CultureInfo.InvariantCulture);
         int sequenceFrameLimit = frames + 30;
@@ -88,7 +107,10 @@ internal static class YcdAnimationBuilder
         sb.AppendLine($"   <Duration value=\"{duration}\" />");
         sb.AppendLine($"   <Unknown1C>{animDataName}</Unknown1C>");
 
+        // BoneIds — Unk0 is the track FORMAT: 0=Vector3 (position), 1=Quaternion.
         sb.AppendLine("   <BoneIds>");
+        foreach (var p in posTracks)
+            sb.AppendLine($"    <Item><BoneId value=\"{p.BoneTag}\" /><Track value=\"0\" /><Unk0 value=\"0\" /></Item>");
         foreach (var b in sorted)
             sb.AppendLine($"    <Item><BoneId value=\"{b.BoneTag}\" /><Track value=\"1\" /><Unk0 value=\"1\" /></Item>");
         sb.AppendLine("   </BoneIds>");
@@ -98,6 +120,10 @@ internal static class YcdAnimationBuilder
         sb.AppendLine("     <Hash />");
         sb.AppendLine($"     <FrameCount value=\"{frames}\" />");
         sb.AppendLine("     <SequenceData>");
+
+        // Position items first — mirror the BoneIds order 1:1.
+        foreach (var p in posTracks)
+            AppendPositionItem(sb, p.PerFrame);
 
         foreach (var bone in sorted)
         {
@@ -161,6 +187,69 @@ internal static class YcdAnimationBuilder
         }
         sb.AppendLine("</Values>");
         sb.AppendLine("       </Item>");
+    }
+
+    /// <summary>One position (Vector3) track item: a StaticVector3 channel when
+    /// the bone never moves, else three explicit float channels (x, y, z).</summary>
+    private static void AppendPositionItem(StringBuilder sb, Vector3[] frames)
+    {
+        if (IsConstantV(frames))
+        {
+            var p = frames[0];
+            sb.AppendLine($"      <Item><Channels><Item><Type value=\"StaticVector3\" /><Value x=\"{F(p.X)}\" y=\"{F(p.Y)}\" z=\"{F(p.Z)}\" /></Item></Channels></Item>");
+        }
+        else
+        {
+            sb.AppendLine("      <Item><Channels>");
+            AppendFloatChannelV(sb, frames, v => v.X);
+            AppendFloatChannelV(sb, frames, v => v.Y);
+            AppendFloatChannelV(sb, frames, v => v.Z);
+            sb.AppendLine("      </Channels></Item>");
+        }
+    }
+
+    private static void AppendFloatChannelV(StringBuilder sb, Vector3[] frames, Func<Vector3, float> picker)
+    {
+        float min = float.MaxValue, max = float.MinValue;
+        for (int i = 0; i < frames.Length; i++)
+        {
+            var v = picker(frames[i]);
+            if (v < min) min = v;
+            if (v > max) max = v;
+        }
+
+        if (max - min < 1e-7f)
+        {
+            sb.AppendLine($"       <Item><Type value=\"StaticFloat\" /><Value value=\"{F(min)}\" /></Item>");
+            return;
+        }
+
+        float quantum = Math.Max(1e-7f, (max - min) / 1048575f);
+        sb.AppendLine("       <Item>");
+        sb.AppendLine("        <Type value=\"QuantizeFloat\" />");
+        sb.AppendLine($"        <Quantum value=\"{F(quantum)}\" />");
+        sb.AppendLine($"        <Offset value=\"{F(min)}\" />");
+        sb.Append("        <Values>");
+        for (int i = 0; i < frames.Length; i++)
+        {
+            if (i > 0) sb.Append(' ');
+            sb.Append(F(picker(frames[i])));
+        }
+        sb.AppendLine("</Values>");
+        sb.AppendLine("       </Item>");
+    }
+
+    private static bool IsConstantV(Vector3[] frames)
+    {
+        if (frames.Length <= 1) return true;
+        var first = frames[0];
+        for (int i = 1; i < frames.Length; i++)
+        {
+            if (Math.Abs(frames[i].X - first.X) > 1e-6f) return false;
+            if (Math.Abs(frames[i].Y - first.Y) > 1e-6f) return false;
+            if (Math.Abs(frames[i].Z - first.Z) > 1e-6f) return false;
+        }
+        return true;
     }
 
     private static bool IsConstant(Quaternion[] frames)

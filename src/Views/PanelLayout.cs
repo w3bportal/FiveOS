@@ -7,6 +7,7 @@ using System.Linq;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Controls.Primitives;
+using System.Windows.Data;
 using System.Windows.Input;
 using System.Windows.Media;
 using FiveOS.Services;
@@ -71,6 +72,8 @@ public static class PanelLayout
         if ((bool)host.GetValue(HostWiredProperty)) return;
         host.SetValue(HostWiredProperty, true);
 
+        host.Loaded += (_, _) => WireCollapsibleHeaders(host);
+        if (host.IsLoaded) WireCollapsibleHeaders(host);
         if (host.IsLoaded)
             ApplySavedOrder(host);
         else
@@ -286,6 +289,93 @@ public static class PanelLayout
         return null;
     }
 
+    private static readonly DependencyProperty CollapseWiredProperty =
+        DependencyProperty.RegisterAttached(
+            "CollapseWired", typeof(bool), typeof(PanelLayout),
+            new PropertyMetadata(false));
+
+    /// <summary>Let every panel in this stack fold shut from its own header.
+    ///
+    /// The cards all share one shape — Border &gt; Panel whose first child is the
+    /// header row and whose remaining children are the body — so this is wired
+    /// once here rather than repeated in the markup for each panel. A body
+    /// element whose Visibility is bound keeps its binding: collapsing sets the
+    /// value at current-value precedence, and expanding re-runs the binding.</summary>
+    private static void WireCollapsibleHeaders(Panel host)
+    {
+        var stackKey = GetOrderKey(host) ?? "";
+        foreach (var card in host.Children.OfType<FrameworkElement>())
+        {
+            var id = GetId(card);
+            if (string.IsNullOrEmpty(id)) continue;
+            var content = (card as Border)?.Child as Panel ?? card as Panel;
+            if (content is null || content.Children.Count < 2) continue;
+            if (content.Children[0] is not FrameworkElement header) continue;
+            if ((bool)header.GetValue(CollapseWiredProperty)) continue;
+            header.SetValue(CollapseWiredProperty, true);
+
+            // An unpainted panel is invisible to hit-testing, so a click on the
+            // empty half of the header row would land on nothing at all. Paint
+            // it transparent to make the whole strip the click target.
+            if (header is Panel { Background: null } strip) strip.Background = Brushes.Transparent;
+            else if (header is Border { Background: null } bd) bd.Background = Brushes.Transparent;
+
+            // The same chevron the collapsible groups elsewhere in the app use,
+            // so a folded panel reads as folded at a glance.
+            var chevron = new Wpf.Ui.Controls.SymbolIcon
+            {
+                Symbol = Wpf.Ui.Controls.SymbolRegular.ChevronDown12,
+                FontSize = 11,
+                Foreground = (Brush)Application.Current.FindResource("TextFillColorTertiaryBrush"),
+                VerticalAlignment = VerticalAlignment.Center,
+                Margin = new Thickness(0, 0, 5, 0),
+            };
+            if (header is DockPanel dock)
+            {
+                DockPanel.SetDock(chevron, Dock.Left);
+                dock.Children.Insert(Math.Min(1, dock.Children.Count), chevron);
+            }
+            else if (header is Panel plain) plain.Children.Insert(0, chevron);
+
+            void Apply(bool collapsed, bool persist)
+            {
+                for (int i = 1; i < content.Children.Count; i++)
+                {
+                    if (content.Children[i] is not UIElement body) continue;
+                    if (collapsed)
+                    {
+                        body.SetCurrentValue(UIElement.VisibilityProperty, Visibility.Collapsed);
+                    }
+                    else
+                    {
+                        var bound = BindingOperations.GetBindingExpression(body, UIElement.VisibilityProperty);
+                        if (bound != null) bound.UpdateTarget();
+                        else body.SetCurrentValue(UIElement.VisibilityProperty, Visibility.Visible);
+                    }
+                }
+                chevron.Symbol = collapsed
+                    ? Wpf.Ui.Controls.SymbolRegular.ChevronRight12
+                    : Wpf.Ui.Controls.SymbolRegular.ChevronDown12;
+                header.Tag = collapsed;
+                if (persist) UserSettings.SavePanelCollapsed(stackKey, id!, collapsed);
+            }
+
+            header.Cursor = Cursors.Hand;
+            header.MouseLeftButtonUp += (s, e) =>
+            {
+                // The drag grip starts a reorder and the help icon owns its own
+                // hover — neither should fold the panel.
+                for (var o = e.OriginalSource as DependencyObject; o != null && !ReferenceEquals(o, header); o = VisualTreeHelper.GetParent(o))
+                    if (GetDragHandle(o) || o is Wpf.Ui.Controls.SymbolIcon) return;
+                if (_dragging) return;
+                Apply(!(header.Tag is true), persist: true);
+                e.Handled = true;
+            };
+
+            Apply(UserSettings.LoadPanelCollapsed(stackKey, id!), persist: false);
+        }
+    }
+
     public static void ApplySavedOrder(Panel host)
     {
         var key = GetOrderKey(host);
@@ -309,11 +399,13 @@ public static class PanelLayout
             if (byId.Remove(id, out var fe))
                 ordered.Add(fe);
         }
-        foreach (var fe in cards)
+        // A panel the saved order has never seen (added in a later build)
+        // keeps the slot the layout gave it instead of dropping to the bottom.
+        for (int i = 0; i < cards.Count; i++)
         {
-            var id = GetId(fe)!;
+            var id = GetId(cards[i])!;
             if (byId.Remove(id, out var leftover))
-                ordered.Add(leftover);
+                ordered.Insert(Math.Min(i, ordered.Count), leftover);
         }
 
         foreach (var fe in cards)

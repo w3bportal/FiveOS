@@ -4,6 +4,7 @@
 using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
+using System.Linq;
 using CommunityToolkit.Mvvm.ComponentModel;
 using FiveOS.Services;
 
@@ -1048,31 +1049,110 @@ public partial class PoseToEmoteViewModel : ObservableObject
 
     // ── Prop (emote-with-prop authoring) ────────────────────────────
 
-    /// <summary>True once the user has loaded a prop via window.loadProp.
-    /// Drives the visibility of the Prop section in the sidebar and the
-    /// dpemotes export's PropEmotes branching.</summary>
+    // ── Prop (toolbar ▸ Prop) ──────────────────────────────────────────
+    //
+    // The viewer parents a preview mesh under the chosen bone; the bone the
+    // rig actually resolved (PH_R_Hand, or SKEL_R_Hand on rigs without the
+    // PH_ helpers) is echoed back in `prop-state` and lands in
+    // PropAttachBoneName / PropBoneId, which is what every export writes as
+    // PropBone. Placement is read from the viewer at export time.
+
+    /// <summary>True once a preview prop is in the viewport. Drives the
+    /// Prop popup's attached-state rows and every export's prop branch.</summary>
     [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(PropShowYUpFix))]
+    [NotifyPropertyChangedFor(nameof(PropAttachButtonText))]
     private bool _hasProp;
 
-    /// <summary>GTA in-game model name the dpemotes runtime will spawn.
-    /// E.g. "prop_phone_ing", "p_amb_brolly_01", "prop_beer_bottle".
-    /// The mesh the user imported in FiveOS is purely visual reference;
-    /// the in-game prop is whatever GTA model this name resolves to.</summary>
+    /// <summary>GTA in-game model name the emote script will spawn, e.g.
+    /// "prop_phone_ing", "p_amb_brolly_01", "prop_amb_beer_bottle". The mesh
+    /// shown in the viewport is only a preview; in-game the prop is
+    /// whatever GTA model this name resolves to.</summary>
     [ObservableProperty]
     private string _propModelName = "prop_phone_ing";
 
-    /// <summary>RAGE runtime bone tag the prop attaches to. dpemotes
-    /// conventionally uses these as plain integers in PropBone.
-    /// Common: 28422 = R hand, 60309 = L hand, 24818 = Spine3.</summary>
+    /// <summary>RAGE bone tag the prop attaches to — PropBone in rpemotes /
+    /// dpemotes and the GetPedBoneIndex argument in standalone packs.
+    /// Echoed from the viewer (the bone it really resolved). 28422 = PH_R_Hand,
+    /// 60309 = PH_L_Hand, 57005 / 18905 = SKEL_R/L_Hand.</summary>
     [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(PropAttachedLabel))]
     private int _propBoneId = 28422;
 
-    /// <summary>SKEL_* name the prop attaches to in the FiveOS viewport
-    /// (NOT necessarily the same as PropBoneId -- the in-game RAGE bone
-    /// tag and our local bone name diverge for hands etc.). Drives
-    /// the in-viewport offset math.</summary>
+    /// <summary>Name of the viewport bone the preview hangs off. Same bone as
+    /// <see cref="PropBoneId"/> — the placement is measured in its frame.</summary>
     [ObservableProperty]
-    private string _propAttachBoneName = "SKEL_R_Hand";
+    [NotifyPropertyChangedFor(nameof(PropAttachedLabel))]
+    private string _propAttachBoneName = "PH_R_Hand";
+
+    /// <summary>Index into <see cref="PropAttachOptions"/> — the user's
+    /// "which hand" choice.</summary>
+    [ObservableProperty]
+    private int _propAttachIndex;
+
+    /// <summary>Live bone-local placement readout ("x y z m · rx ry rz °").</summary>
+    [ObservableProperty]
+    private string _propPlacementText = "—";
+
+    /// <summary>What the preview mesh is (file name, game model, placeholder).</summary>
+    [ObservableProperty]
+    private string _propPreviewLabel = "";
+
+    /// <summary>Where the preview mesh came from: "file" | "game" | "placeholder".</summary>
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(PropShowYUpFix))]
+    private string _propSource = "";
+
+    /// <summary>Treat a user-supplied mesh as a Y-up (Blender / glTF) export
+    /// and turn it back into RAGE model space. Game extracts never need it.</summary>
+    [ObservableProperty]
+    private bool _propYUpFix = true;
+
+    public bool PropShowYUpFix => HasProp && PropSource == "file";
+    public string PropAttachButtonText => HasProp ? "Snap to bone" : "Attach prop";
+    public string PropAttachedLabel => $"{PropAttachBoneName} · tag {PropBoneId}";
+
+    /// <summary>Where a prop can hang. Bones are tried in order — PH_* are the
+    /// game's prop-handle helpers (a zero placement there is the natural palm
+    /// grip, where the vanilla phone sits); the SKEL_* hand is the fallback
+    /// for rigs that don't carry them. Tags resolve via GtaBoneTags.</summary>
+    public sealed record PropAttachOption(string Label, string[] Bones);
+
+    public static readonly PropAttachOption[] PropAttachOptions =
+    {
+        new("Right hand", new[] { "PH_R_Hand", "SKEL_R_Hand" }),
+        new("Left hand",  new[] { "PH_L_Hand", "SKEL_L_Hand" }),
+        new("Head",       new[] { "SKEL_Head" }),
+        new("Chest",      new[] { "SKEL_Spine3" }),
+        new("Pelvis",     new[] { "SKEL_Pelvis" }),
+        new("Right foot", new[] { "SKEL_R_Foot" }),
+        new("Left foot",  new[] { "SKEL_L_Foot" }),
+    };
+
+    public IReadOnlyList<string> PropAttachLabels { get; } =
+        PropAttachOptions.Select(o => o.Label).ToArray();
+
+    public PropAttachOption CurrentPropAttach =>
+        PropAttachOptions[Math.Clamp(PropAttachIndex, 0, PropAttachOptions.Length - 1)];
+
+    /// <summary>Well-known hand props from the base game — suggestions for the
+    /// editable model-name box. Any model name the server streams works too.</summary>
+    public IReadOnlyList<string> PropCatalog { get; } = new[]
+    {
+        "prop_phone_ing", "prop_npc_phone", "prop_amb_phone",
+        "prop_cs_burger_01", "prop_sandwich_01", "prop_taco_01", "prop_amb_donut", "prop_donut_02",
+        "prop_amb_beer_bottle", "prop_beer_bottle", "prop_wine_glass", "prop_champ_flute", "prop_cs_whiskey_bottle",
+        "prop_ld_can_01", "prop_ecola_can", "prop_food_bs_coffee", "p_amb_coffeecup_01", "prop_cs_mug_01",
+        "prop_amb_ciggy_01", "prop_cigar_01", "prop_cs_lighter_01", "prop_bong_01",
+        "prop_cs_tablet", "prop_notepad_01", "prop_pencil_01", "prop_cs_marker_01", "prop_cs_clipboard", "prop_cs_book_01",
+        "prop_cs_walkie_talkie", "prop_cs_hand_radio", "prop_mic_01", "prop_boombox_01",
+        "prop_acc_guitar_01", "prop_el_guitar_01",
+        "prop_flashlight_01", "prop_binoc_01", "p_amb_brolly_01",
+        "prop_tool_broom", "prop_tool_hammer", "prop_tool_wrench", "prop_tool_shovel", "prop_bucket_01a",
+        "prop_anim_cash_pile_01", "prop_ld_wallet_01", "prop_ld_suitcase_01", "prop_cs_cardbox_01", "prop_paper_bag_01",
+        "prop_bskball_01", "prop_tennis_rack_01", "prop_golf_iron_01",
+        "prop_cs_pills", "prop_syringe_01", "prop_single_rose",
+    };
 
     // ── Animated-vs-static export mode chip ─────────────────────────
     //

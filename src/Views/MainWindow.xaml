@@ -1256,26 +1256,8 @@
                         <RowDefinition Height="*" MinHeight="160" />
                         <!-- Sidebar + viewport -->
                         <RowDefinition Height="Auto" />
-                        <!-- Splitter (drag to resize the timeline; animated modes only) -->
-                        <RowDefinition x:Name="PropAnimTimelineRow" Height="0" />
-                        <!-- Animated keys timeline (height toggled + persisted in code-behind) -->
-                        <RowDefinition Height="Auto" />
                         <!-- Footer (prop name + convert) -->
                     </Grid.RowDefinitions>
-
-                    <!-- Drag to resize the animated-keys timeline against the
-                         viewport. Hidden (and its Auto row collapses to 0)
-                         outside animated-prop mode, where there is no timeline. -->
-                    <GridSplitter Grid.Row="1"
-                                  Height="5"
-                                  HorizontalAlignment="Stretch"
-                                  VerticalAlignment="Center"
-                                  Background="{DynamicResource ControlElevationBorderBrush}"
-                                  ShowsPreview="False"
-                                  ResizeBehavior="PreviousAndNext"
-                                  Cursor="SizeNS"
-                                  Visibility="{Binding IsAnimatedPropsView, Converter={StaticResource BooleanToVisibility}}"
-                                  DragCompleted="OnPropAnimTimelineSplitterDragCompleted" />
 
                     <Grid Grid.Row="0" Margin="0,4,0,0">
                         <Grid.ColumnDefinitions>
@@ -1455,6 +1437,68 @@
                                                Text="Generate a 3D model with Meshy or another AI provider, then load it straight into the viewer. Requires an API key in Settings." />
                                 </StackPanel>
                             </TabItem>
+                            <TabItem Header="Game" FontSize="12" Padding="10,4"
+                                     ToolTip="Import a model straight out of your GTA V install — drawables (.ydr), fragments (.yft: vending machines, fridges, anything breakable) and drawable dictionaries (.ydd). The game files are only read, never changed.">
+                                <StackPanel Margin="0,8,0,0" Loaded="OnGamePropTabLoaded">
+                                    <ui:TextBox x:Name="GamePropSearchBox"
+                                                Text="{Binding GamePropSearch, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                                                PlaceholderText="Search game models… e.g. prop_chair, fridge yft"
+                                                FontFamily="Consolas"
+                                                FontSize="11"
+                                                TextChanged="OnGamePropSearchChanged"
+                                                KeyDown="OnGamePropSearchKeyDown"
+                                                ToolTip="Type part of a model name. Every word must match (add 'yft' or 'ydd' to narrow by kind); prop_* names list first. Enter imports the top match.">
+                                        <ui:TextBox.Icon>
+                                            <ui:SymbolIcon Symbol="Search24" />
+                                        </ui:TextBox.Icon>
+                                    </ui:TextBox>
+                                    <ListBox x:Name="GamePropList"
+                                             ItemsSource="{Binding GamePropResults}"
+                                             SelectedItem="{Binding GamePropSelected, Mode=TwoWay}"
+                                             MaxHeight="220"
+                                             Margin="0,6,0,0"
+                                             FontFamily="Consolas"
+                                             FontSize="11"
+                                             MouseDoubleClick="OnGamePropListDoubleClick"
+                                             ScrollViewer.HorizontalScrollBarVisibility="Disabled"
+                                             Visibility="{Binding GamePropHasResults, Converter={StaticResource BooleanToVisibility}}"
+                                             ToolTip="Double-click a model to import it.">
+                                        <ListBox.ItemContainerStyle>
+                                            <Style TargetType="ListBoxItem">
+                                                <Setter Property="Padding" Value="8,3" />
+                                                <Setter Property="MinHeight" Value="24" />
+                                            </Style>
+                                        </ListBox.ItemContainerStyle>
+                                    </ListBox>
+                                    <ui:Button Margin="0,8,0,0"
+                                               HorizontalAlignment="Stretch"
+                                               Content="Import model"
+                                               Appearance="Secondary"
+                                               Click="OnGamePropImport"
+                                               IsEnabled="{Binding GamePropCanImport}"
+                                               ToolTip="Copy the selected model (and the texture dictionaries it uses) out of the game files and load it into the viewer.">
+                                        <ui:Button.Icon>
+                                            <ui:SymbolIcon Symbol="Cube24" />
+                                        </ui:Button.Icon>
+                                    </ui:Button>
+                                    <TextBlock FontSize="10"
+                                               Opacity="0.7"
+                                               TextWrapping="Wrap"
+                                               Margin="0,8,0,0"
+                                               Text="{Binding GamePropStatus}" />
+                                    <ui:Button Margin="0,4,0,0"
+                                               HorizontalAlignment="Stretch"
+                                               Content="Set GTA V folder…"
+                                               Appearance="Transparent"
+                                               Click="OnGamePropSetFolder"
+                                               Visibility="{Binding GamePropNeedsFolder, Converter={StaticResource BooleanToVisibility}}"
+                                               ToolTip="Pick the folder that contains GTA5.exe. Shared with the Vehicles and Emotes tabs.">
+                                        <ui:Button.Icon>
+                                            <ui:SymbolIcon Symbol="Folder24" />
+                                        </ui:Button.Icon>
+                                    </ui:Button>
+                                </StackPanel>
+                            </TabItem>
                         </TabControl>
                         </StackPanel>
                         </Border>
@@ -1551,50 +1595,6 @@
                                            Foreground="{DynamicResource TextFillColorPrimaryBrush}"
                                            VerticalAlignment="Center" />
                             </DockPanel>
-                            <TextBlock Text="Game" Style="{StaticResource FieldLabel}" />
-                            <ComboBox SelectedIndex="{Binding GameTargetIndex, Mode=TwoWay}"
-                                      HorizontalAlignment="Stretch"
-                                      Margin="0,0,0,8"
-                                      ToolTip="Which game to build the prop for. GTA V produces a drop-in FiveM resource; GTA IV produces loose RAGE resources (.wdr + .wbn collision) you install into an .img with OpenIV.">
-                                <ComboBoxItem Content="GTA V / FiveM" ToolTip="Ready-to-drop resource: .ydr + .ybn + .ytyp + fxmanifest.lua." />
-                                <ComboBoxItem Content="GTA IV" ToolTip="Loose resources: .wdr model with embedded textures, .wbn collision, plus the editable OpenFormats source and a README with install steps." />
-                            </ComboBox>
-
-                            <!-- The IV resource compiler is a third-party tool
-                                 we don't ship, so it's pointed at once here.
-                                 Without it the export still yields collision
-                                 and the editable source. -->
-                            <StackPanel Margin="0,0,0,8"
-                                        Visibility="{Binding IsGtaIvTarget, Converter={StaticResource BooleanToVisibility}}">
-                                <TextBlock Text="IV resource compiler" Style="{StaticResource FieldLabel}" />
-                                <DockPanel>
-                                    <Button DockPanel.Dock="Right"
-                                            Content="Browse…"
-                                            Margin="6,0,0,0"
-                                            Padding="10,3"
-                                            Click="BrowseIvResourceBuilder_Click"
-                                            ToolTip="Point at ResourceBuilder.exe (or the folder holding it)." />
-                                    <TextBlock Text="{Binding IvCompilerStatus}"
-                                               VerticalAlignment="Center"
-                                               TextTrimming="CharacterEllipsis"
-                                               Opacity="0.7" FontSize="11"
-                                               ToolTip="{Binding IvResourceBuilderPath}" />
-                                </DockPanel>
-
-                                <!-- A .ymap carries no geometry, so it can't
-                                     go through the model pipeline above — it
-                                     converts on its own. -->
-                                <TextBlock Text="Map placements"
-                                           Style="{StaticResource FieldLabel}"
-                                           Margin="0,10,0,0" />
-                                <Button Content="Convert .ymap → .wpl…"
-                                        HorizontalAlignment="Stretch"
-                                        HorizontalContentAlignment="Center"
-                                        Padding="10,4"
-                                        Click="ConvertYmapToWpl_Click"
-                                        ToolTip="Turn a GTA V map placement file into a GTA IV one. Positions and rotations carry across directly; the .ide written alongside lists every model the placements reference, which you still convert separately." />
-                            </StackPanel>
-
                             <TextBlock Text="Up axis" Style="{StaticResource FieldLabel}" />
                             <ComboBox SelectedIndex="{Binding UpAxisIndex, Mode=TwoWay}"
                                       HorizontalAlignment="Stretch"
@@ -1642,7 +1642,6 @@
                             <ui:ToggleSwitch IsChecked="{Binding EmbedCollision}"
                                              Content="Embed in YDR (no .ybn)"
                                              IsEnabled="{Binding IsCollisionEmbeddable}"
-                                             Visibility="{Binding IsGtaVTarget, Converter={StaticResource BooleanToVisibility}}"
                                              ToolTip="Attach the BoundComposite to Drawable.Bound so the YDR ships visual + collision in one file. Recommended for .ymap-placed static props (RAGE loads the bound from the same drawable resource it pulled for the visual). Off ships a sibling scene.ybn — useful if you want to swap in a Sollumz-built .ybn later."
                                              Margin="0,0,0,8" />
                             <TextBlock Text="Collision material" Style="{StaticResource FieldLabel}" />
@@ -1713,7 +1712,6 @@
                             <ui:ToggleSwitch IsChecked="{Binding BreakableGlass}"
                                              Content="Breakable glass (shatters when shot)"
                                              Margin="0,8,0,0"
-                                             Visibility="{Binding IsGtaVTarget, Converter={StaticResource BooleanToVisibility}}"
                                              ToolTip="Glass parts get GLASS_SHOOT_THROUGH collision — bullets pass through and the engine plays the glass-shatter VFX + sound on hit. Off keeps glass solid. Shatter-on-shot, not a physically-fragmenting .yft fragment." />
                         </StackPanel>
                         </StackPanel>
@@ -1754,68 +1752,11 @@
                             <ui:ToggleSwitch IsChecked="{Binding IncludeYtyp}"
                                              Content="Generate .ytyp metadata"
                                              Margin="0,0,0,8"
-                                             Visibility="{Binding IsGtaVTarget, Converter={StaticResource BooleanToVisibility}}"
                                              ToolTip="Write a .ytyp file that registers your prop as a placeable archetype. Without this you can spawn the model from script (CreateObject) but it can't be placed in a .ymap via CodeWalker." />
                             <ui:ToggleSwitch IsChecked="{Binding ExtractTextures}"
                                              Content="Extract embedded textures"
                                              Margin="0,0,0,8"
                                              ToolTip="Pull diffuse + normal maps from your source FBX/GLB (embedded or sidecar PNGs), encode them as DDS, and bake them into the YDR's TextureDictionary. Turn off only if you're shipping a separate .ytd dictionary." />
-                            <ui:ToggleSwitch IsChecked="{Binding AnimatedProp}"
-                                             Content="Animated prop (rig + animation)"
-                                             Margin="0,0,0,8"
-                                             Visibility="{Binding ShowAnimatedPropControls, Converter={StaticResource BooleanToVisibility}}"
-                                             ToolTip="If your model ships a rig AND an animation clip, export it as an ANIMATED prop: the engine attaches a skeleton, rigidly binds each part to a bone, writes a matching .ycd, and sets the ytyp's Auto Start Anim flag so a placed prop plays on its own. Falls back to a normal static prop when there's no animation. Rigid binding animates WHOLE parts, so it suits mechanical models whose moving pieces are separate meshes — verify the motion on your FiveM server." />
-
-                            <!-- Auto-spin sub-options: only relevant when
-                                 Animated prop is on (static Props tab). On the
-                                 Animated workspace the keys timeline owns motion. -->
-                            <StackPanel Margin="16,0,0,8"
-                                        Visibility="{Binding AnimatedProp, Converter={StaticResource BooleanToVisibility}}">
-                                <StackPanel.Style>
-                                    <Style TargetType="StackPanel">
-                                        <Style.Triggers>
-                                            <DataTrigger Binding="{Binding IsAnimatedPropsView}" Value="True">
-                                                <Setter Property="Visibility" Value="Collapsed" />
-                                            </DataTrigger>
-                                        </Style.Triggers>
-                                    </Style>
-                                </StackPanel.Style>
-                                <ui:ToggleSwitch IsChecked="{Binding AutoSpin}"
-                                                 Content="Auto-spin (no animation in file)"
-                                                 Margin="0,0,0,6"
-                                                 ToolTip="Model has no animation baked in? Generate one: FiveOS puts a rotation bone at the model's centre and spins it 360° on loop. Ideal for gears, fans, wheels, signs, turntables — no pre-animated file needed." />
-                                <StackPanel Visibility="{Binding AutoSpin, Converter={StaticResource BooleanToVisibility}}">
-                                    <Grid Margin="0,2,0,6">
-                                        <Grid.ColumnDefinitions>
-                                            <ColumnDefinition Width="90" />
-                                            <ColumnDefinition Width="*" />
-                                        </Grid.ColumnDefinitions>
-                                        <TextBlock Text="Spin axis" VerticalAlignment="Center" Opacity="0.7" />
-                                        <ComboBox Grid.Column="1" SelectedIndex="{Binding SpinAxisIndex}"
-                                                  HorizontalAlignment="Left" Width="150"
-                                                  ToolTip="Which axis the prop turns around. Z = vertical (fans, turntables); X / Y = horizontal (wheels, rollers).">
-                                            <ComboBoxItem Content="X (horizontal)" />
-                                            <ComboBoxItem Content="Y (horizontal)" />
-                                            <ComboBoxItem Content="Z (vertical)" />
-                                        </ComboBox>
-                                    </Grid>
-                                    <Grid Margin="0,0,0,6">
-                                        <Grid.ColumnDefinitions>
-                                            <ColumnDefinition Width="90" />
-                                            <ColumnDefinition Width="*" />
-                                        </Grid.ColumnDefinitions>
-                                        <TextBlock Text="Secs / rev" VerticalAlignment="Center" Opacity="0.7" />
-                                        <ui:NumberBox Grid.Column="1" Value="{Binding SpinSeconds, Mode=TwoWay}"
-                                                      Minimum="0.2" Maximum="120" SmallChange="0.5" LargeChange="1"
-                                                      HorizontalAlignment="Left" Width="150"
-                                                      ToolTip="Seconds for one full turn. Lower = faster spin." />
-                                    </Grid>
-                                    <ui:ToggleSwitch IsChecked="{Binding SpinReverse}"
-                                                     Content="Reverse direction"
-                                                     Margin="0,0,0,4" />
-                                </StackPanel>
-                            </StackPanel>
-
                             <ui:ToggleSwitch IsChecked="{Binding GenerateLods}"
                                              Content="Generate LODs (med / low / vlow)"
                                              Margin="0,0,0,8"
@@ -1991,6 +1932,81 @@
                                     </ui:Button.Icon>
                                 </ui:Button>
                             </Grid>
+
+                            <!-- Custom pivot: the point the model rotates and
+                                 scales around, and the origin the exported prop
+                                 is placed and rotated by in-game. Set it with
+                                 the viewport's Pivot gizmo (P). -->
+                            <TextBlock Text="{Binding PivotSummary}"
+                                       FontSize="10"
+                                       Opacity="0.65"
+                                       TextWrapping="Wrap"
+                                       Margin="0,10,0,0"
+                                       ToolTip="Press P (or the Pivot button on the viewport toolbar) and drag the arrows to put the pivot on a hinge, a base corner, wherever the prop should turn from. The model stays where it is; only the pivot moves." />
+                            <ui:Button HorizontalAlignment="Stretch"
+                                       Margin="0,6,0,0"
+                                       Appearance="Secondary"
+                                       Content="Reset pivot to centre"
+                                       Click="OnResetPivot"
+                                       Visibility="{Binding HasCustomPivot, Converter={StaticResource BooleanToVisibility}}"
+                                       ToolTip="Put the pivot back at the model's centre — the export then keeps the file's own origin.">
+                                <ui:Button.Icon>
+                                    <ui:SymbolIcon Symbol="Target24" />
+                                </ui:Button.Icon>
+                            </ui:Button>
+                        </StackPanel>
+                        </Border>
+
+                        <!-- ─── BONES (Animated mode) ─── -->
+                        <Border local:PanelLayout.Id="bones"
+                                Background="Transparent"
+                                Padding="0,0,0,4"
+                                Visibility="{Binding IsAnimatedPropsView, Converter={StaticResource BooleanToVisibility}}">
+                        <StackPanel DataContext="{Binding PropAnim}">
+                        <DockPanel Margin="10,14,16,8">
+                            <Border DockPanel.Dock="Left"
+                                    Width="14" Height="18"
+                                    Margin="0,0,4,0"
+                                    Background="Transparent"
+                                    Cursor="SizeAll"
+                                    local:PanelLayout.DragHandle="True"
+                                    ToolTip="Drag to reorder panel"
+                                    VerticalAlignment="Center">
+                                <TextBlock Text="⠿" FontSize="12" Opacity="0.4"
+                                           HorizontalAlignment="Center" VerticalAlignment="Center" />
+                            </Border>
+                            <ui:SymbolIcon DockPanel.Dock="Right"
+                                           Style="{StaticResource HelpIconStyle}"
+                                           ToolTip="Every separate mesh in your file is a part you can animate. Click a part on the stage (or here), drag the gizmo, and the key lands on the timeline under the viewport. Convert bakes the motion into the prop — a skeleton in the .ydr plus a .ycd clip that auto-plays when the prop is placed." />
+                            <TextBlock DockPanel.Dock="Right" Text="{Binding BoneCountText}" FontSize="10" Opacity="0.45"
+                                       VerticalAlignment="Center" Margin="0,0,8,0" />
+                            <TextBlock Text="BONES"
+                                       FontSize="11" FontWeight="SemiBold" Opacity="0.55"
+                                       Foreground="{DynamicResource TextFillColorPrimaryBrush}"
+                                       VerticalAlignment="Center" />
+                        </DockPanel>
+                        <StackPanel Margin="16,0,16,0">
+                            <ui:TextBox Text="{Binding BoneFilter, UpdateSourceTrigger=PropertyChanged}"
+                                        PlaceholderText="Search parts…" FontSize="11" Margin="0,0,0,6"
+                                        ToolTip="Parts with geometry are listed; type to search every node, empty groups included." />
+                            <TextBlock Text="Parts are listed in the LAYERS tree — click one there to select it, Shift or Ctrl+click for several. Hiding a part, or Spin 360°, applies to everything selected."
+                                       FontSize="10" Opacity="0.45" TextWrapping="Wrap" Margin="0,0,0,2" />
+                            <DockPanel Margin="0,8,0,0" LastChildFill="False">
+                                <ui:Button DockPanel.Dock="Left" Content="Spin 360°" Appearance="Secondary"
+                                           Padding="10,3" FontSize="12" Click="OnPropAnimSpin"
+                                           ToolTip="Key a full turn of the selected part over the clip length — fans, wheels, signs and turntables in one click." />
+                                <ComboBox x:Name="PropAnimSpinAxis" DockPanel.Dock="Left" SelectedIndex="0"
+                                          Width="96" Margin="6,0,0,0" FontSize="11"
+                                          ToolTip="Axis to turn around, in game terms: Vertical is the game's Z (up), Y its forward axis.">
+                                    <ComboBoxItem Content="Vertical (Z)" />
+                                    <ComboBoxItem Content="X" />
+                                    <ComboBoxItem Content="Y" />
+                                </ComboBox>
+                                <CheckBox x:Name="PropAnimSpinReverse" DockPanel.Dock="Left" Content="Reverse"
+                                          Margin="8,0,0,0" FontSize="11" VerticalAlignment="Center" />
+                            </DockPanel>
+                            <TextBlock Text="{Binding StatusText}" FontSize="10" Opacity="0.5" TextWrapping="Wrap" Margin="0,8,0,0" />
+                        </StackPanel>
                         </StackPanel>
                         </Border>
 
@@ -2328,7 +2344,99 @@
                      collapse the host instead. See IsViewportVisible. -->
                 <Grid x:Name="ViewportRoot"
                       Visibility="{Binding IsViewportVisible, Converter={StaticResource BooleanToVisibility}}">
-                    <Border CornerRadius="8"
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="*" />
+                    </Grid.RowDefinitions>
+
+                    <!-- Stage bar: Props | Animated. In Animated the viewer turns
+                         into the bone editor (timeline lives in the page); keys
+                         count + undo / redo sit on the right. -->
+                    <DockPanel Grid.Row="0" Margin="0,0,0,6" LastChildFill="False">
+                        <DockPanel.Resources>
+                            <Style x:Key="StageTab" TargetType="Border">
+                                <Setter Property="CornerRadius" Value="4" />
+                                <Setter Property="Padding" Value="10,3" />
+                                <Setter Property="Margin" Value="0,0,4,0" />
+                                <Setter Property="Cursor" Value="Hand" />
+                                <Setter Property="Background" Value="Transparent" />
+                                <Setter Property="BorderThickness" Value="1" />
+                                <Setter Property="BorderBrush" Value="Transparent" />
+                            </Style>
+                            <Style x:Key="StageTabLabel" TargetType="TextBlock">
+                                <Setter Property="FontSize" Value="11" />
+                                <Setter Property="FontWeight" Value="SemiBold" />
+                                <Setter Property="Opacity" Value="0.6" />
+                                <Setter Property="VerticalAlignment" Value="Center" />
+                                <Setter Property="Foreground" Value="{DynamicResource TextFillColorPrimaryBrush}" />
+                            </Style>
+                        </DockPanel.Resources>
+                        <StackPanel DockPanel.Dock="Left" Orientation="Horizontal">
+                            <Border Tag="Props" MouseLeftButtonUp="OnPropStageModeClick"
+                                    ToolTip="Static prop — place, scale and convert.">
+                                <Border.Style>
+                                    <Style TargetType="Border" BasedOn="{StaticResource StageTab}">
+                                        <Style.Triggers>
+                                            <DataTrigger Binding="{Binding IsStaticPropsView}" Value="True">
+                                                <Setter Property="Background" Value="{DynamicResource ControlFillColorSecondaryBrush}" />
+                                                <Setter Property="BorderBrush" Value="{DynamicResource ControlElevationBorderBrush}" />
+                                            </DataTrigger>
+                                        </Style.Triggers>
+                                    </Style>
+                                </Border.Style>
+                                <TextBlock Text="Props">
+                                    <TextBlock.Style>
+                                        <Style TargetType="TextBlock" BasedOn="{StaticResource StageTabLabel}">
+                                            <Style.Triggers>
+                                                <DataTrigger Binding="{Binding IsStaticPropsView}" Value="True">
+                                                    <Setter Property="Opacity" Value="1" />
+                                                </DataTrigger>
+                                            </Style.Triggers>
+                                        </Style>
+                                    </TextBlock.Style>
+                                </TextBlock>
+                            </Border>
+                            <Border Tag="Animated" MouseLeftButtonUp="OnPropStageModeClick"
+                                    ToolTip="Animated prop — click a part, pose it with the gizmo, key it on the timeline; Convert bakes the motion into the prop.">
+                                <Border.Style>
+                                    <Style TargetType="Border" BasedOn="{StaticResource StageTab}">
+                                        <Style.Triggers>
+                                            <DataTrigger Binding="{Binding IsAnimatedPropsView}" Value="True">
+                                                <Setter Property="Background" Value="{DynamicResource ControlFillColorSecondaryBrush}" />
+                                                <Setter Property="BorderBrush" Value="{DynamicResource ControlElevationBorderBrush}" />
+                                            </DataTrigger>
+                                        </Style.Triggers>
+                                    </Style>
+                                </Border.Style>
+                                <TextBlock Text="Animated">
+                                    <TextBlock.Style>
+                                        <Style TargetType="TextBlock" BasedOn="{StaticResource StageTabLabel}">
+                                            <Style.Triggers>
+                                                <DataTrigger Binding="{Binding IsAnimatedPropsView}" Value="True">
+                                                    <Setter Property="Opacity" Value="1" />
+                                                </DataTrigger>
+                                            </Style.Triggers>
+                                        </Style>
+                                    </TextBlock.Style>
+                                </TextBlock>
+                            </Border>
+                        </StackPanel>
+                        <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Center"
+                                    Visibility="{Binding IsAnimatedPropsView, Converter={StaticResource BooleanToVisibility}}">
+                            <TextBlock Text="{Binding PropAnim.KeysText}" FontSize="10" Opacity="0.5" VerticalAlignment="Center" Margin="0,0,10,0" />
+                            <ui:Button Appearance="Secondary" Padding="7,2" Margin="0,0,4,0" Click="OnPropAnimUndo"
+                                       IsEnabled="{Binding PropAnim.CanUndo}" ToolTip="Undo (Ctrl+Z)">
+                                <ui:SymbolIcon Symbol="ArrowUndo24" FontSize="13" />
+                            </ui:Button>
+                            <ui:Button Appearance="Secondary" Padding="7,2" Click="OnPropAnimRedo"
+                                       IsEnabled="{Binding PropAnim.CanRedo}" ToolTip="Redo (Ctrl+Y)">
+                                <ui:SymbolIcon Symbol="ArrowRedo24" FontSize="13" />
+                            </ui:Button>
+                        </StackPanel>
+                    </DockPanel>
+
+                    <Border Grid.Row="1"
+                            CornerRadius="8"
                             ClipToBounds="True"
                             BorderThickness="1"
                             BorderBrush="{DynamicResource ControlElevationBorderBrush}">
@@ -3137,107 +3245,11 @@
         </Grid>
 
                     <!-- ═══════════════════════════════════════════════════
-                         ANIMATED KEYS TIMELINE
-                         Scrub / insert / delete rotation keys; convert
-                         samples them into the prop .ycd.
-                         ═══════════════════════════════════════════════════ -->
-                    <Border Grid.Row="2"
-                            BorderThickness="0,1,0,0"
-                            BorderBrush="{DynamicResource ControlElevationBorderBrush}"
-                            Background="{DynamicResource ControlFillColorDefaultBrush}"
-                            Visibility="{Binding IsAnimatedPropsView, Converter={StaticResource BooleanToVisibility}}">
-                        <Grid Margin="12,8,12,10">
-                            <Grid.RowDefinitions>
-                                <RowDefinition Height="Auto" />
-                                <RowDefinition Height="*" />
-                            </Grid.RowDefinitions>
-
-                            <!-- Transport -->
-                            <DockPanel Grid.Row="0" Margin="0,0,0,8" LastChildFill="True">
-                                <StackPanel DockPanel.Dock="Left" Orientation="Horizontal" VerticalAlignment="Center">
-                                    <ui:Button Appearance="Transparent"
-                                               Padding="8,4"
-                                               Margin="0,0,4,0"
-                                               Click="OnPropAnimPlayToggle"
-                                               ToolTip="Play / pause timeline preview">
-                                        <ui:Button.Icon>
-                                            <ui:SymbolIcon x:Name="PropAnimPlayIcon" Symbol="Play24" FontSize="14" />
-                                        </ui:Button.Icon>
-                                    </ui:Button>
-                                    <ui:Button Appearance="Transparent"
-                                               Padding="8,4"
-                                               Margin="0,0,4,0"
-                                               Click="OnPropAnimStop"
-                                               ToolTip="Stop and return playhead to start">
-                                        <ui:Button.Icon>
-                                            <ui:SymbolIcon Symbol="Stop24" FontSize="14" />
-                                        </ui:Button.Icon>
-                                    </ui:Button>
-                                    <Border Width="1" Height="18" Margin="6,0,10,0"
-                                            Background="{DynamicResource ControlElevationBorderBrush}" />
-                                    <ui:Button Content="Add key"
-                                               Appearance="Secondary"
-                                               Padding="10,4"
-                                               Margin="0,0,6,0"
-                                               FontSize="12"
-                                               Command="{Binding AddPropAnimKeyCommand}"
-                                               ToolTip="Insert a key at the playhead using the current gizmo rotation (K)" />
-                                    <ui:Button Content="Delete key"
-                                               Appearance="Transparent"
-                                               Padding="10,4"
-                                               Margin="0,0,6,0"
-                                               FontSize="12"
-                                               Command="{Binding DeletePropAnimKeyCommand}"
-                                               ToolTip="Remove the key nearest the playhead" />
-                                    <ui:Button Content="Reset"
-                                               Appearance="Transparent"
-                                               Padding="10,4"
-                                               FontSize="12"
-                                               Command="{Binding ClearPropAnimKeysCommand}"
-                                               ToolTip="Reset to a default 0→360° spin on the current axis" />
-                                </StackPanel>
-                                <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Center" Margin="12,0,0,0">
-                                    <TextBlock Text="Duration" Opacity="0.65" FontSize="11" VerticalAlignment="Center" Margin="0,0,6,0" />
-                                    <ui:NumberBox Value="{Binding PropAnimDuration, Mode=TwoWay}"
-                                                  Minimum="0.2" Maximum="120" SmallChange="0.5"
-                                                  Width="72" FontSize="12"
-                                                  ToolTip="Timeline length in seconds" />
-                                </StackPanel>
-                                <TextBlock Text="{Binding PropAnimPlayheadLabel}"
-                                           FontSize="11"
-                                           Opacity="0.75"
-                                           VerticalAlignment="Center"
-                                           FontFamily="Consolas" />
-                            </DockPanel>
-
-                            <!-- Ruler + key lane -->
-                            <Border Grid.Row="1"
-                                    CornerRadius="4"
-                                    BorderThickness="1"
-                                    BorderBrush="{DynamicResource ControlElevationBorderBrush}"
-                                    Background="#FF1A1A1A"
-                                    ClipToBounds="True">
-                                <Canvas x:Name="PropAnimTimelineCanvas"
-                                        Background="Transparent"
-                                        MouseLeftButtonDown="OnPropAnimTimelineDown"
-                                        MouseMove="OnPropAnimTimelineMove"
-                                        MouseLeftButtonUp="OnPropAnimTimelineUp"
-                                        MouseLeave="OnPropAnimTimelineUp"
-                                        SizeChanged="OnPropAnimTimelineSizeChanged">
-                                    <ctrl:TimelineRenderLayer x:Name="PropAnimTimelineLayer"
-                                                              Width="{Binding ActualWidth, ElementName=PropAnimTimelineCanvas}"
-                                                              Height="{Binding ActualHeight, ElementName=PropAnimTimelineCanvas}" />
-                                </Canvas>
-                            </Border>
-                        </Grid>
-                    </Border>
-
-                    <!-- ═══════════════════════════════════════════════════
                          FOOTER: prop name + convert action
                          Temporarily hidden — use Ctrl+Enter / File → Convert;
                          status + P/R/S stay on the window bottom strip.
                          ═══════════════════════════════════════════════════ -->
-                    <Border Grid.Row="3"
+                    <Border Grid.Row="1"
                             BorderThickness="0,1,0,0"
                             BorderBrush="{DynamicResource ControlElevationBorderBrush}"
                             Background="{DynamicResource ControlFillColorDefaultBrush}"

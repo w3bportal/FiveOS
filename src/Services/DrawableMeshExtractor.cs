@@ -134,6 +134,15 @@ public sealed class DrawableMeshExtractor
     /// it takes effect on the next ExtractLod.</summary>
     public void SetExternalTextures(Dictionary<uint, Texture>? map) => _externalTex = map;
 
+    /// <summary>Name hashes whose external copy may beat the embedded one
+    /// when it is LARGER. GTA V props embed a low-res copy and keep the real
+    /// one in a <c>+hi</c>/<c>+hifr</c> dictionary; the Props preview wants
+    /// the latter. Only the model's own high-detail set qualifies — GTA reuses
+    /// names like "black" across unrelated dictionaries, and the vehicle
+    /// preview must keep a mod's embedded textures over the shared vehshare
+    /// set. Null (default) = embedded always wins.</summary>
+    public HashSet<uint>? PreferLargerExternalFor { get; init; }
+
     public DrawableMeshExtractor(string sessionDir)
     {
         _sessionDir = sessionDir;
@@ -360,12 +369,19 @@ public sealed class DrawableMeshExtractor
     private Texture? ResolveDecodable(TextureBase? tb)
     {
         if (tb == null) return null;
+        Texture? ext = null;
+        if (_externalTex != null && _externalTex.TryGetValue((uint)tb.NameHash, out var found)
+            && found?.Data != null && found.Width > 0 && found.Height > 0)
+            ext = found;
         if (tb is Texture embedded && embedded.Data != null && embedded.Width > 0 && embedded.Height > 0)
+        {
+            if (ext != null && PreferLargerExternalFor != null
+                && PreferLargerExternalFor.Contains((uint)tb.NameHash)
+                && (long)ext.Width * ext.Height > (long)embedded.Width * embedded.Height)
+                return ext;
             return embedded;
-        if (_externalTex != null && _externalTex.TryGetValue((uint)tb.NameHash, out var ext)
-            && ext?.Data != null && ext.Width > 0 && ext.Height > 0)
-            return ext;
-        return null;
+        }
+        return ext;
     }
 
     /// <summary>Resolve a geometry's shader: prefer the resolved reference,

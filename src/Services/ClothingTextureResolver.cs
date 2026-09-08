@@ -2,6 +2,7 @@
 // https://github.com/w3bportal/FiveOS
 
 using System.IO;
+using System.Linq;
 using CodeWalker.GameFiles;
 
 namespace FiveOS.Services;
@@ -47,24 +48,42 @@ public static class ClothingTextureResolver
     /// the UI thread.</summary>
     public static (string? Name, Dictionary<uint, Texture> Map) Load(string sourcePath, IEnumerable<DrawableBase> drawables)
     {
+        var r = LoadDetailed(sourcePath, drawables);
+        return (r.Name, r.Map);
+    }
+
+    /// <summary>What <see cref="Load"/> found, plus the name hashes that came
+    /// out of the model's own <c>+hi</c>/<c>+hifr</c> high-detail set — the
+    /// only external textures that should beat an embedded copy.</summary>
+    public sealed record Resolved(string? Name, Dictionary<uint, Texture> Map, HashSet<uint> HiHashes);
+
+    public static Resolved LoadDetailed(string sourcePath, IEnumerable<DrawableBase> drawables)
+    {
         var map = new Dictionary<uint, Texture>();
+        var hi = new HashSet<uint>();
         var dir = Path.GetDirectoryName(sourcePath);
-        if (dir == null) return (null, map);
+        if (dir == null) return new Resolved(null, map, hi);
         string[] ytds;
         try { ytds = Directory.GetFiles(dir, "*.ytd"); }
-        catch { return (null, map); }
-        if (ytds.Length == 0) return (null, map);
+        catch { return new Resolved(null, map, hi); }
+        if (ytds.Length == 0) return new Resolved(null, map, hi);
 
         var needed = CollectExternalNames(drawables);
         var baseName = Path.GetFileNameWithoutExtension(sourcePath);
-        // Best-named candidates first so the primary .ytd is usually the only load.
+        // Best-named candidates first: the model's own high-detail set, then
+        // its same-name dictionary, so the hi copy is the one that lands in the
+        // map (first dictionary per hash wins) and the primary .ytd is usually
+        // the only load.
         Array.Sort(ytds, (a, b) => NameScore(b, baseName).CompareTo(NameScore(a, baseName)));
 
         string? primary = null;
         int scanned = 0;
+        int hiPending = ytds.Count(y => IsHiVariant(y, baseName));
         foreach (var ytd in ytds)
         {
             if (scanned++ >= 64) break;   // pathological-folder guard
+            bool isHi = IsHiVariant(ytd, baseName);
+            if (isHi) hiPending--;
             YtdFile yf;
             try { yf = DrawableOptimizer.LoadResource<YtdFile>(ytd); }
             catch { continue; }
@@ -76,12 +95,17 @@ public static class ClothingTextureResolver
             {
                 if (tex == null) continue;
                 uint h = (uint)tex.NameHash;
-                if (map.TryAdd(h, tex) && needed.Contains(h)) contributed = true;
+                if (map.TryAdd(h, tex))
+                {
+                    if (isHi) hi.Add(h);
+                    if (needed.Contains(h)) contributed = true;
+                }
             }
             if (contributed && primary == null) primary = Path.GetFileName(ytd);
 
-            // Stop early once every referenced texture is in hand.
-            if (needed.Count > 0)
+            // Stop early once every referenced texture is in hand — but never
+            // before the model's high-detail set has been read.
+            if (needed.Count > 0 && hiPending <= 0)
             {
                 bool covered = true;
                 foreach (var h in needed) if (!map.ContainsKey(h)) { covered = false; break; }
@@ -90,11 +114,24 @@ public static class ClothingTextureResolver
         }
 
         primary ??= Path.GetFileName(ytds[0]);
-        return (primary, map);
+        return new Resolved(primary, map, hi);
+    }
+
+    private static bool IsHiVariant(string ytdPath, string baseName)
+    {
+        var n = Path.GetFileNameWithoutExtension(ytdPath);
+        return n.Equals(baseName + "+hi", StringComparison.OrdinalIgnoreCase)
+            || n.Equals(baseName + "+hifr", StringComparison.OrdinalIgnoreCase)
+            || n.Equals(baseName + "+hidr", StringComparison.OrdinalIgnoreCase)
+            || n.Equals(baseName + "+hidd", StringComparison.OrdinalIgnoreCase);
     }
 
     /// <summary>Name hashes of the diffuse/sampler textures the drawables
-    /// reference externally (no embedded pixel data).</summary>
+    /// reference externally (no embedded pixel data). Public so the game-file
+    /// importer can decide which RPF dictionaries are worth extracting.</summary>
+    public static HashSet<uint> ExternalTextureHashes(IEnumerable<DrawableBase> drawables)
+        => CollectExternalNames(drawables);
+
     private static HashSet<uint> CollectExternalNames(IEnumerable<DrawableBase> drawables)
     {
         var set = new HashSet<uint>();
@@ -122,6 +159,7 @@ public static class ClothingTextureResolver
     private static int NameScore(string ytdPath, string baseName)
     {
         var n = Path.GetFileNameWithoutExtension(ytdPath);
+        if (IsHiVariant(ytdPath, baseName)) return 4;
         if (string.Equals(n, baseName, StringComparison.OrdinalIgnoreCase)) return 3;
         if (n.Contains(baseName, StringComparison.OrdinalIgnoreCase) ||
             baseName.Contains(n, StringComparison.OrdinalIgnoreCase)) return 2;

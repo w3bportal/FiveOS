@@ -45,10 +45,16 @@ public record PosedPositionTrack(ushort BoneTag, Vector3[] PerFrame);
 /// </summary>
 public static class YcdAnimationBuilder
 {
+    /// <param name="emitMover">Write the entity mover pair (Track 5/6 on
+    /// BoneId 0). Right for ped clips (see the note inside). Vehicle / prop
+    /// entity clips authored bone-by-bone pass <c>false</c>: their bone 0 is
+    /// the chassis, a real bone with its own position/rotation tracks, and
+    /// PlayEntityAnim does no mover extraction — matching what Sollumz
+    /// writes for vehicle clips.</param>
     public static byte[] Build(string clipName, IReadOnlyList<PosedBoneTrack> bones, int frames, int fps,
-        IReadOnlyList<PosedPositionTrack>? positions = null)
+        IReadOnlyList<PosedPositionTrack>? positions = null, bool emitMover = true)
     {
-        var xml = BuildXml(clipName, bones, frames, fps, positions);
+        var xml = BuildXml(clipName, bones, frames, fps, positions, emitMover);
         var ycd = XmlYcd.GetYcd(xml);
         return ycd.Save();
     }
@@ -57,7 +63,7 @@ public static class YcdAnimationBuilder
     /// XML instead of the compiled bytes (callers can compile it via
     /// CodeWalker.exe as a check on CW.Core's binary writer).</summary>
     public static string BuildXml(string clipName, IReadOnlyList<PosedBoneTrack> bones, int frames, int fps,
-        IReadOnlyList<PosedPositionTrack>? positions = null)
+        IReadOnlyList<PosedPositionTrack>? positions = null, bool emitMover = true)
     {
         if (string.IsNullOrWhiteSpace(clipName))
             throw new ArgumentException("clipName must be non-empty.", nameof(clipName));
@@ -97,8 +103,12 @@ public static class YcdAnimationBuilder
         // Clips that don't travel get a zero translation: that is not "freeze
         // the ped", it's "this clip does not move the ped relative to its own
         // entity" — the bone animation plays in full either way.
-        var moverTranslation = posTracks.FirstOrDefault(p => p.BoneTag == 0)?.PerFrame;
-        if (moverTranslation != null) posTracks.RemoveAll(p => p.BoneTag == 0);
+        Vector3[]? moverTranslation = null;
+        if (emitMover)
+        {
+            moverTranslation = posTracks.FirstOrDefault(p => p.BoneTag == 0)?.PerFrame;
+            if (moverTranslation != null) posTracks.RemoveAll(p => p.BoneTag == 0);
+        }
 
         var safe = SanitizeClipName(clipName);
         var animDataName = "hash_" + (YcdPoseBuilder.Joaat(safe) + 1).ToString("X8");
@@ -141,7 +151,7 @@ public static class YcdAnimationBuilder
             sb.AppendLine($"    <Item><BoneId value=\"{p.BoneTag}\" /><Track value=\"0\" /><Unk0 value=\"0\" /></Item>");
         foreach (var b in sorted)
             sb.AppendLine($"    <Item><BoneId value=\"{b.BoneTag}\" /><Track value=\"1\" /><Unk0 value=\"1\" /></Item>");
-        YcdPoseBuilder.AppendMoverBoneIds(sb);
+        if (emitMover) YcdPoseBuilder.AppendMoverBoneIds(sb);
         sb.AppendLine("   </BoneIds>");
 
         sb.AppendLine("   <Sequences>");
@@ -176,9 +186,12 @@ public static class YcdAnimationBuilder
         }
 
         // Mover pair, mirroring the BoneIds order 1:1.
-        if (moverTranslation != null) AppendPositionItem(sb, moverTranslation);
-        else YcdPoseBuilder.AppendNeutralMoverTranslation(sb);
-        YcdPoseBuilder.AppendMoverRotation(sb);
+        if (emitMover)
+        {
+            if (moverTranslation != null) AppendPositionItem(sb, moverTranslation);
+            else YcdPoseBuilder.AppendNeutralMoverTranslation(sb);
+            YcdPoseBuilder.AppendMoverRotation(sb);
+        }
 
         sb.AppendLine("     </SequenceData>");
         sb.AppendLine("    </Item>");

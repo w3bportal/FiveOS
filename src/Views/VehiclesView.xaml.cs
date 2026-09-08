@@ -2,6 +2,7 @@
 // https://github.com/w3bportal/FiveOS
 
 using System.IO;
+using System.Text.Json;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Controls.Primitives;
@@ -25,21 +26,55 @@ public partial class VehiclesView : UserControl
 
     private bool _busy;
 
+    private VehiclesViewModel? _layoutVm;
+
     private void OnLoaded(object sender, RoutedEventArgs e)
     {
         LayersCol.Width = new GridLength(UserSettings.LoadVehiclesLayersWidth());
         PaintCol.Width = new GridLength(UserSettings.LoadVehiclesPaintWidth());
-        DetailsRow.Height = new GridLength(UserSettings.LoadVehiclesDetailsHeight());
+        if (!ReferenceEquals(_layoutVm, Vm))
+        {
+            if (_layoutVm != null) _layoutVm.PropertyChanged -= OnVmLayoutPropertyChanged;
+            _layoutVm = Vm;
+            if (_layoutVm != null) _layoutVm.PropertyChanged += OnVmLayoutPropertyChanged;
+        }
+        UpdateDetailsRow();
         SyncMetaModeButtons();
+        HookAnimVm();
+        _ = InitCarPreviewAsync();
     }
 
     private void OnUnloaded(object sender, RoutedEventArgs e) => PersistLayout();
+
+    private void OnVmLayoutPropertyChanged(object? sender, System.ComponentModel.PropertyChangedEventArgs e)
+    {
+        if (e.PropertyName == nameof(VehiclesViewModel.ShowMetaEditor)) UpdateDetailsRow();
+    }
+
+    /// <summary>The bottom row is the meta editor — it only takes space while
+    /// a .meta file is open; the rest of the time the stage has the height.</summary>
+    private void UpdateDetailsRow()
+    {
+        bool open = Vm?.ShowMetaEditor == true;
+        if (open)
+        {
+            DetailsRow.MinHeight = 140;
+            DetailsRow.Height = new GridLength(Math.Max(140, UserSettings.LoadVehiclesDetailsHeight()));
+        }
+        else
+        {
+            DetailsRow.MinHeight = 0;
+            DetailsRow.Height = new GridLength(0);
+        }
+    }
 
     private void PersistLayout()
     {
         UserSettings.SaveVehiclesLayersWidth(LayersCol.Width.Value);
         UserSettings.SaveVehiclesPaintWidth(PaintCol.Width.Value);
-        UserSettings.SaveVehiclesDetailsHeight(DetailsRow.Height.Value);
+        // The row is collapsed to 0 whenever no meta is open — never persist that.
+        if (Vm?.ShowMetaEditor == true && DetailsRow.Height.Value >= 140)
+            UserSettings.SaveVehiclesDetailsHeight(DetailsRow.Height.Value);
     }
 
     private void OnLayersSplitterDragCompleted(object sender, DragCompletedEventArgs e)
@@ -49,7 +84,9 @@ public partial class VehiclesView : UserControl
         => UserSettings.SaveVehiclesPaintWidth(PaintCol.Width.Value);
 
     private void OnDetailsSplitterDragCompleted(object sender, DragCompletedEventArgs e)
-        => UserSettings.SaveVehiclesDetailsHeight(DetailsRow.Height.Value);
+    {
+        if (Vm?.ShowMetaEditor == true && DetailsRow.Height.Value >= 140) UserSettings.SaveVehiclesDetailsHeight(DetailsRow.Height.Value);
+    }
 
     private async void OnTreeSelected(object sender, RoutedPropertyChangedEventArgs<object> e)
     {
@@ -362,14 +399,14 @@ public partial class VehiclesView : UserControl
 
     private void OnDragOver(object sender, DragEventArgs e)
     {
-        e.Effects = GetDroppedInputs(e).Count > 0
+        e.Effects = GetDroppedInputs(e).Count > 0 || DroppedAnimFile(e) != null
             ? DragDropEffects.Copy : DragDropEffects.None;
         e.Handled = true;
     }
 
     private void OnDragEnter(object sender, DragEventArgs e)
     {
-        if (GetDroppedInputs(e).Count > 0) DropOverlay.Visibility = Visibility.Visible;
+        if (GetDroppedInputs(e).Count > 0 || DroppedAnimFile(e) != null) DropOverlay.Visibility = Visibility.Visible;
     }
 
     private void OnDragLeave(object sender, DragEventArgs e) => DropOverlay.Visibility = Visibility.Collapsed;
@@ -377,8 +414,12 @@ public partial class VehiclesView : UserControl
     private async void OnDrop(object sender, DragEventArgs e)
     {
         DropOverlay.Visibility = Visibility.Collapsed;
+        if (Vm == null) return;
+        // A lone .yft / .fvanim goes straight to the stage's Animate mode.
+        var animFile = DroppedAnimFile(e);
+        if (animFile != null) { await OpenAnimFileAsync(animFile); return; }
         var inputs = GetDroppedInputs(e);
-        if (inputs.Count == 0 || Vm == null) return;
+        if (inputs.Count == 0) return;
         await AddOrSetAsync(inputs);
     }
 
@@ -680,22 +721,48 @@ public partial class VehiclesView : UserControl
     {
         string json;
         try { json = e.WebMessageAsJson; } catch { return; }
-        if (json.Contains("\"ready\"") && !_carViewerReady)
+        JsonDocument doc;
+        try { doc = JsonDocument.Parse(json); } catch { return; }
+        using (doc)
         {
-            _carViewerReady = true;
-            Dispatcher.Invoke(() =>
+            var root = doc.RootElement;
+            if (root.ValueKind != JsonValueKind.Object) return;
+            var kind = root.TryGetProperty("kind", out var k) ? k.GetString() : null;
+            if (kind == "ready")
             {
-                if (_pendingModelPath != null) _ = LoadModelAsync(_pendingModelPath);
-            });
+                if (_carViewerReady) return;
+                _carViewerReady = true;
+                Dispatcher.Invoke(() =>
+                {
+                    if (Vm?.IsAnimateMode == true) _ = ApplyStageModeAsync();
+                    if (_pendingModelPath != null) _ = LoadModelAsync(_pendingModelPath);
+                });
+                return;
+            }
+            if (kind is "vanim-state" or "vanim-request-save" or "vanim-split-request")
+            {
+                // Clone: the document is disposed before the dispatcher runs.
+                var snap = root.Clone();
+                Dispatcher.BeginInvoke(() => HandleAnimViewerMessage(kind, snap));
+            }
         }
     }
 
     private async Task LoadModelAsync(string yftPath)
     {
         _pendingModelPath = null;
+        bool animate = Vm?.IsAnimateMode == true;
+        // Animate mode wants the full-detail meshes (same skeleton). A re-load
+        // of the SAME car (textures landed, GTA folder set) must keep its keys.
+        if (animate && _loadedModelPath == yftPath && _pendingAnimSession == null && (AnimVm?.TotalKeys ?? 0) > 0)
+        {
+            var stash = await CarExecReturnAsync("window.fiveosVehicleAnim.getSession()");
+            if (!string.IsNullOrEmpty(stash)) _pendingAnimSession = stash;
+        }
         _loadedModelPath = yftPath;
         if (!File.Exists(yftPath)) return;
-        var name = Path.GetFileName(yftPath);
+        var geoPath = animate ? PreferHiLod(yftPath) : yftPath;
+        var name = Path.GetFileName(geoPath);
         PreviewHint.Visibility = Visibility.Collapsed;
         SetPreviewLoader(true, "Loading model…");
         DoorsToggle.IsChecked = false;
@@ -710,7 +777,9 @@ public partial class VehiclesView : UserControl
         VehicleMeshBuilder.BuildResult r;
         try
         {
-            r = await Task.Run(() => _carMeshBuilder!.Build(yftPath, frameCamera: true, 1f, pb, shared));
+            // Skeleton always rides along (a few KB) so a Preview↔Animate flip
+            // never has to rebuild the car.
+            r = await Task.Run(() => _carMeshBuilder!.Build(geoPath, frameCamera: true, 1f, pb, shared, includeSkeleton: true));
         }
         catch (Exception ex)
         {
@@ -721,7 +790,14 @@ public partial class VehiclesView : UserControl
             return;
         }
         if (_loadedModelPath != yftPath) return;   // selection moved on
-        await CarExecAsync($"window.fiveosWorkbench.loadLod({r.PayloadJson})");
+        _lastPayloadJson = r.PayloadJson;
+        _lastSkeleton = r.Skeleton;
+        _lastGroups = r.Groups;
+        _lastPieces = r.Pieces;
+        if (Vm?.IsAnimateMode == true)
+            await ShowCarInEditorAsync(r, geoPath);
+        else
+            await CarExecAsync($"window.fiveosWorkbench.loadLod({r.PayloadJson})");
         PopulateParts(r.Groups);
 
         // Keep the loader up while GTA's shared textures load — the car reloads
@@ -747,7 +823,7 @@ public partial class VehiclesView : UserControl
     // ── Mods controls: open doors + toggle parts/extras ──────────────────
 
     private void OnDoorsToggled(object sender, RoutedEventArgs e)
-        => _ = CarExecAsync($"window.fiveosWorkbench.setDoorsOpen({(DoorsToggle.IsChecked == true ? "true" : "false")})");
+        => _ = CarExecAsync($"window.fiveosVehicleAnim.setDoorsOpen({(DoorsToggle.IsChecked == true ? "true" : "false")})");
 
     private void OnPaintColor(object sender, MouseButtonEventArgs e)
     {
@@ -776,8 +852,8 @@ public partial class VehiclesView : UserControl
                 FontSize = 11,
                 Margin = new Thickness(0, 1, 0, 1),
             };
-            cb.Checked += (_, _) => _ = CarExecAsync($"window.fiveosWorkbench.setGroupVisible({JsStr(g.Name)}, true)");
-            cb.Unchecked += (_, _) => _ = CarExecAsync($"window.fiveosWorkbench.setGroupVisible({JsStr(g.Name)}, false)");
+            cb.Checked += (_, _) => _ = CarExecAsync($"window.fiveosVehicleAnim.setBoneVisible({JsStr(g.Name)}, true)");
+            cb.Unchecked += (_, _) => _ = CarExecAsync($"window.fiveosVehicleAnim.setBoneVisible({JsStr(g.Name)}, false)");
             PartsList.Items.Add(cb);
         }
         if (PartsList.Items.Count == 0)
@@ -814,6 +890,8 @@ public partial class VehiclesView : UserControl
         }
         UserSettings.SaveGtaFolder(dlg.FolderName);
         GameTextureCache.Reset(dlg.FolderName);
+        AnimRpfIndex.Reset(dlg.FolderName);
+        GamePropPreview.Reset();
         _sharedTexKicked = false;
         SetPreviewLoader(true, "Loading textures…");
         bool ok = await GameTextureCache.EnsureLoadedAsync(dlg.FolderName);

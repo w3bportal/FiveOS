@@ -48,27 +48,6 @@ MIT License. Copyright (c) Microsoft Corp. https://github.com/microsoft/DirectXT
 | FuzzySharp | MIT |
 | SharpCompress | MIT — © Adam Hathcock (zip/rar/7z extraction for mod-link imports) |
 
-## Vendored source
-
-### rage-toolkit (RageLib)
-
-`src/ydr-writer/third_party/ragelib/` contains a subset of
-[rage-toolkit](https://github.com/carmineos/rage-toolkit), used to read and
-write Grand Theft Auto IV collision resources (`.wbn`). Only the RSC5 resource
-container, the GTA IV `phBound` hierarchy, and the collection/numeric helpers
-they depend on are included.
-
-**MIT** — © Neodymium, carmineos and contributors. The upstream `LICENSE.md`
-is kept alongside the sources at
-`src/ydr-writer/third_party/ragelib/LICENSE.md`, and every file retains its
-original copyright header.
-
-FiveOS carries local fixes to these sources, each marked with a `FIVEOS PATCH`
-comment: a corrected `PhBoundComposite` block length, working
-`PhBoundPrimitive` material/area setters, an implemented RSC5 page allocator,
-a real zlib (rather than raw deflate) resource writer, and a page map that is
-allocated before it is written.
-
 ## Grand Theft Auto V reference meshes (Emotes)
 
 FiveOS bundles stripped freemode reference meshes (`freemode_male.glb`,

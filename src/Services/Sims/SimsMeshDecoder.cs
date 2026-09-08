@@ -24,6 +24,11 @@ public sealed class SimsMesh
     /// duplicate blob sitting inside the real mesh.</summary>
     public bool ShadowOnly;
 
+    /// <summary>Absolute path of a decoded diffuse image (PNG) for this mesh,
+    /// or null for an untextured mesh. <see cref="SimsGlbWriter"/> embeds it
+    /// as the material's base colour so the viewport shows the real surface.</summary>
+    public string? TexturePath;
+
     public int TriangleCount => Indices.Count / 3;
     public bool IsUsable => Positions.Count > 0 && Indices.Count >= 3;
 }

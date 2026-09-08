@@ -15,7 +15,7 @@ namespace FiveOS.Services;
 /// precisely for user additions, merged into its animation list at load.
 /// After a resource restart the emote shows up in the in-game emote menu.
 /// </summary>
-internal static class RpEmotesInstaller
+public static class RpEmotesInstaller
 {
     /// <summary>Cheap sanity check that a folder is an rpemotes(-reborn)
     /// install with the addon list file we patch.</summary>
@@ -36,7 +36,8 @@ internal static class RpEmotesInstaller
     /// <summary>Writes the .ycd and registers the emote. Returns a user-facing
     /// result message; throws on I/O failure (caller reports).</summary>
     public static string Install(
-        string folder, string emoteName, string label, byte[] ycdBytes, bool emoteMoving)
+        string folder, string emoteName, string label, byte[] ycdBytes, bool emoteMoving,
+        DpemotesPackBuilder.PropInfo? prop = null)
     {
         var streamDir = Path.Combine(folder, "stream", "[Custom Emotes]", "FiveOS");
         Directory.CreateDirectory(streamDir);
@@ -45,17 +46,34 @@ internal static class RpEmotesInstaller
         var listPath = Path.Combine(folder, "client", "AnimationListCustom.lua");
         var lua = File.ReadAllText(listPath, Encoding.UTF8);
 
-        // Already registered (e.g. re-export of the same emote): the fresh
-        // .ycd above is all that's needed — leave their list entry alone.
-        if (lua.Contains($"[\"{emoteName}\"]", System.StringComparison.Ordinal))
-            return $"Updated '{emoteName}' in RPEmotes (animation replaced, existing menu entry kept). "
-                 + "Restart the resource to see it.";
-
-        var m = Regex.Match(lua, @"CustomDP\.Emotes\s*=\s*\{");
+        // Prop emotes live in their own table — rpemotes spawns Prop at
+        // PropBone with PropPlacement only for PropEmotes entries.
+        bool hasProp = prop is not null && !string.IsNullOrWhiteSpace(prop.ModelName);
+        var tableName = hasProp ? "CustomDP.PropEmotes" : "CustomDP.Emotes";
+        var m = Regex.Match(lua, Regex.Escape(tableName) + @"\s*=\s*\{");
         if (!m.Success)
             throw new System.InvalidOperationException(
-                "Couldn't find the CustomDP.Emotes table in client/AnimationListCustom.lua — "
+                $"Couldn't find the {tableName} table in client/AnimationListCustom.lua — "
                 + "is this an rpemotes-reborn install?");
+
+        // Duplicate handling is scoped to the TARGET table: the same name in
+        // the other table is a different emote and must not swallow this one.
+        var key = $"[\"{emoteName}\"]";
+        int tableOpen = m.Index + m.Length - 1;
+        int tableEnd = FindTableEnd(lua, tableOpen);
+        int entryAt = tableEnd > tableOpen
+            ? lua.IndexOf(key, tableOpen, tableEnd - tableOpen, System.StringComparison.Ordinal)
+            : -1;
+        bool nameElsewhere = ExistsOutsideRange(lua, key, tableOpen, tableEnd);
+        var conflictNote = nameElsewhere
+            ? $" Note: '{emoteName}' also exists in another table of this file — pick a distinct name if the wrong one plays."
+            : "";
+
+        // Plain re-export of an existing plain emote: the fresh .ycd above is
+        // all that's needed — leave their (possibly hand-edited) entry alone.
+        if (entryAt >= 0 && !hasProp)
+            return $"Updated '{emoteName}' in RPEmotes (animation replaced, existing menu entry kept). "
+                 + "Restart the resource to see it." + conflictNote;
 
         // One-time safety copy before the first FiveOS edit of their file.
         var bak = listPath + ".fiveos.bak";
@@ -63,25 +81,57 @@ internal static class RpEmotesInstaller
 
         // The .ycd filename is the animation dictionary; the clip inside is
         // built with the same name (see YcdAnimationBuilder callers).
-        var entry =
-            "\n    [\"" + emoteName + "\"] = {\n" +
-            "        \"" + emoteName + "\",\n" +
-            "        \"" + emoteName + "\",\n" +
-            "        \"" + LuaEscape(label) + "\",\n" +
-            "        {\n" +
-            "            EmoteMoving = " + (emoteMoving ? "true" : "false") + ",\n" +
-            "            EmoteLoop = true,\n" +
-            "        },\n" +
-            "    },";
+        // AnimationOptions is a NAMED field in rpemotes' list format — a bare
+        // positional table there is ignored, so the flags must sit under it.
+        var sb = new StringBuilder();
+        sb.Append("\n    [\"").Append(emoteName).Append("\"] = {\n");
+        sb.Append("        \"").Append(emoteName).Append("\",\n");
+        sb.Append("        \"").Append(emoteName).Append("\",\n");
+        sb.Append("        \"").Append(LuaEscape(label)).Append("\",\n");
+        sb.Append("        AnimationOptions = {\n");
+        if (hasProp)
+        {
+            string F(float v) => v.ToString("0.###", System.Globalization.CultureInfo.InvariantCulture);
+            var pl = new float[6];
+            for (int i = 0; i < 6 && i < prop!.Placement.Length; i++) pl[i] = prop.Placement[i];
+            sb.Append("            Prop = \"").Append(LuaEscape(prop!.ModelName)).Append("\",\n");
+            sb.Append("            PropBone = ").Append(prop.BoneTag).Append(",\n");
+            sb.Append("            PropPlacement = { ")
+              .Append(F(pl[0])).Append(", ").Append(F(pl[1])).Append(", ").Append(F(pl[2])).Append(", ")
+              .Append(F(pl[3])).Append(", ").Append(F(pl[4])).Append(", ").Append(F(pl[5]))
+              .Append(" },\n");
+        }
+        sb.Append("            EmoteMoving = ").Append(emoteMoving ? "true" : "false").Append(",\n");
+        sb.Append("            EmoteLoop = true,\n");
+        sb.Append("        },\n");
+        sb.Append("    },");
+
+        // A prop emote that already exists is REPLACED outright — the
+        // placement is the point of a re-export.
+        if (entryAt >= 0)
+        {
+            int entryOpen = lua.IndexOf('{', entryAt);
+            int entryClose = entryOpen > 0 ? FindTableEnd(lua, entryOpen) : -1;
+            if (entryClose > entryOpen)
+            {
+                int entryEnd = entryClose + 1;
+                if (entryEnd < lua.Length && lua[entryEnd] == ',') entryEnd++;
+                lua = lua[..entryAt] + sb.ToString().TrimStart('\n', ' ') + lua[entryEnd..];
+                File.WriteAllText(listPath, lua, new UTF8Encoding(encoderShouldEmitUTF8Identifier: false));
+                return $"Updated prop emote '{emoteName}' in RPEmotes (animation + prop placement replaced). "
+                     + "Restart the resource to see it." + conflictNote;
+            }
+        }
 
         // Insert right after the opening brace — valid for the shipped empty
         // table ({}) and for tables that already hold other custom emotes.
         int at = m.Index + m.Length;
-        lua = lua[..at] + entry + lua[at..];
+        lua = lua[..at] + sb.ToString() + lua[at..];
         File.WriteAllText(listPath, lua, new UTF8Encoding(encoderShouldEmitUTF8Identifier: false));
 
-        return $"Added '{emoteName}' to RPEmotes. Restart the resource "
-             + $"(restart {Path.GetFileName(folder)}) and find it in the emote menu — /e {emoteName}.";
+        var what = hasProp ? $"prop emote '{emoteName}' ({prop!.ModelName})" : $"'{emoteName}'";
+        return $"Added {what} to RPEmotes. Restart the resource "
+             + $"(restart {Path.GetFileName(folder)}) and find it in the emote menu — /e {emoteName}." + conflictNote;
     }
 
     /// <summary>Writes the .ycd and registers a SHARED (synced two-player)

@@ -45,11 +45,28 @@ public sealed class VehicleMeshBuilder
     /// "Optimize this car" would bake — the on-disk yft is never touched.</summary>
     public sealed record BuildResult(
         string PayloadJson, List<GroupInfo> Groups, int Tris,
-        int TexturedParts, int TotalParts);
+        int TexturedParts, int TotalParts, List<BoneInfo> Skeleton, List<PieceInfo> Pieces);
 
+    /// <summary>One rendered piece (a bone's share of one geometry): which bone
+    /// it hangs on, its triangle count and its box in RAGE vehicle space. The
+    /// bone splitter lets the user pick pieces to move onto a new bone.</summary>
+    public sealed record PieceInfo(int Index, int Bone, int Tris, float[] Min, float[] Max);
+
+    /// <summary>One bone of the vehicle skeleton, for the Vehicle Anim editor.
+    /// <paramref name="Pos"/>/<paramref name="Rot"/> are the LOCAL (parent-
+    /// relative) rest transform in RAGE Z-up space — exactly the values a
+    /// .ycd position/rotation track is written against.</summary>
+    public sealed record BoneInfo(
+        string Name, int Index, int ParentIndex, ushort Tag, string? Kind,
+        float[] Pos, float[] Rot, int Depth, bool HasGeometry);
+
+    /// <param name="includeSkeleton">Emit the full bone hierarchy in the
+    /// payload (<c>skeleton</c>) and a <c>bone</c> index on every part. Only
+    /// the Vehicle Anim editor needs it; the car previewer keeps the lighter
+    /// group-only shape.</param>
     public BuildResult Build(
         string yftPath, bool frameCamera, float previewRatio = 1f, bool preserveBoundary = true,
-        IReadOnlyDictionary<uint, Texture>? sharedTextures = null)
+        IReadOnlyDictionary<uint, Texture>? sharedTextures = null, bool includeSkeleton = false)
     {
         var yft = DrawableOptimizer.LoadResource<YftFile>(yftPath);
         var drawable = yft.Fragment?.Drawable
@@ -98,7 +115,7 @@ public sealed class VehicleMeshBuilder
             return new[] { b.Translation.X, b.Translation.Y, b.Translation.Z };
         }
 
-        var parts = new List<(DrawableMeshExtractor.Part Part, string Group)>();
+        var parts = new List<(DrawableMeshExtractor.Part Part, string Group, int Bone)>();
         int tris = 0;
 
         // ── Main drawable: one part per geometry, grouped by bound bone ──
@@ -117,8 +134,15 @@ public sealed class VehicleMeshBuilder
                 if (geom == null) continue;
                 var part = _extractor.ExtractGeometry(geom, model, gi, drawable);
                 if (part == null) continue;
-                parts.Add((part, BoneName(GeometryBone(geom, model))));
-                tris += part.Indices.Length / 3;
+                // Vanilla-style cars are ONE skinned model: a single body
+                // geometry carries chassis, doors and bonnet together, each
+                // vertex naming its bone through BlendIndices. Split by bone
+                // so a door is its own part hinged on its own bone.
+                foreach (var (piece, boneIdx) in SplitByBone(part, geom, model))
+                {
+                    parts.Add((piece, BoneName(boneIdx), boneIdx));
+                    tris += piece.Indices.Length / 3;
+                }
             }
         }
 
@@ -135,7 +159,7 @@ public sealed class VehicleMeshBuilder
                 foreach (var wp in src)
                 {
                     var placed = PlacePart(wp, bone.Translation.X, bone.Translation.Y, bone.Translation.Z, mirror);
-                    parts.Add((placed, bone.Name));
+                    parts.Add((placed, bone.Name, Array.IndexOf(bones, bone)));
                     tris += placed.Indices.Length / 3;
                 }
             }
@@ -150,9 +174,70 @@ public sealed class VehicleMeshBuilder
             groups.Add(new GroupInfo(g, BonePivot(g), kind));
         }
 
+        // ── Skeleton (Vehicle Anim editor) ───────────────────────────────
+        var skeletonInfo = new List<BoneInfo>();
+        if (includeSkeleton && bones != null)
+        {
+            var withGeo = new HashSet<int>(parts.Select(p => p.Bone));
+            for (int i = 0; i < bones.Length; i++)
+            {
+                var b = bones[i];
+                if (b == null) continue;
+                int parent = b.ParentIndex;
+                if (parent < 0 || parent >= bones.Length || parent == i) parent = -1;
+                int depth = 0;
+                for (int p = parent, guard = 0; p >= 0 && guard < 64; guard++)
+                {
+                    depth++;
+                    var pb = bones[p];
+                    p = pb == null ? -1 : pb.ParentIndex;
+                    if (p >= bones.Length) p = -1;
+                }
+                var name = string.IsNullOrEmpty(b.Name) ? $"bone_{i}" : b.Name;
+                skeletonInfo.Add(new BoneInfo(
+                    name, i, parent, b.Tag, BoneKind(name),
+                    new[] { b.Translation.X, b.Translation.Y, b.Translation.Z },
+                    new[] { b.Rotation.X, b.Rotation.Y, b.Rotation.Z, b.Rotation.W },
+                    depth, withGeo.Contains(i)));
+            }
+        }
+
+        var pieces = new List<PieceInfo>(parts.Count);
+        if (includeSkeleton)
+            for (int i = 0; i < parts.Count; i++)
+            {
+                var pos = parts[i].Part.Positions;
+                var mn = new[] { float.MaxValue, float.MaxValue, float.MaxValue };
+                var mx = new[] { float.MinValue, float.MinValue, float.MinValue };
+                for (int k = 0; k + 2 < pos.Length; k += 3)
+                    for (int a = 0; a < 3; a++) { if (pos[k + a] < mn[a]) mn[a] = pos[k + a]; if (pos[k + a] > mx[a]) mx[a] = pos[k + a]; }
+                if (pos.Length < 3) { mn = new float[3]; mx = new float[3]; }
+                pieces.Add(new PieceInfo(i, parts[i].Bone, parts[i].Part.Indices.Length / 3, mn, mx));
+            }
+
         int textured = parts.Count(p => p.Part.TextureFile != null);
-        return new BuildResult(BuildPayload(parts, groups, tris, frameCamera),
-            groups, tris, textured, parts.Count);
+        return new BuildResult(BuildPayload(parts, groups, tris, frameCamera, includeSkeleton ? skeletonInfo : null),
+            groups, tris, textured, parts.Count, skeletonInfo, pieces);
+    }
+
+    /// <summary>Editor-facing bone category: the toggleable group kinds plus
+    /// the common non-geometry hinge/anchor bones people actually animate.</summary>
+    private static string? BoneKind(string name)
+    {
+        var k = GroupKind(name);
+        if (k != null) return k;
+        var g = name.ToLowerInvariant();
+        if (g.StartsWith("steering") || g.StartsWith("handlebars")) return "part";
+        if (g.StartsWith("suspension_") || g.StartsWith("transmission_") || g.StartsWith("hub_")) return "suspension";
+        if (g.StartsWith("exhaust") || g.StartsWith("engine") || g.StartsWith("bumper") || g.StartsWith("wing_")) return "part";
+        if (g.StartsWith("seat_") || g.StartsWith("misc") || g.StartsWith("neon") || g.StartsWith("indicator")
+            || g.StartsWith("headlight") || g.StartsWith("taillight") || g.StartsWith("brakelight")
+            || g.StartsWith("reversinglight") || g.StartsWith("platelight") || g.StartsWith("interiorlight")
+            || g.StartsWith("extralight") || g.StartsWith("siren") || g.StartsWith("turret")
+            || g.StartsWith("rotor") || g.StartsWith("prop") || g.StartsWith("rudder") || g.StartsWith("elevator")
+            || g.StartsWith("aileron") || g.StartsWith("afterburner") || g.StartsWith("mast") || g.StartsWith("crane"))
+            return "part";
+        return null;
     }
 
     /// <summary>The mod's livery/wrap texture: the largest "sign"/"livery"-named
@@ -185,6 +270,107 @@ public sealed class VehicleMeshBuilder
 
     private static bool IsNamedBetter(Texture cur, Texture cand)
         => (long)cand.Width * cand.Height > (long)cur.Width * cur.Height;
+
+    // RAGE vertex declaration slots (fixed semantic order).
+    private const int CompBlendWeights = 1;
+    private const int CompBlendIndices = 2;
+
+    /// <summary>Split a geometry's triangles by the bone each vertex is
+    /// rigidly weighted to (BlendIndices → geometry BoneIds). Geometry with no
+    /// per-vertex binding, or bound to a single bone, comes back as one piece
+    /// on <see cref="GeometryBone"/>. The extractor keeps vertex order 1:1
+    /// with the RAGE buffer, so blend bytes line up with part positions.</summary>
+    private static IEnumerable<(DrawableMeshExtractor.Part Part, int Bone)> SplitByBone(
+        DrawableMeshExtractor.Part part, DrawableGeometry geom, DrawableModel model)
+    {
+        int fallback = GeometryBone(geom, model);
+        int[]? vertexBone = null;
+        try
+        {
+            var ids = geom.BoneIds;
+            var vd = geom.VertexData;
+            var decl = vd?.Info;
+            if (ids is { Length: > 0 } && vd?.VertexBytes is { } bytes && decl != null
+                && ((uint)decl.Flags & (1u << CompBlendIndices)) != 0)
+            {
+                int offI = decl.GetComponentOffset(CompBlendIndices);
+                int offW = ((uint)decl.Flags & (1u << CompBlendWeights)) != 0 ? decl.GetComponentOffset(CompBlendWeights) : -1;
+                int stride = vd.VertexStride, vc = Math.Min(vd.VertexCount, part.Positions.Length / 3);
+                if (offI >= 0 && stride > 0 && vc > 0)
+                {
+                    vertexBone = new int[vc];
+                    for (int v = 0; v < vc; v++)
+                    {
+                        int oI = v * stride + offI;
+                        if (oI + 3 >= bytes.Length) { vertexBone[v] = fallback; continue; }
+                        int best = 0;
+                        if (offW >= 0)
+                        {
+                            int oW = v * stride + offW;
+                            if (oW + 3 < bytes.Length)
+                            {
+                                int bw = bytes[oW];
+                                for (int k = 1; k < 4; k++) if (bytes[oW + k] > bw) { bw = bytes[oW + k]; best = k; }
+                            }
+                        }
+                        int blend = bytes[oI + best];
+                        vertexBone[v] = blend < ids.Length ? ids[blend] : fallback;
+                    }
+                }
+            }
+        }
+        catch { vertexBone = null; }
+
+        var idx = part.Indices;
+        if (vertexBone == null || idx.Length < 3) { yield return (part, fallback); yield break; }
+
+        // Triangle → bone (majority of its three corners, first corner on a tie).
+        int triCount = idx.Length / 3;
+        var triBone = new int[triCount];
+        var counts = new Dictionary<int, int>();
+        for (int t = 0; t < triCount; t++)
+        {
+            int a = idx[t * 3], b = idx[t * 3 + 1], c = idx[t * 3 + 2];
+            int ba = a < vertexBone.Length ? vertexBone[a] : fallback;
+            int bb = b < vertexBone.Length ? vertexBone[b] : fallback;
+            int bc = c < vertexBone.Length ? vertexBone[c] : fallback;
+            int bone = (bb == bc && bb != ba) ? bb : ba;
+            triBone[t] = bone;
+            counts[bone] = counts.TryGetValue(bone, out var n) ? n + 1 : 1;
+        }
+        if (counts.Count == 1) { yield return (part, triBone[0]); yield break; }
+
+        foreach (var bone in counts.Keys.OrderBy(k => k))
+        {
+            var remap = new Dictionary<int, int>();
+            var newIdx = new List<int>();
+            var order = new List<int>();
+            for (int t = 0; t < triCount; t++)
+            {
+                if (triBone[t] != bone) continue;
+                for (int k = 0; k < 3; k++)
+                {
+                    int old = idx[t * 3 + k];
+                    if (!remap.TryGetValue(old, out var nv)) { nv = order.Count; remap[old] = nv; order.Add(old); }
+                    newIdx.Add(nv);
+                }
+            }
+            var pos = new float[order.Count * 3];
+            float[]? nrm = part.Normals != null ? new float[order.Count * 3] : null;
+            float[]? uv = part.Uvs != null ? new float[order.Count * 2] : null;
+            for (int i = 0; i < order.Count; i++)
+            {
+                int o = order[i];
+                if (o * 3 + 2 < part.Positions.Length)
+                { pos[i * 3] = part.Positions[o * 3]; pos[i * 3 + 1] = part.Positions[o * 3 + 1]; pos[i * 3 + 2] = part.Positions[o * 3 + 2]; }
+                if (nrm != null && o * 3 + 2 < part.Normals!.Length)
+                { nrm[i * 3] = part.Normals[o * 3]; nrm[i * 3 + 1] = part.Normals[o * 3 + 1]; nrm[i * 3 + 2] = part.Normals[o * 3 + 2]; }
+                if (uv != null && o * 2 + 1 < part.Uvs!.Length)
+                { uv[i * 2] = part.Uvs[o * 2]; uv[i * 2 + 1] = part.Uvs[o * 2 + 1]; }
+            }
+            yield return (part with { Positions = pos, Normals = nrm, Uvs = uv, Indices = newIdx.ToArray() }, bone);
+        }
+    }
 
     private static int GeometryBone(DrawableGeometry geom, DrawableModel model)
     {
@@ -324,13 +510,28 @@ public sealed class VehicleMeshBuilder
     // ── Payload serialization (workbench loadLod shape + groups) ─────────
 
     private static string BuildPayload(
-        List<(DrawableMeshExtractor.Part Part, string Group)> parts,
-        List<GroupInfo> groups, int tris, bool frame)
+        List<(DrawableMeshExtractor.Part Part, string Group, int Bone)> parts,
+        List<GroupInfo> groups, int tris, bool frame, List<BoneInfo>? skeleton)
     {
         var sb = new StringBuilder(1 << 19);
         sb.Append("{\"lod\":\"HIGH\",\"paint\":true,\"tris\":").Append(tris)
-          .Append(",\"frame\":").Append(frame ? "true" : "false")
-          .Append(",\"groups\":[");
+          .Append(",\"frame\":").Append(frame ? "true" : "false");
+        if (skeleton != null)
+        {
+            sb.Append(",\"skeleton\":[");
+            for (int i = 0; i < skeleton.Count; i++)
+            {
+                var b = skeleton[i];
+                if (i > 0) sb.Append(',');
+                sb.Append("{\"name\":\"").Append(JsonName(b.Name)).Append("\",\"tag\":").Append(b.Tag)
+                  .Append(",\"index\":").Append(b.Index).Append(",\"parent\":").Append(b.ParentIndex)
+                  .Append(",\"kind\":");
+                if (b.Kind != null) sb.Append('"').Append(b.Kind).Append('"'); else sb.Append("null");
+                sb.Append(",\"pos\":["); AppendFloats(sb, b.Pos); sb.Append("],\"rot\":["); AppendFloats(sb, b.Rot); sb.Append("]}");
+            }
+            sb.Append(']');
+        }
+        sb.Append(",\"groups\":[");
         for (int i = 0; i < groups.Count; i++)
         {
             var g = groups[i];
@@ -342,19 +543,23 @@ public sealed class VehicleMeshBuilder
         }
         sb.Append("],\"parts\":[");
         bool first = true;
-        foreach (var (part, group) in parts)
+        foreach (var (part, group, bone) in parts)
         {
             if (!first) sb.Append(',');
             first = false;
-            AppendPart(sb, part, group);
+            AppendPart(sb, part, group, skeleton != null ? bone : -1);
         }
         sb.Append("]}");
         return sb.ToString();
     }
 
-    private static void AppendPart(StringBuilder sb, DrawableMeshExtractor.Part part, string group)
+    private static string JsonName(string s)
+        => s.Replace("\\", "\\\\").Replace("\"", "\\\"");
+
+    private static void AppendPart(StringBuilder sb, DrawableMeshExtractor.Part part, string group, int bone)
     {
-        sb.Append("{\"group\":\"").Append(group).Append('"');
+        sb.Append("{\"group\":\"").Append(JsonName(group)).Append('"');
+        if (bone >= 0) sb.Append(",\"bone\":").Append(bone);
         sb.Append(",\"positions\":["); AppendFloats(sb, part.Positions); sb.Append(']');
         sb.Append(",\"normals\":");
         if (part.Normals != null) { sb.Append('['); AppendFloats(sb, part.Normals); sb.Append(']'); } else sb.Append("null");

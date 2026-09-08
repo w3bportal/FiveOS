@@ -1056,7 +1056,7 @@ public static class TextureBaker
         return colorType == 4 || colorType == 6;
     }
 
-    // internal, not private: the GTA IV backend re-encodes BC5 normal maps
+    // internal, not private: re-encoding BC5 normal maps is shared
     // to DXT5 (IV predates BC5 and its resource builder rejects the format)
     // and needs the same bundled binary.
     internal static string LocateTexconv()

@@ -117,7 +117,22 @@ public partial class VehiclesViewModel : ObservableObject
 {
     private readonly Action<string> _setStatus;
 
-    public VehiclesViewModel(Action<string> setStatus) => _setStatus = setStatus;
+    public VehiclesViewModel(Action<string> setStatus)
+    {
+        _setStatus = setStatus;
+        Anim = new BoneAnimViewModel(setStatus);
+    }
+
+    /// <summary>Vehicle Animation editor state — the stage's Animate mode.</summary>
+    public BoneAnimViewModel Anim { get; }
+
+    /// <summary>The stage is always the animation editor now; the flag stays
+    /// so the plumbing that once switched modes keeps one code path.</summary>
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(IsPreviewMode))]
+    private bool _isAnimateMode = true;
+
+    public bool IsPreviewMode => !IsAnimateMode;
 
     public ObservableCollection<RpfFileRow> Rows { get; } = new();
     public ObservableCollection<VehicleFile> Files { get; } = new();

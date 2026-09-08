@@ -32,15 +32,6 @@ public enum ExportMode { Prop }
 /// </summary>
 public enum AppView { Dashboard, Props, AnimatedProps, Optimize, Rpf, Vehicles, ImageTo3D, Emotes, Clothing }
 
-/// <summary>One rotation key on the Animated props timeline (degrees, seconds).</summary>
-public sealed partial class PropAnimKey : ObservableObject
-{
-    [ObservableProperty] private double _time;
-    [ObservableProperty] private double _rotX;
-    [ObservableProperty] private double _rotY;
-    [ObservableProperty] private double _rotZ;
-}
-
 /// <summary>Per-part visual material preset. Drives the RAGE shader written
 /// into the YDR (glass / emissive* / metal / cutout) and, for glass, the
 /// collision material index assigned to that part's polygons so the engine
@@ -50,12 +41,17 @@ public enum MaterialPreset { Standard, Glass, Emissive, EmissiveStrong, Emissive
 
 public partial class MainViewModel : ObservableObject
 {
+    /// <summary>Editor state for the Props stage in Animated mode — the
+    /// parts (bones), selection and key counts echoed from the viewer.</summary>
+    public BoneAnimViewModel PropAnim { get; }
+
     public MainViewModel()
     {
         OptimizeVm = new OptimizeViewModel(s => StatusText = s);
         TxAdminVm = new TxAdminOptimizeViewModel(s => StatusText = s);
         RpfVm = new RpfConverterViewModel(s => StatusText = s);
         VehiclesVm = new VehiclesViewModel(s => StatusText = s);
+        PropAnim = new BoneAnimViewModel(s => StatusText = s);
         CarcolsVm = new CarcolsFixerViewModel(s => StatusText = s);
         ImageTo3DVm = new ImageTo3DViewModel();
 
@@ -743,61 +739,69 @@ public partial class MainViewModel : ObservableObject
     [ObservableProperty]
     private int _upAxisIndex;
 
-    /// <summary>0 = GTA V (FiveM resource), 1 = GTA IV (loose RAGE resources).
-    /// Bound to the sidebar's "Game" ComboBox SelectedIndex.</summary>
+    // ─── Custom pivot ───────────────────────────────────────────────────
+    //
+    // The point the model rotates and scales around in the viewport, and the
+    // point the exported prop is placed and rotated by in-game. The viewer
+    // owns it (Pivot gizmo mode); these mirror it so it survives undo/redo
+    // and so Convert can bake it. Values are the offset from the pivot to
+    // the model's own file origin, in the viewer's Y-up display space.
+    // <see cref="HasCustomPivot"/> stays false until the user moves it, so
+    // props keep exporting exactly as they always did unless asked otherwise.
+
     [ObservableProperty]
-    [NotifyPropertyChangedFor(nameof(IsGtaIvTarget))]
-    [NotifyPropertyChangedFor(nameof(IsGtaVTarget))]
-    [NotifyPropertyChangedFor(nameof(ShowAnimatedPropControls))]
-    private int _gameTargetIndex;
+    [NotifyPropertyChangedFor(nameof(PivotSummary))]
+    private bool _hasCustomPivot;
 
-    /// <summary>True when exporting for GTA IV. Drives the sidebar's
-    /// visibility switches: the options GTA IV has no equivalent for
-    /// (.ytyp, embedded collision, breakable glass, animated props) hide
-    /// rather than sit there doing nothing.</summary>
-    public bool IsGtaIvTarget => GameTargetIndex == 1;
-
-    /// <summary>Inverse of <see cref="IsGtaIvTarget"/>, for XAML that needs
-    /// to show GTA V-only controls.</summary>
-    public bool IsGtaVTarget => GameTargetIndex != 1;
-
-    /// <summary>The file the exporter should actually read, when that differs
-    /// from what the viewport is showing.
-    ///
-    /// A GTA V .ydr is previewed through a generated .glb, but converting that
-    /// .glb would round-trip the geometry and throw away vertex colours,
-    /// tangents and the source shader names — the engine reads .ydr natively
-    /// and much better. So the viewport gets the .glb and this keeps the .ydr.
-    /// Null means "use SourcePath", which is the normal case.</summary>
     [ObservableProperty]
-    private string? _convertSourcePath;
+    [NotifyPropertyChangedFor(nameof(PivotSummary))]
+    private double _pivotX;
 
-    /// <summary>Whether to offer the animated-prop controls at all.
-    ///
-    /// The GTA IV writer has no animation path — it emits a static drawable
-    /// and there is no .ycd equivalent wired up — so leaving these switches
-    /// live under a GTA IV export would silently discard whatever the user
-    /// set. Hide them instead of accepting input we throw away.</summary>
-    public bool ShowAnimatedPropControls => !IsAnimatedPropsView && IsGtaVTarget;
-
-    /// <summary>Where the external GTA IV resource compiler lives. Not
-    /// bundled — it's a third-party tool — so the user points at their own
-    /// copy once and it sticks.</summary>
     [ObservableProperty]
-    [NotifyPropertyChangedFor(nameof(IvCompilerStatus))]
-    private string? _ivResourceBuilderPath = UserSettings.LoadIvResourceBuilderPath();
+    [NotifyPropertyChangedFor(nameof(PivotSummary))]
+    private double _pivotY;
 
-    /// <summary>One-line description of the compiler situation, shown under
-    /// the Game picker. Deliberately reassuring when unset: an export without
-    /// the compiler still produces collision and the editable source, so this
-    /// is a "you'll get less" state, not an error.</summary>
-    public string IvCompilerStatus
-        => string.IsNullOrWhiteSpace(IvResourceBuilderPath)
-            ? "Not set — exports stop at OpenFormats source (+ collision)"
-            : System.IO.Path.GetFileName(IvResourceBuilderPath!.TrimEnd('\\', '/'));
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(PivotSummary))]
+    private double _pivotZ;
 
-    partial void OnIvResourceBuilderPathChanged(string? value)
-        => UserSettings.SaveIvResourceBuilderPath(value);
+    /// <summary>One-line status for the sidebar: where the prop's origin is.</summary>
+    public string PivotSummary => HasCustomPivot
+        ? $"Custom pivot ({-PivotX:0.###}, {-PivotY:0.###}, {-PivotZ:0.###}) — baked on Convert"
+        : "Pivot: model centre (export keeps the file's own origin)";
+
+    // ─── Props → SOURCE → Game tab (import a model from the GTA V install) ───
+
+    /// <summary>Live search text. Matched against every model name in the
+    /// game files — drawables (.ydr), fragments (.yft) and drawable
+    /// dictionaries (.ydd); prop_*, buildings, anything.</summary>
+    [ObservableProperty]
+    private string _gamePropSearch = "";
+
+    /// <summary>Matching model names, best first (capped).</summary>
+    public ObservableCollection<string> GamePropResults { get; } = new();
+
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(GamePropCanImport))]
+    private string? _gamePropSelected;
+
+    /// <summary>One-line state under the list: index progress, match count,
+    /// or why nothing can be imported yet.</summary>
+    [ObservableProperty]
+    private string _gamePropStatus = "";
+
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(GamePropCanImport))]
+    private bool _gamePropBusy;
+
+    /// <summary>True when no GTA V folder is known — shows the folder picker.</summary>
+    [ObservableProperty]
+    private bool _gamePropNeedsFolder;
+
+    [ObservableProperty]
+    private bool _gamePropHasResults;
+
+    public bool GamePropCanImport => !GamePropBusy && !string.IsNullOrWhiteSpace(GamePropSelected);
 
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(IsCollisionEmbeddable))]
@@ -848,168 +852,6 @@ public partial class MainViewModel : ObservableObject
     [ObservableProperty]
     private bool _extractTextures = true;
 
-    /// <summary>When on, and the loaded model ships a rig + animation clip,
-    /// the prop exports as an ANIMATED prop: the engine attaches a skeleton
-    /// to the drawable and rigidly binds each part to a bone, then writes a
-    /// matching .ycd + a client.lua that drives it in-game via
-    /// PlayEntityAnim. Falls back to a normal static prop when the source
-    /// has no animation. Rigid bone-binding animates WHOLE parts, so it fits
-    /// mechanical models whose moving pieces are separate meshes; a single
-    /// one-piece skinned mesh won't articulate this way. Off by default.</summary>
-    [ObservableProperty]
-    private bool _animatedProp;
-
-    /// <summary>Auto-spin: when on (with Animated prop), the engine SYNTHESIZES
-    /// a 360° spin for a model that has no animation of its own — one rotation
-    /// bone at the centroid, whole model bound to it. Lets a plain gear / fan /
-    /// wheel spin with zero animation prep.</summary>
-    [ObservableProperty]
-    private bool _autoSpin;
-
-    /// <summary>Spin axis index: 0 = X, 1 = Y, 2 = Z (vertical, default).</summary>
-    [ObservableProperty]
-    private int _spinAxisIndex = 2;
-
-    /// <summary>Seconds per full revolution for auto-spin.</summary>
-    [ObservableProperty]
-    private double _spinSeconds = 4.0;
-
-    /// <summary>Reverse the auto-spin direction.</summary>
-    [ObservableProperty]
-    private bool _spinReverse;
-
-    // ── Animated props keys timeline ────────────────────────────────
-    // Author rotation keys for rigid animated props. On convert with 2+
-    // keys the engine builds a .ycd from the timeline instead of (or in
-    // addition to) sampling a source clip / auto-spin.
-
-    public ObservableCollection<PropAnimKey> PropAnimKeys { get; } = new();
-
-    [ObservableProperty]
-    [NotifyPropertyChangedFor(nameof(PropAnimPlayheadLabel))]
-    private double _propAnimDuration = 4.0;
-
-    [ObservableProperty]
-    [NotifyPropertyChangedFor(nameof(PropAnimPlayheadLabel))]
-    private double _propAnimPlayhead;
-
-    [ObservableProperty]
-    private int _propAnimFps = 30;
-
-    [ObservableProperty]
-    private bool _isPropAnimPlaying;
-
-    public string PropAnimPlayheadLabel =>
-        $"{PropAnimPlayhead:0.00}s / {PropAnimDuration:0.00}s  ·  {PropAnimKeys.Count} key{(PropAnimKeys.Count == 1 ? "" : "s")}";
-
-    public void EnsureDefaultPropAnimKeys()
-    {
-        if (PropAnimKeys.Count > 0) return;
-        PropAnimDuration = SpinSeconds > 0.05 ? SpinSeconds : 4.0;
-        PropAnimPlayhead = 0;
-        // Default loop: identity → full turn on the chosen spin axis.
-        PropAnimKeys.Add(new PropAnimKey { Time = 0, RotX = 0, RotY = 0, RotZ = 0 });
-        PropAnimKeys.Add(SpinAxisIndex switch
-        {
-            0 => new PropAnimKey { Time = PropAnimDuration, RotX = 360, RotY = 0, RotZ = 0 },
-            1 => new PropAnimKey { Time = PropAnimDuration, RotX = 0, RotY = 360, RotZ = 0 },
-            _ => new PropAnimKey { Time = PropAnimDuration, RotX = 0, RotY = 0, RotZ = 360 },
-        });
-        OnPropertyChanged(nameof(PropAnimPlayheadLabel));
-    }
-
-    [RelayCommand]
-    private void AddPropAnimKey()
-    {
-        EnsureDefaultPropAnimKeys();
-        var t = Math.Clamp(PropAnimPlayhead, 0, PropAnimDuration);
-        // Replace an existing key at the same frame snap, otherwise insert.
-        var frame = 1.0 / Math.Max(1, PropAnimFps);
-        var existing = PropAnimKeys.FirstOrDefault(k => Math.Abs(k.Time - t) < frame * 0.5);
-        if (existing != null)
-        {
-            existing.RotX = TransformRotX;
-            existing.RotY = TransformRotY;
-            existing.RotZ = TransformRotZ;
-        }
-        else
-        {
-            PropAnimKeys.Add(new PropAnimKey
-            {
-                Time = t,
-                RotX = TransformRotX,
-                RotY = TransformRotY,
-                RotZ = TransformRotZ,
-            });
-            SortPropAnimKeys();
-        }
-        OnPropertyChanged(nameof(PropAnimPlayheadLabel));
-    }
-
-    [RelayCommand]
-    private void DeletePropAnimKey()
-    {
-        if (PropAnimKeys.Count == 0) return;
-        var frame = 1.0 / Math.Max(1, PropAnimFps);
-        var hit = PropAnimKeys
-            .OrderBy(k => Math.Abs(k.Time - PropAnimPlayhead))
-            .FirstOrDefault();
-        if (hit == null || Math.Abs(hit.Time - PropAnimPlayhead) > frame * 1.5) return;
-        // Keep at least two keys so export still has a motion span.
-        if (PropAnimKeys.Count <= 2) return;
-        PropAnimKeys.Remove(hit);
-        OnPropertyChanged(nameof(PropAnimPlayheadLabel));
-    }
-
-    [RelayCommand]
-    private void ClearPropAnimKeys()
-    {
-        PropAnimKeys.Clear();
-        EnsureDefaultPropAnimKeys();
-    }
-
-    public void SortPropAnimKeys()
-    {
-        var sorted = PropAnimKeys.OrderBy(k => k.Time).ToList();
-        PropAnimKeys.Clear();
-        foreach (var k in sorted) PropAnimKeys.Add(k);
-    }
-
-    public void NotifyPropAnimKeysChanged() => OnPropertyChanged(nameof(PropAnimPlayheadLabel));
-
-    /// <summary>Lerp rotation at the playhead and push into the gizmo for preview.</summary>
-    public void ApplyPropAnimPlayheadToTransform()
-    {
-        if (PropAnimKeys.Count == 0) return;
-        var sorted = PropAnimKeys.OrderBy(k => k.Time).ToList();
-        var t = Math.Clamp(PropAnimPlayhead, 0, PropAnimDuration);
-        if (t <= sorted[0].Time)
-        {
-            TransformRotX = sorted[0].RotX;
-            TransformRotY = sorted[0].RotY;
-            TransformRotZ = sorted[0].RotZ;
-            return;
-        }
-        var last = sorted[^1];
-        if (t >= last.Time)
-        {
-            TransformRotX = last.RotX;
-            TransformRotY = last.RotY;
-            TransformRotZ = last.RotZ;
-            return;
-        }
-        for (int i = 0; i < sorted.Count - 1; i++)
-        {
-            var a = sorted[i];
-            var b = sorted[i + 1];
-            if (t < a.Time || t > b.Time) continue;
-            var u = (b.Time - a.Time) < 1e-9 ? 0 : (t - a.Time) / (b.Time - a.Time);
-            TransformRotX = a.RotX + (b.RotX - a.RotX) * u;
-            TransformRotY = a.RotY + (b.RotY - a.RotY) * u;
-            TransformRotZ = a.RotZ + (b.RotZ - a.RotZ) * u;
-            return;
-        }
-    }
 
     /// <summary>When true the exporter deep-clones the High DrawableModels
     /// into Med/Low/VLow slots and decimates each clone via g3sharp. RAGE
@@ -1194,6 +1036,7 @@ public partial class MainViewModel : ObservableObject
                     (old.Entry is not null && ReferenceEquals(n.Entry, old.Entry)) ||
                     (old.QueueItem is not null && ReferenceEquals(n.QueueItem, old.QueueItem)) ||
                     (old.Part is not null && ReferenceEquals(n.Part, old.Part) && n.Kind == old.Kind) ||
+                    (old.Bone is not null && ReferenceEquals(n.Bone, old.Bone)) ||
                     (old.IsPack && n.IsPack && string.Equals(n.GroupKey, old.GroupKey, System.StringComparison.OrdinalIgnoreCase)) ||
                     (old.IsWorking && n.IsWorking);
                 if (match) return n;
@@ -1239,6 +1082,12 @@ public partial class MainViewModel : ObservableObject
             if (n.IsWorking || n.IsPart)
                 OutlinerRoots.RemoveAt(i);
         }
+        if (_boneRoot is not null)
+        {
+            foreach (var n in AllBoneNodes(_boneRoot))
+                if (n.Bone is { } b) b.PropertyChanged -= OnOutlinerBonePropertyChanged;
+            _boneRoot = null;
+        }
         _workingRoot = null;
         _flatPropRoot = null;
     }
@@ -1273,8 +1122,96 @@ public partial class MainViewModel : ObservableObject
         PackSession.ConvertQueue.Any(q => q.IsPending &&
             string.Equals(q.SourcePath, SourcePath, System.StringComparison.OrdinalIgnoreCase));
 
+    /// <summary>The Animated stage's parts, nested the way the source file
+    /// nests them, standing in for the model's flat part list while that stage
+    /// is up. Rows mirror their <see cref="BoneRow"/> both ways.</summary>
+    private Services.PropPackTreeNode? _boneRoot;
+    private bool _boneOutlinerActive;
+
+    public void ShowBoneOutliner(IEnumerable<BoneRow> bones)
+    {
+        var flat = bones.ToList();
+        _boneOutlinerActive = true;
+        RemoveModelOutlinerRoots();
+        if (flat.Count == 0) { SyncPackOutlinerRoot(); return; }
+
+        _boneRoot = new Services.PropPackTreeNode
+        {
+            Kind = Services.PropPackTreeNode.NodeKind.Working,
+            Name = ResolveOutlinerPropName(),
+            IsExpanded = true,
+            Detail = $"{flat.Count} part{(flat.Count == 1 ? "" : "s")}",
+            IsEyeOn = flat.Any(b => b.IsVisible),
+        };
+
+        foreach (var top in Services.BoneOutlinerTree.Build(flat, PropAnim.Bones, (_, b) =>
+        {
+            b.PropertyChanged -= OnOutlinerBonePropertyChanged;
+            b.PropertyChanged += OnOutlinerBonePropertyChanged;
+        }))
+            _boneRoot.Children.Add(top);
+
+        OutlinerRoots.Insert(0, _boneRoot);
+        SyncPackOutlinerRoot();
+        RestoreOutlinerSelection();
+    }
+
+    /// <summary>Leave the Animated stage: drop the bone tree and put the
+    /// model's own layers back.</summary>
+    public void HideBoneOutliner()
+    {
+        if (!_boneOutlinerActive) return;
+        _boneOutlinerActive = false;
+        RemoveModelOutlinerRoots();
+        RebuildOutlinerWorking();
+    }
+
+    private void OnOutlinerBonePropertyChanged(object? sender, System.ComponentModel.PropertyChangedEventArgs e)
+    {
+        if (sender is not BoneRow bone || _boneRoot is null) return;
+        var node = FindBoneNode(_boneRoot, bone);
+        if (node is null) return;
+        switch (e.PropertyName)
+        {
+            case nameof(BoneRow.IsVisible):
+                node.IsEyeOn = bone.IsVisible;
+                _boneRoot.IsEyeOn = AllBoneNodes(_boneRoot).Any(n => n.IsEyeOn);
+                break;
+            case nameof(BoneRow.KeyCount):
+                node.Detail = bone.IsKeyed ? bone.Detail : "";
+                break;
+        }
+    }
+
+    /// <summary>The outliner row standing for this part, if the bone tree is up.</summary>
+    public Services.PropPackTreeNode? FindOutlinerBoneNode(BoneRow bone)
+        => _boneRoot is null ? null : FindBoneNode(_boneRoot, bone);
+
+    private static Services.PropPackTreeNode? FindBoneNode(Services.PropPackTreeNode from, BoneRow bone)
+    {
+        foreach (var n in from.Children)
+        {
+            if (ReferenceEquals(n.Bone, bone)) return n;
+            var inner = FindBoneNode(n, bone);
+            if (inner is not null) return inner;
+        }
+        return null;
+    }
+
+    private static IEnumerable<Services.PropPackTreeNode> AllBoneNodes(Services.PropPackTreeNode from)
+    {
+        foreach (var n in from.Children)
+        {
+            yield return n;
+            foreach (var inner in AllBoneNodes(n)) yield return inner;
+        }
+    }
+
     public void RebuildOutlinerWorking()
     {
+        // The Animated stage owns the tree while it is up.
+        if (_boneOutlinerActive) { SyncPackOutlinerRoot(); return; }
+
         foreach (var p in ModelParts)
             p.PropertyChanged -= OnOutlinerPartPropertyChanged;
 
@@ -1401,6 +1338,15 @@ public partial class MainViewModel : ObservableObject
 
         SelectedPackEntry = SelectedOutlinerNodes.Select(x => x.Entry).FirstOrDefault(e => e is not null);
         SelectedModelPart = SelectedOutlinerNodes.Select(x => x.Part).FirstOrDefault(p => p is not null);
+
+        if (_boneOutlinerActive)
+        {
+            var bones = SelectedOutlinerNodes.Select(x => x.Bone).Where(b => b is not null).ToList();
+            foreach (var b in PropAnim.Bones) b.IsSelected = bones.Contains(b);
+            // Last one clicked leads: it is the one the gizmo and the
+            // transform boxes follow.
+            PropAnim.SelectedBone = bones.Count > 0 ? bones[^1] : null;
+        }
     }
 
     partial void OnIsPackModeChanged(bool value)
@@ -1541,7 +1487,7 @@ public partial class MainViewModel : ObservableObject
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(IsPropsView))]
     [NotifyPropertyChangedFor(nameof(IsAnimatedPropsView))]
-    [NotifyPropertyChangedFor(nameof(ShowAnimatedPropControls))]
+    [NotifyPropertyChangedFor(nameof(IsStaticPropsView))]
     [NotifyPropertyChangedFor(nameof(IsOptimizeView))]
     [NotifyPropertyChangedFor(nameof(IsRpfView))]
     [NotifyPropertyChangedFor(nameof(IsVehiclesView))]
@@ -1587,6 +1533,8 @@ public partial class MainViewModel : ObservableObject
     /// <summary>Static Props and Animated share the same convert workspace.</summary>
     public bool IsPropsView      => !IsSettingsOpen && ActiveView is AppView.Props or AppView.AnimatedProps;
     public bool IsAnimatedPropsView => !IsSettingsOpen && ActiveView == AppView.AnimatedProps;
+    /// <summary>The Props stage in its plain mode — the "Props" tab above the viewport.</summary>
+    public bool IsStaticPropsView => IsPropsView && !IsAnimatedPropsView;
     public bool IsOptimizeView   => !IsSettingsOpen && ActiveView == AppView.Optimize;
     public bool IsRpfView        => !IsSettingsOpen && ActiveView == AppView.Rpf;
     public bool IsVehiclesView   => !IsSettingsOpen && ActiveView == AppView.Vehicles;
@@ -1650,8 +1598,6 @@ public partial class MainViewModel : ObservableObject
         if (string.Equals(view, "Animated", System.StringComparison.OrdinalIgnoreCase))
         {
             ExportMode = ExportMode.Prop;
-            AnimatedProp = true;
-            EnsureDefaultPropAnimKeys();
             ActiveView = AppView.AnimatedProps;
             SyncWorkspaceTabForActiveView();
             return;
@@ -1801,7 +1747,7 @@ public partial class MainViewModel : ObservableObject
     [NotifyPropertyChangedFor(nameof(IsViewportVisible))]
     [NotifyPropertyChangedFor(nameof(IsPropsView))]
     [NotifyPropertyChangedFor(nameof(IsAnimatedPropsView))]
-    [NotifyPropertyChangedFor(nameof(ShowAnimatedPropControls))]
+    [NotifyPropertyChangedFor(nameof(IsStaticPropsView))]
     [NotifyPropertyChangedFor(nameof(IsOptimizeView))]
     [NotifyPropertyChangedFor(nameof(IsRpfView))]
     [NotifyPropertyChangedFor(nameof(IsVehiclesView))]
@@ -1854,6 +1800,8 @@ public partial class MainViewModel : ObservableObject
         double LodDistVlow,
         GizmoMode ActiveGizmo,
         bool ScaleLocked,
+        bool HasCustomPivot,
+        double PivotX, double PivotY, double PivotZ,
         double TransformPosX, double TransformPosY, double TransformPosZ,
         double TransformRotX, double TransformRotY, double TransformRotZ,
         double TransformScaleX, double TransformScaleY, double TransformScaleZ);
@@ -1865,6 +1813,7 @@ public partial class MainViewModel : ObservableObject
         nameof(ExtractTextures), nameof(GenerateLods),
         nameof(LodDistHigh), nameof(LodDistMed), nameof(LodDistLow), nameof(LodDistVlow),
         nameof(ActiveGizmo), nameof(ScaleLocked),
+        nameof(HasCustomPivot), nameof(PivotX), nameof(PivotY), nameof(PivotZ),
         nameof(TransformPosX), nameof(TransformPosY), nameof(TransformPosZ),
         nameof(TransformRotX), nameof(TransformRotY), nameof(TransformRotZ),
         nameof(TransformScaleX), nameof(TransformScaleY), nameof(TransformScaleZ),
@@ -1875,6 +1824,12 @@ public partial class MainViewModel : ObservableObject
     /// only want the final value on the undo stack.</summary>
     private static readonly HashSet<string> DebouncedTransformProperties = new(StringComparer.Ordinal)
     {
+        // The name box updates on every keystroke (UpdateSourceTrigger=
+        // PropertyChanged), so without coalescing, Ctrl+Z walked back one
+        // CHARACTER at a time and looked broken. One pause = one undo step.
+        nameof(PropName),
+        // Dragging the pivot fires as fast as any other gizmo drag.
+        nameof(PivotX), nameof(PivotY), nameof(PivotZ),
         nameof(TransformPosX), nameof(TransformPosY), nameof(TransformPosZ),
         nameof(TransformRotX), nameof(TransformRotY), nameof(TransformRotZ),
         nameof(TransformScaleX), nameof(TransformScaleY), nameof(TransformScaleZ),
@@ -1926,6 +1881,7 @@ public partial class MainViewModel : ObservableObject
         CollisionMaterial, IncludeYtyp, ExtractTextures, GenerateLods,
         LodDistHigh, LodDistMed, LodDistLow, LodDistVlow,
         ActiveGizmo, ScaleLocked,
+        HasCustomPivot, PivotX, PivotY, PivotZ,
         TransformPosX, TransformPosY, TransformPosZ,
         TransformRotX, TransformRotY, TransformRotZ,
         TransformScaleX, TransformScaleY, TransformScaleZ);
@@ -2066,6 +2022,10 @@ public partial class MainViewModel : ObservableObject
             LodDistVlow = s.LodDistVlow;
             ActiveGizmo = s.ActiveGizmo;
             ScaleLocked = s.ScaleLocked;
+            HasCustomPivot = s.HasCustomPivot;
+            PivotX = s.PivotX;
+            PivotY = s.PivotY;
+            PivotZ = s.PivotZ;
             // Transform values come last — the host's PropertyChanged
             // handler pushes each one into the three.js viewer, so by the
             // time these assignments finish the viewer is back in sync

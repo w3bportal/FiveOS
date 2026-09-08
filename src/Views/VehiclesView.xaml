@@ -15,6 +15,7 @@
              DragLeave="OnDragLeave"
              Loaded="OnLoaded"
              Unloaded="OnUnloaded"
+             PreviewKeyDown="OnViewPreviewKeyDown"
              d:DataContext="{d:DesignInstance vm:VehiclesViewModel}">
 
     <UserControl.Resources>
@@ -352,6 +353,10 @@
                                Margin="14,4,14,8" />
 
                     <Grid Grid.Row="2" Margin="8,0,8,8">
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="*" MinHeight="90" />
+                            <RowDefinition Height="Auto" />
+                        </Grid.RowDefinitions>
                         <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center"
                                     Visibility="{Binding ShowLayersEmpty, Converter={StaticResource BooleanToVisibility}}">
                             <ui:SymbolIcon Symbol="Layer24" FontSize="28" Opacity="0.3" HorizontalAlignment="Center" />
@@ -416,150 +421,14 @@
                                   Visibility="{Binding ShowLayersTree, Converter={StaticResource BooleanToVisibility}}"
                                   PreviewMouseLeftButtonDown="OnQueueMouseDown"
                                   SelectedItemChanged="OnTreeSelected" />
-                    </Grid>
-                </Grid>
-            </Border>
 
-            <GridSplitter Grid.Column="1"
-                          x:Name="LayersSplitter"
-                          HorizontalAlignment="Stretch"
-                          VerticalAlignment="Stretch"
-                          Background="{DynamicResource ControlElevationBorderBrush}"
-                          ShowsPreview="False"
-                          ResizeBehavior="PreviousAndNext"
-                          Cursor="SizeWE"
-                          DragCompleted="OnLayersSplitterDragCompleted" />
-
-            <Grid Grid.Column="2" x:Name="WorkspaceGrid" Margin="0">
-                <Grid.RowDefinitions>
-                    <RowDefinition x:Name="StageRow" Height="*" MinHeight="160" />
-                    <RowDefinition Height="5" />
-                    <RowDefinition x:Name="DetailsRow" Height="380" MinHeight="140" MaxHeight="560" />
-                </Grid.RowDefinitions>
-
-                <Grid Grid.Row="0" Margin="10,10,10,0" x:Name="StageGrid">
-                    <Grid.ColumnDefinitions>
-                        <ColumnDefinition Width="*" MinWidth="200" />
-                        <ColumnDefinition Width="5" />
-                        <ColumnDefinition x:Name="PaintCol" Width="220" MinWidth="160" MaxWidth="420" />
-                    </Grid.ColumnDefinitions>
-
-                    <Border Grid.Column="0"
-                            CornerRadius="4" BorderThickness="1"
-                            BorderBrush="{DynamicResource ControlElevationBorderBrush}"
-                            Background="#0d0d10" ClipToBounds="True">
-                        <Grid>
-                            <wv2:WebView2 x:Name="CarPreview" DefaultBackgroundColor="#0d0d10" />
-
-                            <StackPanel x:Name="PreviewHint" HorizontalAlignment="Center" VerticalAlignment="Center"
-                                        IsHitTestVisible="False">
-                                <ui:SymbolIcon Symbol="VehicleCar24" FontSize="36" Opacity="0.28"
-                                               Foreground="White" HorizontalAlignment="Center" />
-                                <TextBlock Text="{Binding FilesEmptyTitle}"
-                                           FontSize="13" FontWeight="SemiBold" Opacity="0.55" Foreground="White"
-                                           HorizontalAlignment="Center" Margin="0,12,0,4" />
-                                <TextBlock Text="{Binding FilesEmptyHint}"
-                                           FontSize="11" Opacity="0.4" Foreground="White"
-                                           TextAlignment="Center" TextWrapping="Wrap" MaxWidth="280"
-                                           HorizontalAlignment="Center" />
-                            </StackPanel>
-
-                            <StackPanel x:Name="PreviewLoader" HorizontalAlignment="Center" VerticalAlignment="Center"
-                                        Visibility="Collapsed" IsHitTestVisible="False">
-                                <ctrl:DotMatrixLoader LoaderStyle="BlockDrop" DotSize="5" DotSpacing="2"
-                                                      HorizontalAlignment="Center" />
-                                <TextBlock x:Name="PreviewLoaderText" Text="Loading…"
-                                           FontSize="11" Opacity="0.8" Foreground="White"
-                                           HorizontalAlignment="Center" Margin="0,10,0,0" />
-                            </StackPanel>
-
-                            <TextBlock x:Name="CarMeshInfoText"
-                                       HorizontalAlignment="Left" VerticalAlignment="Bottom"
-                                       Margin="10,0,10,7" FontSize="10" Opacity="0.65"
-                                       Foreground="White" IsHitTestVisible="False"
-                                       TextTrimming="CharacterEllipsis" Text="" />
-
-                            <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Top"
-                                        Margin="0,8,8,0"
-                                        Visibility="{Binding HasFiles, Converter={StaticResource BooleanToVisibility}}">
-                                <ui:Button x:Name="GtaFolderBtn" Content="GTA"
-                                           Appearance="Secondary" FontSize="10" Padding="8,3"
-                                           Click="OnSetGtaFolder"
-                                           ToolTip="Point at GTA V for shared vehicle textures." />
-                                <ui:Button Content="↺" Appearance="Secondary" FontSize="11" Padding="9,3" Margin="5,0,0,0"
-                                           Click="OnCarRecenter" ToolTip="Recenter camera." />
-                            </StackPanel>
-                        </Grid>
-                    </Border>
-
-                    <GridSplitter Grid.Column="1"
-                                  HorizontalAlignment="Stretch"
-                                  VerticalAlignment="Stretch"
-                                  Background="{DynamicResource ControlElevationBorderBrush}"
-                                  ShowsPreview="False"
-                                  ResizeBehavior="PreviousAndNext"
-                                  Cursor="SizeWE"
-                                  DragCompleted="OnPaintSplitterDragCompleted" />
-
-                    <Border Grid.Column="2"
-                            CornerRadius="4" BorderThickness="1"
-                            BorderBrush="{DynamicResource ControlElevationBorderBrush}"
-                            Background="{DynamicResource ControlFillColorDefaultBrush}"
-                            Visibility="{Binding HasFiles, Converter={StaticResource BooleanToVisibility}}">
-                        <ScrollViewer VerticalScrollBarVisibility="Auto" Padding="12,10">
-                            <StackPanel>
-                                <TextBlock Text="PAINT &amp; VEHICLE CONTROLS" Style="{StaticResource SectionHeader}" />
-                                <WrapPanel Margin="0,0,0,10">
-                                    <WrapPanel.Resources>
-                                        <Style TargetType="Border">
-                                            <Setter Property="Width" Value="22" />
-                                            <Setter Property="Height" Value="22" />
-                                            <Setter Property="CornerRadius" Value="4" />
-                                            <Setter Property="Margin" Value="0,0,6,6" />
-                                            <Setter Property="Cursor" Value="Hand" />
-                                            <Setter Property="BorderThickness" Value="1" />
-                                            <Setter Property="BorderBrush" Value="{DynamicResource ControlElevationBorderBrush}" />
-                                        </Style>
-                                    </WrapPanel.Resources>
-                                    <Border Background="#9A9EA3" Tag="9A9EA3" MouseLeftButtonUp="OnPaintColor" ToolTip="Silver" />
-                                    <Border Background="#E8E8EA" Tag="E8E8EA" MouseLeftButtonUp="OnPaintColor" ToolTip="White" />
-                                    <Border Background="#1A1A1D" Tag="1A1A1D" MouseLeftButtonUp="OnPaintColor" ToolTip="Black" />
-                                    <Border Background="#3A3F44" Tag="3A3F44" MouseLeftButtonUp="OnPaintColor" ToolTip="Gunmetal" />
-                                    <Border Background="#B01818" Tag="B01818" MouseLeftButtonUp="OnPaintColor" ToolTip="Red" />
-                                    <Border Background="#1E3A8A" Tag="1E3A8A" MouseLeftButtonUp="OnPaintColor" ToolTip="Blue" />
-                                    <Border Background="#1E6B3A" Tag="1E6B3A" MouseLeftButtonUp="OnPaintColor" ToolTip="Green" />
-                                    <Border Background="#D4A017" Tag="D4A017" MouseLeftButtonUp="OnPaintColor" ToolTip="Gold" />
-                                    <Border Background="#C2560F" Tag="C2560F" MouseLeftButtonUp="OnPaintColor" ToolTip="Orange" />
-                                </WrapPanel>
-                                <ui:ToggleSwitch x:Name="DoorsToggle" Content="Open doors"
-                                                 IsEnabled="False" FontSize="12" Margin="0,0,0,4"
-                                                 Checked="OnDoorsToggled" Unchecked="OnDoorsToggled" />
-                                <TextBlock x:Name="DoorsHint" FontSize="10" Opacity="0.5" TextWrapping="Wrap"
-                                           Margin="0,0,0,10"
-                                           Text="Load a car to unlock doors." />
-                                <ItemsControl x:Name="PartsList" />
-                            </StackPanel>
-                        </ScrollViewer>
-                    </Border>
-                </Grid>
-
-                <GridSplitter Grid.Row="1"
-                              HorizontalAlignment="Stretch"
-                              VerticalAlignment="Stretch"
-                              Background="{DynamicResource ControlElevationBorderBrush}"
-                              ShowsPreview="False"
-                              ResizeBehavior="PreviousAndNext"
-                              Cursor="SizeNS"
-                              DragCompleted="OnDetailsSplitterDragCompleted" />
-
-                <Border Grid.Row="2"
-                        Background="{DynamicResource ControlFillColorDefaultBrush}"
-                        Margin="10,0,10,10"
-                        CornerRadius="4"
-                        BorderBrush="{DynamicResource ControlElevationBorderBrush}"
-                        BorderThickness="1">
-                    <ScrollViewer VerticalScrollBarVisibility="Auto" Padding="16,12">
-                        <Grid>
+                        <!-- Selected car: details / resource / save-to / optimize, then paint & doors. -->
+                        <Border Grid.Row="1" Margin="0,6,0,0" CornerRadius="4" BorderThickness="1"
+                                BorderBrush="{DynamicResource ControlElevationBorderBrush}"
+                                Background="{DynamicResource ControlFillColorDefaultBrush}"
+                                Visibility="{Binding HasFiles, Converter={StaticResource BooleanToVisibility}}">
+                            <ScrollViewer VerticalScrollBarVisibility="Auto" MaxHeight="420" Padding="10,10,10,8">
+                                <StackPanel>
                             <StackPanel Visibility="{Binding ShowCarDetails, Converter={StaticResource BooleanToVisibility}}">
                                 <TextBlock Text="DETAILS" Style="{StaticResource SectionHeader}" />
 
@@ -652,6 +521,288 @@
                                 </Grid>
                             </StackPanel>
 
+
+                            <StackPanel>
+                                <TextBlock Text="PAINT &amp; VEHICLE CONTROLS" Style="{StaticResource SectionHeader}" />
+                                <WrapPanel Margin="0,0,0,10">
+                                    <WrapPanel.Resources>
+                                        <Style TargetType="Border">
+                                            <Setter Property="Width" Value="22" />
+                                            <Setter Property="Height" Value="22" />
+                                            <Setter Property="CornerRadius" Value="4" />
+                                            <Setter Property="Margin" Value="0,0,6,6" />
+                                            <Setter Property="Cursor" Value="Hand" />
+                                            <Setter Property="BorderThickness" Value="1" />
+                                            <Setter Property="BorderBrush" Value="{DynamicResource ControlElevationBorderBrush}" />
+                                        </Style>
+                                    </WrapPanel.Resources>
+                                    <Border Background="#9A9EA3" Tag="9A9EA3" MouseLeftButtonUp="OnPaintColor" ToolTip="Silver" />
+                                    <Border Background="#E8E8EA" Tag="E8E8EA" MouseLeftButtonUp="OnPaintColor" ToolTip="White" />
+                                    <Border Background="#1A1A1D" Tag="1A1A1D" MouseLeftButtonUp="OnPaintColor" ToolTip="Black" />
+                                    <Border Background="#3A3F44" Tag="3A3F44" MouseLeftButtonUp="OnPaintColor" ToolTip="Gunmetal" />
+                                    <Border Background="#B01818" Tag="B01818" MouseLeftButtonUp="OnPaintColor" ToolTip="Red" />
+                                    <Border Background="#1E3A8A" Tag="1E3A8A" MouseLeftButtonUp="OnPaintColor" ToolTip="Blue" />
+                                    <Border Background="#1E6B3A" Tag="1E6B3A" MouseLeftButtonUp="OnPaintColor" ToolTip="Green" />
+                                    <Border Background="#D4A017" Tag="D4A017" MouseLeftButtonUp="OnPaintColor" ToolTip="Gold" />
+                                    <Border Background="#C2560F" Tag="C2560F" MouseLeftButtonUp="OnPaintColor" ToolTip="Orange" />
+                                </WrapPanel>
+                                <ui:ToggleSwitch x:Name="DoorsToggle" Content="Open doors"
+                                                 IsEnabled="False" FontSize="12" Margin="0,0,0,4"
+                                                 Checked="OnDoorsToggled" Unchecked="OnDoorsToggled" />
+                                <TextBlock x:Name="DoorsHint" FontSize="10" Opacity="0.5" TextWrapping="Wrap"
+                                           Margin="0,0,0,10"
+                                           Text="Load a car to unlock doors." />
+                                <ItemsControl x:Name="PartsList" />
+                            </StackPanel>
+
+                                </StackPanel>
+                            </ScrollViewer>
+                        </Border>
+                    </Grid>
+                </Grid>
+            </Border>
+
+            <GridSplitter Grid.Column="1"
+                          x:Name="LayersSplitter"
+                          HorizontalAlignment="Stretch"
+                          VerticalAlignment="Stretch"
+                          Background="{DynamicResource ControlElevationBorderBrush}"
+                          ShowsPreview="False"
+                          ResizeBehavior="PreviousAndNext"
+                          Cursor="SizeWE"
+                          DragCompleted="OnLayersSplitterDragCompleted" />
+
+            <Grid Grid.Column="2" x:Name="WorkspaceGrid" Margin="0">
+                <Grid.RowDefinitions>
+                    <RowDefinition x:Name="StageRow" Height="*" MinHeight="160" />
+                    <RowDefinition Height="5" />
+                    <RowDefinition x:Name="DetailsRow" Height="380" MinHeight="140" MaxHeight="560" />
+                </Grid.RowDefinitions>
+
+                <Grid Grid.Row="0" Margin="10,10,10,0" x:Name="StageGrid">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*" MinWidth="200" />
+                        <ColumnDefinition Width="5" />
+                        <ColumnDefinition x:Name="PaintCol" Width="220" MinWidth="160" MaxWidth="420" />
+                    </Grid.ColumnDefinitions>
+
+                    <Border Grid.Column="0"
+                            CornerRadius="4" BorderThickness="1"
+                            BorderBrush="{DynamicResource ControlElevationBorderBrush}"
+                            Background="#0d0d10" ClipToBounds="True">
+                        <Grid>
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="*" />
+                            </Grid.RowDefinitions>
+
+                            <!-- Stage bar: model info + undo / redo / Export. The stage IS the animation editor. -->
+                            <Border Grid.Row="0"
+                                    Background="{DynamicResource ControlFillColorDefaultBrush}"
+                                    BorderBrush="{DynamicResource ControlElevationBorderBrush}"
+                                    BorderThickness="0,0,0,1" Padding="8,4">
+                                <DockPanel LastChildFill="True">
+                                    <TextBlock DockPanel.Dock="Left" VerticalAlignment="Center" FontSize="11" Opacity="0.6"
+                                               Text="{Binding Anim.ModelInfo}" TextTrimming="CharacterEllipsis" Margin="2,0,10,0" />
+                                    <!-- Undo / redo / Export, right-aligned. -->
+                                    <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Center">
+                                        <TextBlock Text="{Binding Anim.KeysText}" FontSize="10" Opacity="0.45" VerticalAlignment="Center" Margin="0,0,10,0" />
+                                        <ui:Button Appearance="Secondary" Padding="7,3" Margin="0,0,4,0" Click="OnAnimUndo"
+                                                   IsEnabled="{Binding Anim.CanUndo}" ToolTip="Undo (Ctrl+Z)">
+                                            <ui:SymbolIcon Symbol="ArrowUndo24" FontSize="13" />
+                                        </ui:Button>
+                                        <ui:Button Appearance="Secondary" Padding="7,3" Margin="0,0,8,0" Click="OnAnimRedo"
+                                                   IsEnabled="{Binding Anim.CanRedo}" ToolTip="Redo (Ctrl+Y)">
+                                            <ui:SymbolIcon Symbol="ArrowRedo24" FontSize="13" />
+                                        </ui:Button>
+                                        <ui:Button x:Name="AnimExportBtn" Appearance="Primary" FontSize="11" Padding="10,3"
+                                                   Click="OnAnimExportMenu" IsEnabled="{Binding Anim.CanExport}"
+                                                   ToolTip="Bake the timeline to a .ycd and package it.">
+                                            <StackPanel Orientation="Horizontal">
+                                                <TextBlock Text="Export" VerticalAlignment="Center" />
+                                                <TextBlock Text="▾" FontSize="9" Margin="6,0,0,0" VerticalAlignment="Center" Opacity="0.8" />
+                                            </StackPanel>
+                                            <ui:Button.ContextMenu>
+                                                <ContextMenu>
+                                                    <MenuItem Header="FiveM resource (drop-in folder)" Click="OnAnimExportFiveM" />
+                                                    <MenuItem Header="DLC .rpf (singleplayer / client mods)" Click="OnAnimExportDlc" />
+                                                    <MenuItem Header=".ycd file only…" Click="OnAnimExportYcd" />
+                                                    <Separator />
+                                                    <MenuItem Header="Clip name…" Click="OnAnimRenameClip" />
+                                                    <MenuItem Header="Choose output folder…" Click="OnAnimPickOutputFolder" />
+                                                    <MenuItem Header="Open output folder" Click="OnAnimOpenOutput" />
+                                                    <Separator />
+                                                    <MenuItem Header="Open a .yft…" Click="OnAnimOpenModel" />
+                                                    <MenuItem Header="Save session…" Click="OnAnimSaveSession" />
+                                                    <MenuItem Header="Load session…" Click="OnAnimLoadSession" />
+                                                </ContextMenu>
+                                            </ui:Button.ContextMenu>
+                                        </ui:Button>
+                                    </StackPanel>
+                                </DockPanel>
+                            </Border>
+
+                            <wv2:WebView2 x:Name="CarPreview" Grid.Row="1" DefaultBackgroundColor="#0d0d10" />
+
+                            <StackPanel x:Name="PreviewHint" Grid.Row="1" HorizontalAlignment="Center" VerticalAlignment="Center"
+                                        IsHitTestVisible="False">
+                                <ui:SymbolIcon Symbol="VehicleCar24" FontSize="36" Opacity="0.28"
+                                               Foreground="White" HorizontalAlignment="Center" />
+                                <TextBlock Text="{Binding FilesEmptyTitle}"
+                                           FontSize="13" FontWeight="SemiBold" Opacity="0.55" Foreground="White"
+                                           HorizontalAlignment="Center" Margin="0,12,0,4" />
+                                <TextBlock Text="{Binding FilesEmptyHint}"
+                                           FontSize="11" Opacity="0.4" Foreground="White"
+                                           TextAlignment="Center" TextWrapping="Wrap" MaxWidth="280"
+                                           HorizontalAlignment="Center" />
+                            </StackPanel>
+
+                            <StackPanel x:Name="PreviewLoader" Grid.Row="1" HorizontalAlignment="Center" VerticalAlignment="Center"
+                                        Visibility="Collapsed" IsHitTestVisible="False">
+                                <ctrl:DotMatrixLoader LoaderStyle="BlockDrop" DotSize="5" DotSpacing="2"
+                                                      HorizontalAlignment="Center" />
+                                <TextBlock x:Name="PreviewLoaderText" Text="Loading…"
+                                           FontSize="11" Opacity="0.8" Foreground="White"
+                                           HorizontalAlignment="Center" Margin="0,10,0,0" />
+                            </StackPanel>
+
+                            <TextBlock x:Name="CarMeshInfoText" Grid.Row="1"
+                                       HorizontalAlignment="Left" VerticalAlignment="Bottom"
+                                       Margin="10,0,10,7" FontSize="10" Opacity="0.65"
+                                       Foreground="White" IsHitTestVisible="False"
+                                       TextTrimming="CharacterEllipsis" Text="" />
+
+                            <StackPanel Grid.Row="1" Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Top"
+                                        Margin="0,8,8,0"
+                                        Visibility="{Binding HasFiles, Converter={StaticResource BooleanToVisibility}}">
+                                <ui:Button x:Name="GtaFolderBtn" Content="GTA"
+                                           Appearance="Secondary" FontSize="10" Padding="8,3"
+                                           Click="OnSetGtaFolder"
+                                           ToolTip="Point at GTA V for shared vehicle textures." />
+                                <ui:Button Content="↺" Appearance="Secondary" FontSize="11" Padding="9,3" Margin="5,0,0,0"
+                                           Click="OnCarRecenter" ToolTip="Recenter camera." />
+                            </StackPanel>
+                        </Grid>
+                    </Border>
+
+                    <GridSplitter Grid.Column="1"
+                                  HorizontalAlignment="Stretch"
+                                  VerticalAlignment="Stretch"
+                                  Background="{DynamicResource ControlElevationBorderBrush}"
+                                  ShowsPreview="False"
+                                  ResizeBehavior="PreviousAndNext"
+                                  Cursor="SizeWE"
+                                  DragCompleted="OnPaintSplitterDragCompleted" />
+
+                    <!-- Bones of the loaded car. -->
+                    <Border Grid.Column="2"
+                            CornerRadius="4" BorderThickness="1"
+                            BorderBrush="{DynamicResource ControlElevationBorderBrush}"
+                            Background="{DynamicResource ControlFillColorDefaultBrush}">
+                        <Grid DataContext="{Binding Anim}">
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="*" MinHeight="80" />
+                                <RowDefinition Height="Auto" />
+                            </Grid.RowDefinitions>
+
+                            <StackPanel Grid.Row="0" Margin="12,10,12,6">
+                                <Grid>
+                                    <TextBlock Text="BONES" Style="{StaticResource SectionHeader}" />
+                                    <TextBlock Text="{Binding BoneCountText}" FontSize="10" Opacity="0.45" HorizontalAlignment="Right" />
+                                </Grid>
+                                <ui:TextBox Text="{Binding BoneFilter, UpdateSourceTrigger=PropertyChanged}"
+                                            PlaceholderText="Search bones…" FontSize="11"
+                                            ToolTip="Doors, bonnet, boot, wheels and other animatable bones are listed. Type to search every bone, dummies included." />
+                            </StackPanel>
+
+                            <ListBox x:Name="AnimBonesList" Grid.Row="1" Margin="8,0,8,4"
+                                     ItemsSource="{Binding VisibleBones}"
+                                     SelectedItem="{Binding SelectedBone, Mode=TwoWay}"
+                                     Background="Transparent" BorderThickness="0"
+                                     ScrollViewer.HorizontalScrollBarVisibility="Disabled">
+                                <ListBox.ItemContainerStyle>
+                                    <Style TargetType="ListBoxItem" BasedOn="{StaticResource {x:Type ListBoxItem}}">
+                                        <Setter Property="Padding" Value="6,3" />
+                                        <Setter Property="Margin" Value="0,1" />
+                                        <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+                                    </Style>
+                                </ListBox.ItemContainerStyle>
+                                <ListBox.ItemTemplate>
+                                    <DataTemplate DataType="{x:Type vm:BoneRow}">
+                                        <Grid Margin="{Binding Indent}">
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="22" />
+                                                <ColumnDefinition Width="16" />
+                                                <ColumnDefinition Width="*" />
+                                                <ColumnDefinition Width="Auto" />
+                                            </Grid.ColumnDefinitions>
+                                            <CheckBox Grid.Column="0" IsChecked="{Binding IsVisible, Mode=TwoWay}"
+                                                      Padding="0" Margin="0,0,4,0" MinWidth="0" MinHeight="0"
+                                                      VerticalAlignment="Center" HorizontalAlignment="Left"
+                                                      ToolTip="Show / hide this part in the viewport (and anything attached to it). View only — the clip is untouched." />
+                                            <TextBlock Grid.Column="1" Text="{Binding Glyph}" FontSize="11" Opacity="0.6" VerticalAlignment="Center" />
+                                            <TextBlock Grid.Column="2" Text="{Binding Name}" FontSize="11"
+                                                       TextTrimming="CharacterEllipsis" VerticalAlignment="Center">
+                                                <TextBlock.Style>
+                                                    <Style TargetType="TextBlock">
+                                                        <Style.Triggers>
+                                                            <DataTrigger Binding="{Binding IsInteresting}" Value="False">
+                                                                <Setter Property="Opacity" Value="0.55" />
+                                                            </DataTrigger>
+                                                            <DataTrigger Binding="{Binding IsVisible}" Value="False">
+                                                                <Setter Property="Opacity" Value="0.35" />
+                                                            </DataTrigger>
+                                                        </Style.Triggers>
+                                                    </Style>
+                                                </TextBlock.Style>
+                                            </TextBlock>
+                                            <Border Grid.Column="3" CornerRadius="3" Padding="5,1" Margin="6,0,0,0" VerticalAlignment="Center">
+                                                <Border.Style>
+                                                    <Style TargetType="Border">
+                                                        <Setter Property="Background" Value="Transparent" />
+                                                        <Style.Triggers>
+                                                            <DataTrigger Binding="{Binding IsKeyed}" Value="True">
+                                                                <Setter Property="Background" Value="#33F0C419" />
+                                                            </DataTrigger>
+                                                        </Style.Triggers>
+                                                    </Style>
+                                                </Border.Style>
+                                                <TextBlock Text="{Binding Detail}" FontSize="9" Opacity="0.7" />
+                                            </Border>
+                                        </Grid>
+                                    </DataTemplate>
+                                </ListBox.ItemTemplate>
+                            </ListBox>
+
+                            <TextBlock Grid.Row="2" Text="{Binding StatusText}" FontSize="10" Opacity="0.5"
+                                       TextWrapping="Wrap" Margin="12,6,12,10" />
+                        </Grid>
+                    </Border>
+
+                </Grid>
+
+                <GridSplitter Grid.Row="1" x:Name="DetailsSplitter"
+                              HorizontalAlignment="Stretch"
+                              VerticalAlignment="Stretch"
+                              Background="{DynamicResource ControlElevationBorderBrush}"
+                              ShowsPreview="False"
+                              ResizeBehavior="PreviousAndNext"
+                              Cursor="SizeNS"
+                              Visibility="{Binding ShowMetaEditor, Converter={StaticResource BooleanToVisibility}}"
+                              DragCompleted="OnDetailsSplitterDragCompleted" />
+
+                <!-- Meta editor (vehicles/handling/carvariations) — only when a .meta is open;
+                     the row collapses otherwise (code-behind). -->
+                <Border Grid.Row="2"
+                        Visibility="{Binding ShowMetaEditor, Converter={StaticResource BooleanToVisibility}}"
+                        Background="{DynamicResource ControlFillColorDefaultBrush}"
+                        Margin="10,0,10,10"
+                        CornerRadius="4"
+                        BorderBrush="{DynamicResource ControlElevationBorderBrush}"
+                        BorderThickness="1">
+                    <ScrollViewer VerticalScrollBarVisibility="Auto" Padding="16,12">
+                        <Grid>
                             <StackPanel Visibility="{Binding ShowMetaEditor, Converter={StaticResource BooleanToVisibility}}">
                                 <TextBlock Text="META EDITOR" Style="{StaticResource SectionHeader}" />
                                 <TextBlock Text="{Binding MetaTitle}" FontSize="15" FontWeight="SemiBold"

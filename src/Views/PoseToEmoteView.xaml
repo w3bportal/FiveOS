@@ -852,6 +852,150 @@
                         <TextBlock Text="Sync Pair" FontSize="11" />
                     </StackPanel>
                 </ui:Button>
+                <!-- Prop: put a phone / bottle / mic in the ped's hand. The
+                     viewer parents the preview mesh under the hand bone so it
+                     rides the pose + animation; every export writes
+                     Prop + PropBone + PropPlacement from it. -->
+                <ui:Button x:Name="PropFlyoutBtn"
+                           Click="OnPropFlyoutClick"
+                           Appearance="Secondary"
+                           Padding="10,5"
+                           Margin="6,0,0,0"
+                           ToolTip="Prop — put a phone, bottle, mic… in the ped's hand. It snaps to the hand bone, follows the animation, and exports as Prop + PropPlacement (rpemotes, dpemotes and standalone packs). Opens with a demo phone already in the hand.">
+                    <StackPanel Orientation="Horizontal">
+                        <ui:SymbolIcon Symbol="Cube24" FontSize="13" Margin="0,0,6,0" />
+                        <TextBlock Text="Prop" FontSize="11" />
+                        <ui:SymbolIcon Symbol="ChevronDown12" FontSize="9" Margin="5,1,0,0" Opacity="0.6" />
+                    </StackPanel>
+                </ui:Button>
+                <!-- StaysOpen=False: click-away / workspace switch closes it (a
+                     StaysOpen popup is a top-level window and lingers over
+                     everything). Every action button closes it too so the
+                     viewport is clear for the gizmo. -->
+                <Popup x:Name="PropFlyout"
+                       PlacementTarget="{Binding ElementName=PropFlyoutBtn}"
+                       Placement="Bottom"
+                       StaysOpen="False"
+                       AllowsTransparency="True"
+                       PopupAnimation="Fade"
+                       Opened="OnPropFlyoutOpened"
+                       Closed="OnPropFlyoutClosed">
+                    <Border Background="{DynamicResource ApplicationBackgroundBrush}"
+                            BorderBrush="{DynamicResource ControlElevationBorderBrush}"
+                            BorderThickness="1"
+                            CornerRadius="8"
+                            Padding="14,12"
+                            Width="300"
+                            Margin="0,4,0,0">
+                        <StackPanel>
+                            <TextBlock Text="GTA prop model"
+                                       FontSize="10"
+                                       Foreground="{DynamicResource TextFillColorSecondaryBrush}"
+                                       Margin="0,0,0,2" />
+                            <ComboBox IsEditable="True"
+                                      Text="{Binding PropModelName, UpdateSourceTrigger=PropertyChanged}"
+                                      ItemsSource="{Binding PropCatalog}"
+                                      FontFamily="Consolas"
+                                      FontSize="11"
+                                      ToolTip="Model the emote spawns in-game. Any model your server streams works — the list is just common base-game hand props." />
+                            <TextBlock Text="Attach to"
+                                       FontSize="10"
+                                       Foreground="{DynamicResource TextFillColorSecondaryBrush}"
+                                       Margin="0,8,0,2" />
+                            <ComboBox SelectedIndex="{Binding PropAttachIndex, Mode=TwoWay}"
+                                      ItemsSource="{Binding PropAttachLabels}"
+                                      SelectionChanged="OnPropAttachChanged"
+                                      FontSize="11"
+                                      ToolTip="Bone the prop hangs off. Hands use the game's PH_ prop-handle bones (zero offset = natural grip) when the rig has them." />
+                            <Grid Margin="0,10,0,0">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="Auto" />
+                                </Grid.ColumnDefinitions>
+                                <ui:Button Grid.Column="0"
+                                           Click="OnPropAttach"
+                                           Appearance="Primary"
+                                           HorizontalAlignment="Stretch"
+                                           HorizontalContentAlignment="Center"
+                                           Padding="0,6"
+                                           Margin="0,0,4,0"
+                                           ToolTip="Put the prop on the chosen bone with a zero offset. Shows the real model from your GTA V files when a game folder is set, otherwise a placeholder slab.">
+                                    <StackPanel Orientation="Horizontal">
+                                        <ui:SymbolIcon Symbol="Pin24" FontSize="13" Margin="0,0,6,0" />
+                                        <TextBlock Text="{Binding PropAttachButtonText}" FontSize="11" FontWeight="SemiBold" />
+                                    </StackPanel>
+                                </ui:Button>
+                                <ui:Button Grid.Column="1"
+                                           Click="OnPropMesh"
+                                           Appearance="Secondary"
+                                           Padding="10,6"
+                                           ToolTip="Use your own .glb / .fbx / .obj as the preview mesh. The in-game prop is still the model name above.">
+                                    <StackPanel Orientation="Horizontal">
+                                        <ui:SymbolIcon Symbol="Open24" FontSize="13" Margin="0,0,6,0" />
+                                        <TextBlock Text="Mesh…" FontSize="11" />
+                                    </StackPanel>
+                                </ui:Button>
+                            </Grid>
+                            <StackPanel Visibility="{Binding HasProp, Converter={StaticResource BooleanToVisibility}}">
+                                <Grid Margin="0,6,0,0">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="Auto" />
+                                    </Grid.ColumnDefinitions>
+                                    <ui:Button Grid.Column="0"
+                                               Click="OnPropAdjust"
+                                               Appearance="Secondary"
+                                               HorizontalAlignment="Stretch"
+                                               HorizontalContentAlignment="Center"
+                                               Padding="0,6"
+                                               Margin="0,0,4,0"
+                                               ToolTip="Gizmo on the prop — nudge it into the palm. W move · E rotate (or click the prop in the viewport). Scale only affects the preview.">
+                                        <StackPanel Orientation="Horizontal">
+                                            <ui:SymbolIcon Symbol="ArrowMove24" FontSize="13" Margin="0,0,6,0" />
+                                            <TextBlock Text="Adjust" FontSize="11" />
+                                        </StackPanel>
+                                    </ui:Button>
+                                    <ui:Button Grid.Column="1"
+                                               Click="OnPropRemove"
+                                               Appearance="Secondary"
+                                               Padding="10,6"
+                                               ToolTip="Remove the prop from this emote.">
+                                        <ui:SymbolIcon Symbol="Delete24" FontSize="13" />
+                                    </ui:Button>
+                                </Grid>
+                                <CheckBox IsChecked="{Binding PropYUpFix, Mode=TwoWay}"
+                                          Checked="OnPropYUpChanged"
+                                          Unchecked="OnPropYUpChanged"
+                                          Margin="0,6,0,0"
+                                          Visibility="{Binding PropShowYUpFix, Converter={StaticResource BooleanToVisibility}}"
+                                          ToolTip="Blender / glTF exports are Y-up; the game's models are Z-up. Leave on for a mesh exported from Blender, turn off if the preview lies sideways.">
+                                    <TextBlock Text="Y-up mesh (Blender / glTF export)" FontSize="11" />
+                                </CheckBox>
+                                <TextBlock Text="{Binding PropPreviewLabel}"
+                                           FontSize="10"
+                                           Foreground="{DynamicResource TextFillColorSecondaryBrush}"
+                                           TextTrimming="CharacterEllipsis"
+                                           Margin="0,8,0,0" />
+                                <TextBlock Text="{Binding PropAttachedLabel}"
+                                           FontSize="10"
+                                           FontFamily="Consolas"
+                                           Foreground="{DynamicResource TextFillColorSecondaryBrush}"
+                                           Margin="0,2,0,0" />
+                                <TextBlock Text="{Binding PropPlacementText}"
+                                           FontSize="10"
+                                           FontFamily="Consolas"
+                                           Foreground="{DynamicResource TextFillColorSecondaryBrush}"
+                                           Margin="0,2,0,0"
+                                           ToolTip="PropPlacement the export writes: bone-local offset in metres, then rotation in degrees." />
+                            </StackPanel>
+                            <TextBlock Text="Export, Add to Pack and Add to RPEmotes all write the prop automatically — Remove it if this emote shouldn't carry one."
+                                       FontSize="9"
+                                       Opacity="0.55"
+                                       TextWrapping="Wrap"
+                                       Margin="0,8,0,0" />
+                        </StackPanel>
+                    </Border>
+                </Popup>
                 <!-- Add to Pack lives in the Pack sidebar panel, next to the
                      queue it fills — same reason Save Pose sits in SAVED POSES.
                      The toolbar stays one row of primary actions. -->

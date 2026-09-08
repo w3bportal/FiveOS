@@ -23,6 +23,10 @@ public sealed partial class PropPackTreeNode : ObservableObject
         Prop,
         Queue,
         QueueItem,
+
+        /// <summary>An animatable part of the loaded prop, nested the way the
+        /// source file nests it. Only present while the Animated stage is up.</summary>
+        Bone,
     }
 
     public NodeKind Kind { get; init; }
@@ -71,6 +75,10 @@ public sealed partial class PropPackTreeNode : ObservableObject
     /// <summary>When <see cref="NodeKind.Part"/>, the live mesh part.</summary>
     public MainViewModel.ModelPart? Part { get; init; }
 
+    /// <summary>When <see cref="NodeKind.Bone"/>, the animatable part it stands
+    /// for. The row mirrors it both ways — eye, name and key count.</summary>
+    public BoneRow? Bone { get; init; }
+
     public ObservableCollection<PropPackTreeNode> Children { get; } = new();
 
     public bool IsWorking => Kind == NodeKind.Working;
@@ -80,6 +88,7 @@ public sealed partial class PropPackTreeNode : ObservableObject
     public bool IsProp => Kind == NodeKind.Prop;
     public bool IsQueue => Kind == NodeKind.Queue;
     public bool IsQueueItem => Kind == NodeKind.QueueItem;
+    public bool IsBone => Kind == NodeKind.Bone;
     public bool CanRemove => IsProp || IsQueueItem;
 
     /// <summary>Bold folder-style rows: a pack group or the loaded model.</summary>
@@ -94,8 +103,61 @@ public sealed partial class PropPackTreeNode : ObservableObject
         NodeKind.Prop => SymbolRegular.Cube24,
         NodeKind.Queue => SymbolRegular.ArrowSync24,
         NodeKind.QueueItem => SymbolRegular.Document24,
+        NodeKind.Bone => Bone?.HasGeometry == true ? SymbolRegular.Shapes24 : SymbolRegular.Braces24,
         _ => SymbolRegular.Circle24,
     };
+}
+
+/// <summary>Nests the Animated stage's parts the way the source file nests
+/// them. Kept apart from the view model so the shape is testable on its own.</summary>
+public static class BoneOutlinerTree
+{
+    /// <summary>Hang every listed part off its nearest listed ancestor. A part
+    /// whose own parents are filtered out of <paramref name="listed"/> lands on
+    /// the nearest one that survived, or at the top — so hiding the dummies
+    /// flattens a branch instead of inventing one. <paramref name="all"/> is the
+    /// full part list, needed to walk a chain through the hidden ones.</summary>
+    public static List<PropPackTreeNode> Build(
+        IReadOnlyList<BoneRow> listed,
+        IReadOnlyList<BoneRow> all,
+        Action<PropPackTreeNode, BoneRow>? onNode = null)
+    {
+        var byName = new Dictionary<string, BoneRow>(StringComparer.OrdinalIgnoreCase);
+        foreach (var b in all) byName[b.Name] = b;
+        var inList = new HashSet<BoneRow>(listed);
+        var nodeOf = new Dictionary<BoneRow, PropPackTreeNode>();
+        var roots = new List<PropPackTreeNode>();
+
+        BoneRow? ParentOf(BoneRow b)
+            => b.ParentName is not null && byName.TryGetValue(b.ParentName, out var p) && !ReferenceEquals(p, b) ? p : null;
+
+        foreach (var b in listed)
+        {
+            var node = new PropPackTreeNode
+            {
+                Kind = PropPackTreeNode.NodeKind.Bone,
+                Name = b.Name,
+                Bone = b,
+                IsExpanded = true,
+                IsEyeOn = b.IsVisible,
+                Detail = b.IsKeyed ? b.Detail : "",
+                IsSelected = b.IsSelected,
+            };
+            nodeOf[b] = node;
+
+            PropPackTreeNode? parent = null;
+            // Seeded with the row itself: a malformed file can name a parent
+            // chain that loops back round to it, and a row must never end up
+            // its own ancestor (it would vanish from the tree entirely).
+            var seen = new HashSet<BoneRow> { b };
+            for (var p = ParentOf(b); p is not null && seen.Add(p); p = ParentOf(p))
+                if (inList.Contains(p) && nodeOf.TryGetValue(p, out var pn)) { parent = pn; break; }
+
+            if (parent is null) roots.Add(node); else parent.Children.Add(node);
+            onNode?.Invoke(node, b);
+        }
+        return roots;
+    }
 }
 
 /// <summary>One source mesh waiting to be converted into the pack stream.</summary>

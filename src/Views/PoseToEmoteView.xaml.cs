@@ -1395,12 +1395,59 @@ public partial class PoseToEmoteView : UserControl
                     });
                     break;
 
-case "prop-loaded":
-                    Dispatcher.Invoke(() => { _vm.HasProp = true; _vm.StatusText = "Prop loaded. Move with the gizmo, then export."; });
+                case "prop-loaded":
+                    Dispatcher.Invoke(() =>
+                    {
+                        var r = doc.RootElement;
+                        var label = r.TryGetProperty("label", out var lEl) && lEl.ValueKind == JsonValueKind.String ? lEl.GetString() ?? "" : "";
+                        var source = r.TryGetProperty("source", out var sEl) && sEl.ValueKind == JsonValueKind.String ? sEl.GetString() ?? "" : "";
+                        bool attached = r.TryGetProperty("attached", out var aEl) && aEl.ValueKind == JsonValueKind.True;
+                        _vm.PropSource = source;
+                        _vm.PropPreviewLabel = source switch
+                        {
+                            "game" => $"Preview: {label} (game model)",
+                            "placeholder" => $"Preview: demo phone (stands in for {label})",
+                            _ => $"Preview: {label}",
+                        };
+                        _vm.HasProp = true;
+                        _vm.StatusText = attached
+                            ? $"Prop on the {_vm.CurrentPropAttach.Label.ToLowerInvariant()} — it follows the animation. Adjust to nudge it, then export."
+                            : "Prop loaded — it snaps to the hand as soon as a GTA ped is in the viewport.";
+                    });
+                    break;
+
+                case "prop-state":
+                    Dispatcher.Invoke(() =>
+                    {
+                        var r = doc.RootElement;
+                        if (r.TryGetProperty("bone_name", out var bn) && bn.ValueKind == JsonValueKind.String)
+                            _vm.PropAttachBoneName = bn.GetString() ?? _vm.PropAttachBoneName;
+                        if (r.TryGetProperty("bone_id", out var bi) && bi.ValueKind == JsonValueKind.Number)
+                            _vm.PropBoneId = bi.GetInt32();
+                        if (r.TryGetProperty("source", out var src) && src.ValueKind == JsonValueKind.String)
+                            _vm.PropSource = src.GetString() ?? "";
+                        bool attached = r.TryGetProperty("attached", out var at) && at.ValueKind == JsonValueKind.True;
+                        if (r.TryGetProperty("pos", out var pEl) && r.TryGetProperty("rot_deg", out var qEl)
+                            && pEl.ValueKind == JsonValueKind.Array && qEl.ValueKind == JsonValueKind.Array
+                            && pEl.GetArrayLength() >= 3 && qEl.GetArrayLength() >= 3)
+                        {
+                            _vm.PropPlacementText = string.Format(System.Globalization.CultureInfo.InvariantCulture,
+                                "{0:0.000} {1:0.000} {2:0.000} m  ·  {3:0.#} {4:0.#} {5:0.#} °{6}",
+                                pEl[0].GetDouble(), pEl[1].GetDouble(), pEl[2].GetDouble(),
+                                qEl[0].GetDouble(), qEl[1].GetDouble(), qEl[2].GetDouble(),
+                                attached ? "" : "  (not on a bone yet)");
+                        }
+                    });
                     break;
 
                 case "prop-removed":
-                    Dispatcher.Invoke(() => { _vm.HasProp = false; _vm.StatusText = "Prop removed."; });
+                    Dispatcher.Invoke(() =>
+                    {
+                        _vm.HasProp = false;
+                        _vm.PropPlacementText = "—";
+                        _vm.PropPreviewLabel = "";
+                        _vm.StatusText = "Prop removed.";
+                    });
                     break;
 
                 case "prop-error":
@@ -1991,10 +2038,186 @@ case "prop-loaded":
     // and the resulting poses were unusable. "Save current pose as
     // template" replaces them when the .ycd export pipeline is solid.
 
-    // ── Prop export plumbing ─────────────────────────────────────────
-    // The prop-authoring UI was removed from the sidebar (2026-07-16),
-    // but the export path below stays: it is dormant while HasProp is
-    // false and keeps prop-emote exports possible if the feature returns.
+    // ── Prop authoring (toolbar ▸ Prop) ──────────────────────────────
+    //
+    // The viewer owns the prop: it parents the preview mesh under the chosen
+    // bone (so it rides the pose + animation) and echoes `prop-state` with the
+    // bone it actually resolved plus the bone-local placement. The host only
+    // pushes intent (which bone, which mesh) and reads the placement back at
+    // export time via GetPropInfoForExportAsync.
+
+    private int _propSeq;
+
+    // Toggle like the Import flyout: a second click closes; StaysOpen=False
+    // handles click-away and workspace switches.
+    private void OnPropFlyoutClick(object sender, RoutedEventArgs e)
+        => PropFlyout.IsOpen = !PropFlyout.IsOpen;
+
+    /// <summary>Opening the popup with no prop yet puts the demo prop in the
+    /// hand right away — the feature is visible before any click, and the
+    /// placement fields have something to show.</summary>
+    private async void OnPropFlyoutOpened(object sender, EventArgs e)
+    {
+        if (_vm.HasProp || _propAutoLoading) return;
+        _propAutoLoading = true;
+        try
+        {
+            if (!_webViewReady) await InitWebViewAsync();
+            await LoadPropPreviewAsync();
+        }
+        finally { _propAutoLoading = false; }
+    }
+    private bool _propAutoLoading;
+
+    /// <summary>A closed popup can leave keyboard focus on one of its (now
+    /// hidden) controls, and Ctrl+Z / W / E then reach nobody. Hand focus to
+    /// the viewport unless the click that closed it landed on another
+    /// control.</summary>
+    private void OnPropFlyoutClosed(object sender, EventArgs e)
+    {
+        var focused = System.Windows.Input.Keyboard.FocusedElement as DependencyObject;
+        bool stranded = focused is null
+            || (PropFlyout.Child is FrameworkElement child && (ReferenceEquals(child, focused) || child.IsAncestorOf(focused)));
+        if (!stranded) return;
+        try { Viewport.Focus(); } catch { }
+    }
+
+    /// <summary>Preference-ordered [{name,id}] for the current "Attach to"
+    /// choice. Tags come from GtaBoneTags so the viewer can't drift from
+    /// what the export writes as PropBone.</summary>
+    private string PropCandidatesJs()
+    {
+        var opt = _vm.CurrentPropAttach;
+        var list = opt.Bones.Select(n => new
+        {
+            name = n,
+            id = GtaBoneTags.ByGtaName.TryGetValue(n, out var tag) ? (int)tag : 0,
+        }).ToArray();
+        return JsonSerializer.Serialize(list);
+    }
+
+    private async Task PropJsAsync(string js)
+    {
+        if (!_webViewReady) return;
+        try { await Viewport.CoreWebView2.ExecuteScriptAsync(js); }
+        catch (Exception ex) { FosLogger.Warn("prop", "viewer call failed", ex); }
+    }
+
+    private Task PushPropAttachAsync(bool snap)
+        => PropJsAsync($"window.setPropAttachBone && window.setPropAttachBone({PropCandidatesJs()}, {(snap ? "true" : "false")})");
+
+    /// <summary>"Attach prop" / "Snap to bone": the first press loads a
+    /// preview (the real game model when a GTA folder is set, else a
+    /// placeholder) and snaps it to the chosen bone; later presses re-zero
+    /// the placement on that bone.</summary>
+    private async void OnPropAttach(object sender, RoutedEventArgs e)
+    {
+        PropFlyout.IsOpen = false;
+        if (!_webViewReady) await InitWebViewAsync();
+        if (_vm.HasProp)
+        {
+            await PushPropAttachAsync(snap: true);
+            _vm.StatusText = "Prop snapped to " + _vm.CurrentPropAttach.Label.ToLowerInvariant() + " — zero offset.";
+            return;
+        }
+        await LoadPropPreviewAsync();
+    }
+
+    private async void OnPropMesh(object sender, RoutedEventArgs e)
+    {
+        PropFlyout.IsOpen = false;
+        var file = await StaFileDialogs.OpenAsync(Window.GetWindow(this), dlg =>
+        {
+            dlg.Title = "Prop preview mesh";
+            dlg.Filter = "3D models (*.glb;*.gltf;*.fbx;*.obj)|*.glb;*.gltf;*.fbx;*.obj|All files (*.*)|*.*";
+        });
+        if (file is null) return;
+        if (!_webViewReady) await InitWebViewAsync();
+        await LoadPropFileAsync(file, "file", Path.GetFileName(file));
+    }
+
+    private async Task LoadPropPreviewAsync()
+    {
+        var model = (_vm.PropModelName ?? "").Trim();
+        if (model.Length > 0 && GamePropPreview.IsAvailable)
+        {
+            _vm.StatusText = GamePropPreview.Status == GamePropPreview.State.Ready
+                ? $"Reading {model} from the game files…"
+                : $"Indexing game props (first time only), then reading {model}…";
+            var res = await GamePropPreview.ExportGlbAsync(model);
+            if (res.Success && res.GlbPath is not null)
+            {
+                await LoadPropFileAsync(res.GlbPath, "game", model);
+                return;
+            }
+            _vm.StatusText = (res.Error ?? "Prop not found in the game files") + " — showing the demo phone instead.";
+        }
+        await PushPropAttachAsync(snap: true);
+        var opts = JsonSerializer.Serialize(new
+        {
+            source = "placeholder",
+            label = model.Length > 0 ? model : "prop",
+        });
+        await PropJsAsync($"window.loadProp && window.loadProp('placeholder', {opts})");
+    }
+
+    private async Task LoadPropFileAsync(string path, string source, string label)
+    {
+        if (!_webViewReady || _viewerSessionDir is null)
+        {
+            _vm.StatusText = "Viewer not ready yet.";
+            return;
+        }
+        var ext = Path.GetExtension(path).ToLowerInvariant();
+        var name = $"user-prop-{++_propSeq:x}{ext}";
+        var dest = Path.Combine(_viewerSessionDir, name);
+        try { File.Copy(path, dest, overwrite: true); }
+        catch (Exception ex)
+        {
+            _vm.StatusText = "Couldn't copy the prop: " + ex.Message;
+            return;
+        }
+        // Earlier previews are already decoded in the viewer; drop the files.
+        try
+        {
+            foreach (var f in Directory.EnumerateFiles(_viewerSessionDir, "user-prop-*"))
+            {
+                if (string.Equals(f, dest, StringComparison.OrdinalIgnoreCase)) continue;
+                try { File.Delete(f); } catch { }
+            }
+        }
+        catch { }
+
+        var url = "https://pose-viewer.local/" + name;
+        var opts = JsonSerializer.Serialize(new { label, source, yUpFix = _vm.PropYUpFix });
+        await PushPropAttachAsync(snap: true);
+        await PropJsAsync($"window.loadProp && window.loadProp({JsonSerializer.Serialize(url)}, {opts})");
+    }
+
+    private async void OnPropAttachChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (!_webViewReady || !_vm.HasProp) return;
+        await PushPropAttachAsync(snap: true);
+    }
+
+    private async void OnPropAdjust(object sender, RoutedEventArgs e)
+    {
+        PropFlyout.IsOpen = false;
+        await PropJsAsync("window.selectProp && window.selectProp()");
+        _vm.StatusText = "Gizmo on the prop — W move, E rotate. Click a joint to go back to posing.";
+    }
+
+    private async void OnPropRemove(object sender, RoutedEventArgs e)
+    {
+        PropFlyout.IsOpen = false;
+        await PropJsAsync("window.removeProp && window.removeProp()");
+    }
+
+    private async void OnPropYUpChanged(object sender, RoutedEventArgs e)
+    {
+        if (!IsLoaded) return;
+        await PropJsAsync($"window.setPropYUpFix && window.setPropYUpFix({(_vm.PropYUpFix ? "true" : "false")})");
+    }
 
     /// <summary>Fetch the prop's transform relative to its attach bone
     /// (in-viewport bone, since that's what TransformControls operates
@@ -7234,11 +7457,22 @@ case "prop-loaded":
         if (ycdBytes is null || ycdBytes.Length == 0) return; // status set by builders
 
         var pretty = char.ToUpper(emoteName[0]) + emoteName[1..].Replace('_', ' ');
+
+        // Prop in the viewport → PropEmotes entry with the authored placement.
+        Services.DpemotesPackBuilder.PropInfo? propInfo = null;
+        if (_vm.HasProp && !string.IsNullOrWhiteSpace(_vm.PropModelName))
+        {
+            propInfo = await GetPropInfoForExportAsync();
+            if (propInfo is null)
+                _vm.StatusText = "Couldn't read the prop placement — installing without the prop.";
+        }
+
         try
         {
             var msg = Services.RpEmotesInstaller.Install(
                 folder!, emoteName, pretty, ycdBytes,
-                emoteMoving: _vm.EffectiveExportMovement.ToEmoteMoving());
+                emoteMoving: _vm.EffectiveExportMovement.ToEmoteMoving(),
+                prop: propInfo);
             _vm.StatusText = msg;
             Views.AppDialog.Show(msg, "Add to RPEmotes",
                 MessageBoxButton.OK, MessageBoxImage.Information);
@@ -9490,6 +9724,7 @@ case "prop-loaded":
         UserSettings.SaveGtaFolder(dlg.FolderName);
         AnimRpfIndex.Reset(dlg.FolderName);
         GameTextureCache.Reset(dlg.FolderName);
+        GamePropPreview.Reset();
         _vm.AnimLibraryTotalCount = 0;
         _vm.AnimLibraryAll.Clear();
         _vm.AnimLibraryFiltered.Clear();

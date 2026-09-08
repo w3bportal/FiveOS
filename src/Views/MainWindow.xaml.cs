@@ -26,8 +26,9 @@ public partial class MainWindow : FluentWindow
     private static readonly string[] SupportedExtensions =
     {
         ".obj", ".glb", ".gltf", ".fbx", ".dae", ".ply", ".stl",
-        // GTA V drawable — previewed via a generated .glb, converted natively.
-        ".ydr",
+        // GTA V drawable / fragment / drawable dictionary — previewed via a
+        // generated .glb, which is also what the exporter reads.
+        ".ydr", ".yft", ".ydd",
         // Sims 4 packages aren't models — TryLoad unpacks them to a .glb first.
         ".package",
     };
@@ -149,7 +150,6 @@ public partial class MainWindow : FluentWindow
         DataContext = _vm;
         RefreshWindowTitle();
         ApplySavedPropsSidebarWidth();
-        ApplyPropAnimTimelineHeight();
         if (_vm.LayersPanelWidth < 280)
             _vm.LayersPanelWidth = 340;
         _vm.IsLayersPanelCollapsed = false;
@@ -226,7 +226,7 @@ public partial class MainWindow : FluentWindow
                 EmotesWorkspace.OpenAnimLibraryMode();
             }
             else if (e.PropertyName == nameof(MainViewModel.IsAnimatedPropsView))
-                ApplyPropAnimTimelineHeight();
+                _ = ApplyPropStageModeAsync();
         };
 
         // The update check now runs on the boot splash ("Checking for
@@ -497,6 +497,8 @@ public partial class MainWindow : FluentWindow
     }
 
     private static bool IsTransformProperty(string? name) => name is
+        nameof(MainViewModel.PivotX) or nameof(MainViewModel.PivotY) or nameof(MainViewModel.PivotZ) or
+        nameof(MainViewModel.HasCustomPivot) or
         nameof(MainViewModel.TransformPosX) or nameof(MainViewModel.TransformPosY) or nameof(MainViewModel.TransformPosZ) or
         nameof(MainViewModel.TransformRotX) or nameof(MainViewModel.TransformRotY) or nameof(MainViewModel.TransformRotZ) or
         nameof(MainViewModel.TransformScaleX) or nameof(MainViewModel.TransformScaleY) or nameof(MainViewModel.TransformScaleZ) or
@@ -512,15 +514,23 @@ public partial class MainWindow : FluentWindow
         if (Viewport?.CoreWebView2 == null || !_viewerReady) return;
         var inv = System.Globalization.CultureInfo.InvariantCulture;
         var payload =
-            "{3D models (*.obj;*.glb;*.gltf;*.fbx;*.dae;*.ply;*.stl;*.ydr;*.package)|" +
-                     "*.obj;*.glb;*.gltf;*.fbx;*.dae;*.ply;*.stl;*.ydr;*.package|" +
-                     "GTA V drawable (*.ydr)|*.ydr|" +
+            "{" +
             $"\"pos\":[{_vm.TransformPosX.ToString(inv)},{_vm.TransformPosY.ToString(inv)},{_vm.TransformPosZ.ToString(inv)}]," +
             $"\"rot\":[{_vm.TransformRotX.ToString(inv)},{_vm.TransformRotY.ToString(inv)},{_vm.TransformRotZ.ToString(inv)}]," +
             $"\"scale\":[{_vm.TransformScaleX.ToString(inv)},{_vm.TransformScaleY.ToString(inv)},{_vm.TransformScaleZ.ToString(inv)}]" +
             "}";
         try { await Viewport.CoreWebView2.ExecuteScriptAsync($"window.applyTransform && window.applyTransform({payload})"); }
         catch { /* viewer not ready — gizmo or next load will re-sync */ }
+
+        // The pivot lives in the viewer's model wrap, so an undo/redo (or any
+        // other VM-side change) has to be replayed there explicitly.
+        var pivot = $"[{_vm.PivotX.ToString(inv)},{_vm.PivotY.ToString(inv)},{_vm.PivotZ.ToString(inv)}]";
+        try
+        {
+            await Viewport.CoreWebView2.ExecuteScriptAsync(
+                $"window.setPivotOffset && window.setPivotOffset({pivot}, {(_vm.HasCustomPivot ? "true" : "false")})");
+        }
+        catch { /* same — best effort */ }
 
         // Mirror into the legacy gizmo fields so OnConvert keeps baking
         // the right values.
@@ -684,6 +694,20 @@ public partial class MainWindow : FluentWindow
             // Messages are JSON like {"kind":"ready"} / {"kind":"loaded","verts":N,"tris":N} /
             // {"kind":"transform","pos":[x,y,z],"rot":[x,y,z],"scale":s}.
             var json = e.WebMessageAsJson;
+            if (json.Contains("\"kind\":\"vanim-", StringComparison.Ordinal))
+            {
+                // Bone-editor echo (Props ▸ Animated). Clone before hopping
+                // threads — the document is disposed when this handler returns.
+                string kind; System.Text.Json.JsonElement snap;
+                using (var doc = System.Text.Json.JsonDocument.Parse(json))
+                {
+                    var root = doc.RootElement;
+                    kind = root.TryGetProperty("kind", out var k) ? k.GetString() ?? "" : "";
+                    snap = root.Clone();
+                }
+                Dispatcher.BeginInvoke(() => HandlePropAnimMessage(kind, snap));
+                return;
+            }
             if (json.Contains("\"ready\""))
             {
                 var first = !_viewerReady;
@@ -737,6 +761,7 @@ public partial class MainWindow : FluentWindow
                         _vm.IsModelLoading = false;
                         _ = PushTransformToViewerAsync();
                         _vm.StatusText = $"Preview · {pTris:N0} tris (drag slider to adjust)";
+                        if (_vm.IsAnimatedPropsView) _ = ApplyPropStageModeAsync();
                         return;
                     }
 
@@ -798,6 +823,8 @@ public partial class MainWindow : FluentWindow
                     // the FiveM thresholds. Banner is purely informational —
                     // user can dismiss and convert anyway.
                     EvaluateOptimizationHealth(tris);
+                    // Animated stage: hand the fresh model to the bone editor.
+                    if (_vm.IsAnimatedPropsView) _ = ApplyPropStageModeAsync();
                 });
             }
             else if (json.Contains("parts-sync"))
@@ -812,6 +839,16 @@ public partial class MainWindow : FluentWindow
                 {
                     SyncModelPartsFromMessage(json);
                     await SetGlassAppearanceAsync(_vm.GlassOpacity);
+                });
+            }
+            else if (json.Contains("request-undo") || json.Contains("request-redo"))
+            {
+                // Ctrl+Z / Ctrl+Y pressed while the 3D viewport had focus.
+                bool redo = json.Contains("request-redo");
+                Dispatcher.Invoke(() =>
+                {
+                    if (redo) { if (_vm.RedoCommand.CanExecute(null)) _vm.RedoCommand.Execute(null); }
+                    else if (_vm.UndoCommand.CanExecute(null)) _vm.UndoCommand.Execute(null);
                 });
             }
             else if (json.Contains("\"parts\""))
@@ -852,6 +889,9 @@ public partial class MainWindow : FluentWindow
                 _gizmoPos = (px, py, pz);
                 _gizmoRot = (rx, ry, rz);
                 if (sx > 0 && sy > 0 && sz > 0) _gizmoScale = (sx, sy, sz);
+                // "pivot": null until the user drags it (props then export
+                // with their original origin, exactly as before).
+                var pivot = ExtractVec3OrNull(json, "\"pivot\":");
 
                 // Mirror the gizmo state into the sidebar Transform fields
                 // so the user sees live values as they drag. Suppressed
@@ -867,6 +907,11 @@ public partial class MainWindow : FluentWindow
                         if (sx > 0) _vm.TransformScaleX = sx;
                         if (sy > 0) _vm.TransformScaleY = sy;
                         if (sz > 0) _vm.TransformScaleZ = sz;
+                        _vm.HasCustomPivot = pivot.HasValue;
+                        if (pivot is { } pv)
+                        {
+                            _vm.PivotX = pv.X; _vm.PivotY = pv.Y; _vm.PivotZ = pv.Z;
+                        }
                     }
                     finally { _suppressTransformPush = false; }
                 });
@@ -886,6 +931,20 @@ public partial class MainWindow : FluentWindow
             }
         }
         catch { /* ignore malformed messages */ }
+    }
+
+    /// <summary>Same as <see cref="ExtractVec3"/> but distinguishes an
+    /// explicit <c>null</c> from a missing key — the viewer sends
+    /// <c>"pivot":null</c> while the pivot is still automatic, and a plain
+    /// vector scan would run on to the NEXT array in the payload.</summary>
+    private static (double X, double Y, double Z)? ExtractVec3OrNull(string json, string key)
+    {
+        var i = json.IndexOf(key, StringComparison.Ordinal);
+        if (i < 0) return null;
+        var rest = json.AsSpan(i + key.Length).TrimStart();
+        if (rest.StartsWith("null", StringComparison.Ordinal)) return null;
+        if (rest.Length == 0 || rest[0] != '[') return null;
+        return ExtractVec3(json, key);
     }
 
     private static (double X, double Y, double Z) ExtractVec3(string json, string key)
@@ -2030,12 +2089,9 @@ public partial class MainWindow : FluentWindow
             e.Handled = true;
             return;
         }
-        if (e.Key == Key.K && _vm.IsAnimatedPropsView && !ctrl)
-        {
-            _vm.AddPropAnimKeyCommand.Execute(null);
-            e.Handled = true;
+        // Animated stage: K / Space / Ctrl+Z / Ctrl+Y belong to the bone editor.
+        if (_vm.IsAnimatedPropsView && HandlePropAnimKey(e, ctrl, shift))
             return;
-        }
         if (ctrl && e.Key == Key.OemComma)
         {
             OpenSettingsModal();
@@ -2090,6 +2146,7 @@ public partial class MainWindow : FluentWindow
             .Concat(_vm.DeletedPartNames)
             .Distinct(System.StringComparer.Ordinal)
             .ToList();
+        await EnsurePropAnimKeysSidecarAsync();
         var req = BuildConvertRequest(_vm.PropName, excludeMeshes, _vm.IsPackMode);
 
         var runner = new EngineRunner();
@@ -2209,7 +2266,9 @@ public partial class MainWindow : FluentWindow
         bool routeToPack)
     {
         return new EngineRunner.ConvertRequest(
-            SourcePath: _vm.ConvertSourcePath ?? _vm.SourcePath!,
+            // A GTA V model is converted from its textured preview .glb — the
+            // engine imports mesh formats, not RAGE resources.
+            SourcePath: _vm.SourcePath!,
             AssetName: assetName,
             Up: _vm.UpAxisIndex switch
             {
@@ -2223,7 +2282,11 @@ public partial class MainWindow : FluentWindow
             IncludeYtyp: _vm.IncludeYtyp,
             ExtractTextures: _vm.ExtractTextures,
             ScaleHint: _gizmoScale,
-            PositionHint: "0,0,0",
+            // Re-origin the geometry on the user's pivot when they set
+            // one; the prop's own origin ("0,0,0") otherwise. The pack
+            // queue's own default request keeps "0,0,0" — each queued
+            // item is a different model with its own origin.
+            PositionHint: BuildPivotTranslation(),
             RotationHint: $"{_gizmoRot.X.ToString(System.Globalization.CultureInfo.InvariantCulture)}," +
                           $"{_gizmoRot.Y.ToString(System.Globalization.CultureInfo.InvariantCulture)}," +
                           $"{_gizmoRot.Z.ToString(System.Globalization.CultureInfo.InvariantCulture)}",
@@ -2243,101 +2306,38 @@ public partial class MainWindow : FluentWindow
             PartDiffuseTextures: _vm.PartDiffuseOverrides.Count > 0
                 ? new Dictionary<string, string>(_vm.PartDiffuseOverrides, StringComparer.OrdinalIgnoreCase)
                 : null,
-            AnimatedProp: _vm.IsAnimatedPropsView || _vm.AnimatedProp,
-            // Gate AutoSpin on AnimatedProp: the auto-spin controls only SHOW
-            // under Animated prop, so a user who enabled auto-spin then turned
-            // Animated prop back off must not still ship a spinning prop.
-            // Animated workspace prefers timeline keys over auto-spin.
-            AutoSpin: !_vm.IsAnimatedPropsView && _vm.AnimatedProp && _vm.AutoSpin,
-            SpinAxis: _vm.SpinAxisIndex switch { 0 => "X", 1 => "Y", _ => "Z" },
-            SpinSeconds: _vm.SpinSeconds,
-            SpinReverse: _vm.SpinReverse,
-            AnimKeysPath: WritePropAnimKeysSidecar(),
-            Target: _vm.IsGtaIvTarget
-                ? EngineRunner.GameTarget.GtaIv
-                : EngineRunner.GameTarget.GtaV);
+            // Animated stage: the editor's keys (sampled into a sidecar right
+            // before this call) drive the .ycd. With no keys the engine falls
+            // back to the source file's own clip, else ships a static prop.
+            AnimatedProp: _vm.IsAnimatedPropsView,
+            AnimKeysPath: _vm.IsAnimatedPropsView ? _propAnimKeysSidecar : null);
     }
 
-    /// <summary>Point FiveOS at the user's copy of the GTA IV resource
-    /// compiler. Not bundled — third-party tool of unclear licence — so this
-    /// is a one-off pick that persists in user settings.</summary>
-    private async void BrowseIvResourceBuilder_Click(object sender, RoutedEventArgs e)
-    {
-        var picked = await StaFileDialogs.OpenAsync(this, dlg =>
-        {
-            dlg.Title = "Select the GTA IV resource compiler";
-            dlg.Filter = "ResourceBuilder (*.exe)|*.exe|All files (*.*)|*.*";
-            dlg.CheckFileExists = true;
-            var current = _vm.IvResourceBuilderPath;
-            if (!string.IsNullOrWhiteSpace(current))
-            {
-                try
-                {
-                    var dir = Directory.Exists(current) ? current : Path.GetDirectoryName(current);
-                    if (!string.IsNullOrEmpty(dir) && Directory.Exists(dir)) dlg.InitialDirectory = dir;
-                }
-                catch { /* fall back to the shell default */ }
-            }
-        });
-
-        if (!string.IsNullOrWhiteSpace(picked))
-            _vm.IvResourceBuilderPath = picked;
-    }
-
-    /// <summary>Convert a GTA V .ymap into a GTA IV .wpl.
+    /// <summary>The converter's <c>--pos</c>: the translation that re-origins
+    /// the exported geometry on the user's chosen pivot.
     ///
-    /// Deliberately not routed through the model pipeline: a .ymap contains no
-    /// geometry, so there is nothing to load into the viewport and nothing to
-    /// bake — it is a list of positions in, a list of positions out. Output
-    /// lands beside the source, where a map's other files already live.</summary>
-    private async void ConvertYmapToWpl_Click(object sender, RoutedEventArgs e)
+    /// The engine bakes vertices as <c>v' = R·(S·v) + T</c> (Converter's
+    /// ApplyUserTransform, in the viewer's Y-up space). To make the pivot the
+    /// prop's origin — the point the game places and rotates it by — the
+    /// geometry has to shift by the pivot-to-origin offset carried through
+    /// the same scale and rotation: <c>T = R·(S·P)</c>.
+    ///
+    /// Without a user-placed pivot this stays "0,0,0", so every prop exports
+    /// with its original origin exactly as it did before the feature.</summary>
+    /// <summary>Sidebar "Reset pivot" — hand it back to the viewer, which
+    /// owns the pivot and will echo the cleared state back to the VM.</summary>
+    private async void OnResetPivot(object sender, RoutedEventArgs e)
     {
-        var picked = await StaFileDialogs.OpenAsync(this, dlg =>
-        {
-            dlg.Title = "Select a GTA V placement file";
-            dlg.Filter = "GTA V map placements (*.ymap)|*.ymap|All files (*.*)|*.*";
-            dlg.CheckFileExists = true;
-        });
-        if (string.IsNullOrWhiteSpace(picked)) return;
-
-        var outDir = Path.GetDirectoryName(Path.GetFullPath(picked));
-        if (string.IsNullOrEmpty(outDir)) return;
-
-        // A .ymap stores model hashes, never names, and an .ide entry needs a
-        // name. Point the engine at the configured GTA V install so stock
-        // props resolve — without it only models shipped beside the .ymap can
-        // be identified.
-        var names = Services.GtaInstall.Resolve();
-
-        _vm.StatusText = "Converting placements…";
-        Services.EngineRunner.PlacementOutcome result;
-        try
-        {
-            result = await Services.EngineRunner.ConvertYmapToWplAsync(
-                picked!, outDir, names,
-                line => Services.FosLogger.Info("wpl", line));
-        }
-        catch (Exception ex)
-        {
-            Services.FosLogger.Warn("wpl", $"ymap convert failed: {ex.Message}");
-            _vm.StatusText = $"Couldn't convert that .ymap: {ex.Message}";
-            return;
-        }
-
-        if (!result.Success)
-        {
-            _vm.StatusText = result.Error ?? "Couldn't convert that .ymap.";
-            return;
-        }
-
-        _vm.StatusText = result.IdePath != null
-            ? $"Wrote {Path.GetFileName(result.WplPath!)} and {Path.GetFileName(result.IdePath)} " +
-              "— convert the models it lists, then merge both files into your .img's .ide/.wpl."
-            : $"Wrote {Path.GetFileName(result.WplPath!)}.";
-
-        try { Process.Start(new ProcessStartInfo("explorer.exe", $"/select,\"{result.WplPath}\"") { UseShellExecute = true }); }
-        catch { /* the status line already says where it went */ }
+        if (Viewport?.CoreWebView2 == null) return;
+        try { await Viewport.CoreWebView2.ExecuteScriptAsync("window.resetPivot && window.resetPivot()"); }
+        catch (Exception ex) { Services.FosLogger.Warn("pivot", "reset failed", ex); }
     }
+
+    private string BuildPivotTranslation()
+        => _vm.HasCustomPivot
+            ? Services.PivotMath.BakeTranslationArg(
+                (_vm.PivotX, _vm.PivotY, _vm.PivotZ), _gizmoScale, _gizmoRot)
+            : "0,0,0";
 
     /// <summary>Snapshot the per-part material presets the user picked
     /// in the layers panel, keyed by the part's <see cref="MainViewModel.ModelPart.OriginalName"/>
@@ -2434,6 +2434,7 @@ public partial class MainWindow : FluentWindow
                 if (string.IsNullOrEmpty(assetName)) assetName = $"part_{i + 1}";
 
                 _vm.StatusText = $"Split {i + 1}/{parts.Count}: converting '{assetName}'...";
+                await EnsurePropAnimKeysSidecarAsync();
                 var req = BuildConvertRequest(assetName, excludeForThisPass, routeToPack: true);
                 var outcome = await runner.RunAsync(req, onLog: OnEngineLog, cancel: _convertCts.Token);
                 StopEngineStepTimer();
@@ -2583,19 +2584,6 @@ public partial class MainWindow : FluentWindow
     private void OnSidebarSplitterDragCompleted(object sender, System.Windows.Controls.Primitives.DragCompletedEventArgs e)
     {
         Services.UserSettings.SavePropsSidebarWidth(LeftSidebarColumn.ActualWidth);
-    }
-
-    /// <summary>Give the animated-keys timeline its saved (or default) height
-    /// in animated-prop mode; collapse the row to 0 otherwise so it reserves no
-    /// space for the modes that never show a timeline.</summary>
-    private void ApplyPropAnimTimelineHeight()
-        => PropAnimTimelineRow.Height = _vm.IsAnimatedPropsView
-            ? new GridLength(Services.UserSettings.LoadPropsAnimTimelineHeight())
-            : new GridLength(0);
-
-    private void OnPropAnimTimelineSplitterDragCompleted(object sender, System.Windows.Controls.Primitives.DragCompletedEventArgs e)
-    {
-        Services.UserSettings.SavePropsAnimTimelineHeight(PropAnimTimelineRow.ActualHeight);
     }
 
     // ─── PANELS sidebar dock (drag whole sidebar left/right of viewport) ──
@@ -2793,6 +2781,7 @@ public partial class MainWindow : FluentWindow
                     .Concat(_vm.DeletedPartNames)
                     .Distinct(StringComparer.Ordinal)
                     .ToList();
+                await EnsurePropAnimKeysSidecarAsync();
                 q.RequestSnapshot = BuildConvertRequest(q.AssetName, liveExcludes, routeToPack: true)
                     with { PackGroup = q.GroupName };
             }
@@ -2977,18 +2966,62 @@ public partial class MainWindow : FluentWindow
 
         bool ctrl = (Keyboard.Modifiers & ModifierKeys.Control) == ModifierKeys.Control;
         bool shift = (Keyboard.Modifiers & ModifierKeys.Shift) == ModifierKeys.Shift;
+        if (shift && _outlinerAnchor is not null && !ReferenceEquals(_outlinerAnchor, node))
+        {
+            // Everything between the last plain click and this one, in the
+            // order the tree shows it.
+            var rows = FlattenVisibleOutliner();
+            int a = rows.IndexOf(_outlinerAnchor), b = rows.IndexOf(node);
+            if (a >= 0 && b >= 0)
+            {
+                if (a > b) (a, b) = (b, a);
+                _vm.SetOutlinerSelection(rows.GetRange(a, b - a + 1), additive: false);
+                e.Handled = true;
+                return;
+            }
+        }
         if (ctrl || shift)
         {
             _vm.SetOutlinerSelection(new[] { node }, additive: true);
+            _outlinerAnchor = node;
             e.Handled = true;
         }
         else
         {
+            _outlinerAnchor = node;
             // Assert selection on every plain press — WPF's TreeView only
             // raises SelectedItemChanged when the item CHANGES, so after an
             // empty-space deselect a re-click on the same row would
             // otherwise never re-highlight.
             _vm.SetOutlinerSelection(new[] { node }, additive: false);
+        }
+    }
+
+    /// <summary>Anchor for Shift+click ranges — the last plainly-clicked row.</summary>
+    private Services.PropPackTreeNode? _outlinerAnchor;
+
+    /// <summary>Every row the tree is actually showing, top to bottom.</summary>
+    private List<Services.PropPackTreeNode> FlattenVisibleOutliner()
+    {
+        var rows = new List<Services.PropPackTreeNode>();
+        void Walk(IEnumerable<Services.PropPackTreeNode> nodes)
+        {
+            foreach (var n in nodes)
+            {
+                rows.Add(n);
+                if (n.IsExpanded) Walk(n.Children);
+            }
+        }
+        Walk(_vm.OutlinerRoots);
+        return rows;
+    }
+
+    private static IEnumerable<Services.PropPackTreeNode> AllOutlinerNodes(Services.PropPackTreeNode from)
+    {
+        foreach (var n in from.Children)
+        {
+            yield return n;
+            foreach (var inner in AllOutlinerNodes(n)) yield return inner;
         }
     }
 
@@ -3072,6 +3105,9 @@ public partial class MainWindow : FluentWindow
                 // texture panel for the newly active source.
                 _ = LoadBaseTextureGroupAsync(item.SourcePath);
                 _vm.StatusText = $"'{item.AssetName}' selected.";
+                // Animated stage: the editor binds to the layer now on the stage.
+                ResetPropAnimForNewModel();
+                if (_vm.IsAnimatedPropsView) _ = ApplyPropStageModeAsync();
                 return;
             }
         }
@@ -3348,6 +3384,19 @@ public partial class MainWindow : FluentWindow
     {
         if (sender is not FrameworkElement { Tag: Services.PropPackTreeNode node }) return;
 
+        if (node.Bone is { } bone)
+        {
+            bone.IsVisible = !bone.IsVisible;
+            return;
+        }
+        if (node.IsWorking && node.Children.FirstOrDefault()?.IsBone == true)
+        {
+            bool showAll = !node.IsEyeOn;
+            foreach (var n in AllOutlinerNodes(node))
+                if (n.Bone is { } b) b.IsVisible = showAll;
+            node.IsEyeOn = showAll;
+            return;
+        }
         if (node.Part is { } part)
         {
             part.IsVisible = !part.IsVisible;
@@ -3863,9 +3912,9 @@ public partial class MainWindow : FluentWindow
         {
             Title = "Add props to convert queue",
             Multiselect = true,
-            Filter = "3D models (*.obj;*.glb;*.gltf;*.fbx;*.dae;*.ply;*.stl;*.ydr;*.package)|" +
-                     "*.obj;*.glb;*.gltf;*.fbx;*.dae;*.ply;*.stl;*.ydr;*.package|" +
-                     "GTA V drawable (*.ydr)|*.ydr|" +
+            Filter = "3D models (*.obj;*.glb;*.gltf;*.fbx;*.dae;*.ply;*.stl;*.ydr;*.yft;*.ydd;*.package)|" +
+                     "*.obj;*.glb;*.gltf;*.fbx;*.dae;*.ply;*.stl;*.ydr;*.yft;*.ydd;*.package|" +
+                     "GTA V model (*.ydr;*.yft;*.ydd)|*.ydr;*.yft;*.ydd|" +
                      "Sims 4 package (*.package)|*.package|" +
                      "All files (*.*)|*.*"
         };
@@ -4036,15 +4085,13 @@ public partial class MainWindow : FluentWindow
         _vm.HasModel = false;
         _vm.IsModelLoading = false;
         _vm.SourcePath = null;
-        // Clear the .ydr override too, or a later convert would still read a
-        // drawable the user has already cleared out of the workspace.
-        _vm.ConvertSourcePath = null;
         _vm.PropName = string.Empty;
         _vm.ResultZipPath = null;
         _vm.Verts = 0;
         _vm.Tris = 0;
         ClearPartDiffuseOverrides();
         ClearModelTexturePreview();
+        ResetPropAnimForNewModel();
         _ = ClearViewerAsync();
         _vm.StatusText = "Ready — drop a 3D file or use File → Open";
     }
@@ -4056,9 +4103,9 @@ public partial class MainWindow : FluentWindow
         var dlg = new OpenFileDialog
         {
             Title = "Open 3D model",
-            Filter = "3D models (*.obj;*.glb;*.gltf;*.fbx;*.dae;*.ply;*.stl;*.ydr;*.package)|" +
-                     "*.obj;*.glb;*.gltf;*.fbx;*.dae;*.ply;*.stl;*.ydr;*.package|" +
-                     "GTA V drawable (*.ydr)|*.ydr|" +
+            Filter = "3D models (*.obj;*.glb;*.gltf;*.fbx;*.dae;*.ply;*.stl;*.ydr;*.yft;*.ydd;*.package)|" +
+                     "*.obj;*.glb;*.gltf;*.fbx;*.dae;*.ply;*.stl;*.ydr;*.yft;*.ydd;*.package|" +
+                     "GTA V model (*.ydr;*.yft;*.ydd)|*.ydr;*.yft;*.ydd|" +
                      "Sims 4 package (*.package)|*.package|" +
                      "All files (*.*)|*.*"
         };
@@ -4066,43 +4113,55 @@ public partial class MainWindow : FluentWindow
             TryLoad(dlg.FileName);
     }
 
+    /// <summary>Fire-and-forget entry used by drag/drop, menus and dialogs.
+    /// Exceptions surface exactly as before (async void → dispatcher).</summary>
     private async void TryLoad(string path, string? displayNameOverride = null)
+        => await TryLoadAsync(path, displayNameOverride);
+
+    /// <summary>Load a model into the workspace. Returns true once the file
+    /// has been previewed and handed to the viewer, false when it was rejected
+    /// or failed before that — callers that keep a busy state (the Game tab)
+    /// await this rather than the void wrapper.</summary>
+    private async Task<bool> TryLoadAsync(string path, string? displayNameOverride = null)
     {
         Services.FosLogger.Info("load", $"TryLoad start: {path}");
         if (!File.Exists(path))
         {
             Services.FosLogger.Warn("load", $"file not found: {path}");
             _vm.StatusText = $"File not found: {path}";
-            return;
+            return false;
         }
         if (!IsSupported(path))
         {
             Services.FosLogger.Warn("load", $"unsupported format: {Path.GetExtension(path)}");
             _vm.StatusText = $"Unsupported format: {Path.GetExtension(path)}";
-            return;
+            return false;
         }
 
-        // A GTA V drawable is previewed through a generated .glb, but the
-        // EXPORT still reads the .ydr itself — the engine's native importer
-        // keeps vertex colours, tangents and the source shader names that a
-        // .glb round trip would discard. ConvertSourcePath carries the .ydr
-        // forward while the viewport gets the .glb.
-        _vm.ConvertSourcePath = null;
-        if (string.Equals(Path.GetExtension(path), ".ydr", System.StringComparison.OrdinalIgnoreCase))
+        // A GTA V model (.ydr drawable, .yft fragment, .ydd dictionary) is
+        // imported through a generated .glb, textured from any .ytd beside it.
+        // Both the viewport and the exporter read that .glb — the engine
+        // imports mesh formats, not RAGE resources.
+        var gameExt = Path.GetExtension(path).ToLowerInvariant();
+        if (gameExt is ".ydr" or ".yft" or ".ydd")
         {
             displayNameOverride ??= Path.GetFileNameWithoutExtension(path);
-            _vm.StatusText = "Reading GTA V drawable…";
-            var ydrPath = path;
-            var preview = await Task.Run(() => Services.YdrPreviewImporter.Import(ydrPath));
+            _vm.StatusText = gameExt switch
+            {
+                ".yft" => "Reading GTA V fragment…",
+                ".ydd" => "Reading GTA V drawable dictionary…",
+                _ => "Reading GTA V drawable…",
+            };
+            var gamePath = path;
+            var preview = await Task.Run(() => Services.YdrPreviewImporter.Import(gamePath));
             if (!preview.Success || preview.GlbPath is null)
             {
-                Services.FosLogger.Warn("load", $"ydr preview failed: {preview.Error}");
-                _vm.StatusText = preview.Error ?? "Couldn't read that .ydr.";
-                return;
+                Services.FosLogger.Warn("load", $"{gameExt} preview failed: {preview.Error}");
+                _vm.StatusText = preview.Error ?? $"Couldn't read that {gameExt}.";
+                return false;
             }
             Services.FosLogger.Info("load",
-                $"ydr preview: {preview.MeshCount} mesh(es), {preview.TriangleCount} tris → {preview.GlbPath}");
-            _vm.ConvertSourcePath = ydrPath;
+                $"{gameExt} preview: {preview.DrawableCount} drawable(s), {preview.MeshCount} mesh(es), {preview.TriangleCount} tris, {preview.TextureCount} texture(s) → {preview.GlbPath}");
             path = preview.GlbPath;
         }
 
@@ -4117,7 +4176,7 @@ public partial class MainWindow : FluentWindow
             {
                 Services.FosLogger.Warn("load", $"sims unpack failed: {sims.Error}");
                 _vm.StatusText = sims.Error?.Replace('\n', ' ') ?? "Couldn't read that Sims package.";
-                return;
+                return false;
             }
             Services.FosLogger.Info("load",
                 $"sims unpack: {sims.MeshCount} mesh(es), {sims.TriangleCount} tris, " +
@@ -4170,13 +4229,14 @@ public partial class MainWindow : FluentWindow
         // Pull source diffuse maps into one "Base Texture" library row.
         _ = LoadBaseTextureGroupAsync(path);
 
+        // A new model: whatever was keyed belonged to the old one.
+        ResetPropAnimForNewModel();
+
         // Auto-switch Assets → Animated when the file ships animation clips.
         var hasAnim = await Task.Run(() => SourceFileHasAnimation(path));
         if (hasAnim)
         {
             _vm.ExportMode = ExportMode.Prop;
-            _vm.AnimatedProp = true;
-            _vm.EnsureDefaultPropAnimKeys();
             _vm.ActiveView = AppView.AnimatedProps;
         }
 
@@ -4211,7 +4271,9 @@ public partial class MainWindow : FluentWindow
             _vm.HasModel = false;
             _vm.IsModelLoading = false;
             _vm.StatusText = $"Failed to stage model: {ex.Message}";
+            return false;
         }
+        return true;
     }
 
     /// <summary>True when Assimp finds at least one animation clip — used
@@ -4352,12 +4414,14 @@ public partial class MainWindow : FluentWindow
                 .Concat(_vm.DeletedPartNames)
                 .Distinct(StringComparer.Ordinal)
                 .ToList();
+            await EnsurePropAnimKeysSidecarAsync();
             var snapshot = BuildConvertRequest(stem, excludeMeshes, routeToPack: true);
             item = _vm.PackSession.EnqueueConvertSnapshot(_vm.SourcePath!, stem, null, snapshot);
             _vm.StatusText = $"'{stem}' kept as a layer.";
         }
 
         var id = System.Text.Json.JsonSerializer.Serialize(item.AssetName);
+        await PropAnimBeforeParkAsync();
         try
         {
             await Viewport.CoreWebView2.ExecuteScriptAsync(
@@ -5242,6 +5306,7 @@ public partial class MainWindow : FluentWindow
             .Concat(_vm.DeletedPartNames)
             .Distinct(System.StringComparer.Ordinal)
             .ToList();
+        await EnsurePropAnimKeysSidecarAsync();
         var baseReq = BuildConvertRequest(_vm.PropName, excludeMeshes, routeToPack: false);
 
         _vm.IsConverting = true;
@@ -6411,6 +6476,9 @@ public partial class MainWindow : FluentWindow
     private async Task LoadPreviewInViewerAsync(string path)
     {
         if (!File.Exists(path)) return;
+        // The hot swap clears the model (and the bone editor with it): keep
+        // the keys so the Animated stage picks them up on the new mesh.
+        if (_vm.IsAnimatedPropsView) await StashPropAnimSessionAsync();
         _inPreviewReload = true;
         _vm.IsModelLoading = true;
         try
@@ -6671,279 +6739,4 @@ public partial class MainWindow : FluentWindow
     }
 
     // ── Animated props keys timeline ────────────────────────────────
-
-    private readonly TimelineController _propAnimCtl = new();
-    private DispatcherTimer? _propAnimPlayTimer;
-    private bool _propAnimScrubbing;
-    private bool _propAnimDraggingKey;
-    private PropAnimKey? _propAnimDragKey;
-    private bool _propAnimTimelineHooked;
-
-    private void EnsurePropAnimTimelineHooks()
-    {
-        if (_propAnimTimelineHooked) return;
-        _propAnimTimelineHooked = true;
-        if (PropAnimTimelineLayer != null)
-            PropAnimTimelineLayer.RenderCallback = DrawPropAnimTimeline;
-        _propAnimCtl.Changed += () => PropAnimTimelineLayer?.InvalidateVisual();
-        _vm.PropAnimKeys.CollectionChanged += (_, _) =>
-        {
-            _vm.NotifyPropAnimKeysChanged();
-            PropAnimTimelineLayer?.InvalidateVisual();
-        };
-        _vm.PropertyChanged += (_, e) =>
-        {
-            if (e.PropertyName is nameof(MainViewModel.PropAnimPlayhead)
-                or nameof(MainViewModel.PropAnimDuration)
-                or nameof(MainViewModel.IsAnimatedPropsView)
-                or nameof(MainViewModel.PropAnimPlayheadLabel))
-                PropAnimTimelineLayer?.InvalidateVisual();
-            if (e.PropertyName == nameof(MainViewModel.IsPropAnimPlaying))
-                UpdatePropAnimPlayIcon();
-        };
-    }
-
-    /// <summary>Write timeline keys to a temp JSON sidecar for the engine,
-    /// or null when not in Animated mode / fewer than 2 keys.</summary>
-    private string? WritePropAnimKeysSidecar()
-    {
-        if (!_vm.IsAnimatedPropsView) return null;
-        _vm.EnsureDefaultPropAnimKeys();
-        if (_vm.PropAnimKeys.Count < 2) return null;
-        try
-        {
-            var dir = Path.Combine(Path.GetTempPath(), "FiveOS");
-            Directory.CreateDirectory(dir);
-            var path = Path.Combine(dir, $"anim-keys-{Guid.NewGuid():N}.json");
-            var payload = new
-            {
-                fps = _vm.PropAnimFps,
-                duration = _vm.PropAnimDuration,
-                keys = _vm.PropAnimKeys
-                    .OrderBy(k => k.Time)
-                    .Select(k => new { t = k.Time, rx = k.RotX, ry = k.RotY, rz = k.RotZ })
-                    .ToList(),
-            };
-            File.WriteAllText(path, System.Text.Json.JsonSerializer.Serialize(payload));
-            return path;
-        }
-        catch (Exception ex)
-        {
-            Services.FosLogger.Warn("anim", "anim-keys sidecar failed: " + ex.Message);
-            return null;
-        }
-    }
-
-    private void DrawPropAnimTimeline(System.Windows.Media.DrawingContext dc)
-    {
-        EnsurePropAnimTimelineHooks();
-        var canvas = PropAnimTimelineCanvas;
-        if (canvas == null) return;
-        double w = canvas.ActualWidth;
-        double h = canvas.ActualHeight;
-        if (w < 8 || h < 8) return;
-
-        double dur = Math.Max(0.1, _vm.PropAnimDuration);
-        _propAnimCtl.ClampScroll(dur);
-
-        var bg = new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(0x1A, 0x1A, 0x1A));
-        bg.Freeze();
-        dc.DrawRectangle(bg, null, new Rect(0, 0, w, h));
-
-        var tickPen = new System.Windows.Media.Pen(
-            new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(0x55, 0x55, 0x55)), 1);
-        tickPen.Freeze();
-        var labelBrush = new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(0x9A, 0x9A, 0x9A));
-        labelBrush.Freeze();
-
-        double rulerH = 22;
-        double laneTop = rulerH + 4;
-        double laneH = Math.Max(16, h - laneTop - 8);
-
-        // Major ticks every 0.5s (or 1s when zoomed out).
-        double step = _propAnimCtl.Zoom < 2 ? 1.0 : 0.5;
-        double t0 = Math.Floor(_propAnimCtl.ScrollOffset / step) * step;
-        for (double t = t0; t <= _propAnimCtl.ScrollOffset + _propAnimCtl.VisibleDuration(dur) + step; t += step)
-        {
-            if (t < -1e-6 || t > dur + 1e-6) continue;
-            double x = _propAnimCtl.TimeToX(t, dur, w);
-            dc.DrawLine(tickPen, new System.Windows.Point(x, 0), new System.Windows.Point(x, rulerH));
-            var ft = new System.Windows.Media.FormattedText(
-                t.ToString("0.#", System.Globalization.CultureInfo.InvariantCulture) + "s",
-                System.Globalization.CultureInfo.InvariantCulture,
-                FlowDirection.LeftToRight,
-                new System.Windows.Media.Typeface("Segoe UI"),
-                10, labelBrush, 1.25);
-            dc.DrawText(ft, new System.Windows.Point(x + 3, 3));
-        }
-
-        // Key lane background
-        var laneBrush = new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(0x25, 0x25, 0x25));
-        laneBrush.Freeze();
-        dc.DrawRoundedRectangle(laneBrush, null, new Rect(8, laneTop, w - 16, laneH), 3, 3);
-
-        var keyFill = new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(0x5B, 0xBF, 0xB5));
-        keyFill.Freeze();
-        var keyStroke = new System.Windows.Media.Pen(
-            new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(0xE0, 0xE0, 0xE0)), 1);
-        keyStroke.Freeze();
-
-        double midY = laneTop + laneH * 0.5;
-        foreach (var key in _vm.PropAnimKeys)
-        {
-            double x = _propAnimCtl.TimeToX(key.Time, dur, w);
-            var geo = new System.Windows.Media.StreamGeometry();
-            using (var ctx = geo.Open())
-            {
-                ctx.BeginFigure(new System.Windows.Point(x, midY - 7), true, true);
-                ctx.LineTo(new System.Windows.Point(x + 6, midY), true, false);
-                ctx.LineTo(new System.Windows.Point(x, midY + 7), true, false);
-                ctx.LineTo(new System.Windows.Point(x - 6, midY), true, false);
-            }
-            geo.Freeze();
-            dc.DrawGeometry(keyFill, keyStroke, geo);
-        }
-
-        // Playhead
-        double px = _propAnimCtl.TimeToX(_vm.PropAnimPlayhead, dur, w);
-        var playPen = new System.Windows.Media.Pen(
-            new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(0xFF, 0xC8, 0x57)), 1.5);
-        playPen.Freeze();
-        dc.DrawLine(playPen, new System.Windows.Point(px, 0), new System.Windows.Point(px, h));
-        var head = new System.Windows.Media.StreamGeometry();
-        using (var ctx = head.Open())
-        {
-            ctx.BeginFigure(new System.Windows.Point(px - 5, 0), true, true);
-            ctx.LineTo(new System.Windows.Point(px + 5, 0), true, false);
-            ctx.LineTo(new System.Windows.Point(px, 8), true, false);
-        }
-        head.Freeze();
-        dc.DrawGeometry(playPen.Brush, null, head);
-    }
-
-    private void OnPropAnimTimelineSizeChanged(object sender, SizeChangedEventArgs e)
-    {
-        EnsurePropAnimTimelineHooks();
-        PropAnimTimelineLayer?.InvalidateVisual();
-    }
-
-    private void OnPropAnimTimelineDown(object sender, MouseButtonEventArgs e)
-    {
-        EnsurePropAnimTimelineHooks();
-        var canvas = PropAnimTimelineCanvas;
-        if (canvas == null) return;
-        canvas.CaptureMouse();
-        var pos = e.GetPosition(canvas);
-        double dur = Math.Max(0.1, _vm.PropAnimDuration);
-        double t = _propAnimCtl.SnapTime(_propAnimCtl.XToTime(pos.X, dur, canvas.ActualWidth), _vm.PropAnimFps);
-
-        // Hit-test nearest key within ~8px
-        PropAnimKey? hit = null;
-        double best = 10;
-        foreach (var key in _vm.PropAnimKeys)
-        {
-            double kx = _propAnimCtl.TimeToX(key.Time, dur, canvas.ActualWidth);
-            double d = Math.Abs(kx - pos.X);
-            if (d < best) { best = d; hit = key; }
-        }
-
-        if (hit != null && e.ClickCount == 1)
-        {
-            _propAnimDraggingKey = true;
-            _propAnimDragKey = hit;
-            _vm.PropAnimPlayhead = hit.Time;
-        }
-        else
-        {
-            _propAnimScrubbing = true;
-            _vm.PropAnimPlayhead = Math.Clamp(t, 0, dur);
-            _vm.ApplyPropAnimPlayheadToTransform();
-        }
-        PropAnimTimelineLayer?.InvalidateVisual();
-        e.Handled = true;
-    }
-
-    private void OnPropAnimTimelineMove(object sender, MouseEventArgs e)
-    {
-        if (!_propAnimScrubbing && !_propAnimDraggingKey) return;
-        var canvas = PropAnimTimelineCanvas;
-        if (canvas == null) return;
-        var pos = e.GetPosition(canvas);
-        double dur = Math.Max(0.1, _vm.PropAnimDuration);
-        double t = _propAnimCtl.SnapTime(_propAnimCtl.XToTime(pos.X, dur, canvas.ActualWidth), _vm.PropAnimFps);
-        t = Math.Clamp(t, 0, dur);
-        if (_propAnimDraggingKey && _propAnimDragKey != null)
-        {
-            _propAnimDragKey.Time = t;
-            _vm.PropAnimPlayhead = t;
-        }
-        else
-        {
-            _vm.PropAnimPlayhead = t;
-            _vm.ApplyPropAnimPlayheadToTransform();
-        }
-        PropAnimTimelineLayer?.InvalidateVisual();
-    }
-
-    private void OnPropAnimTimelineUp(object sender, MouseEventArgs e)
-    {
-        if (_propAnimDraggingKey)
-            _vm.SortPropAnimKeys();
-        _propAnimScrubbing = false;
-        _propAnimDraggingKey = false;
-        _propAnimDragKey = null;
-        PropAnimTimelineCanvas?.ReleaseMouseCapture();
-        PropAnimTimelineLayer?.InvalidateVisual();
-    }
-
-    private void OnPropAnimPlayToggle(object sender, RoutedEventArgs e)
-    {
-        EnsurePropAnimTimelineHooks();
-        if (_vm.IsPropAnimPlaying)
-        {
-            StopPropAnimPlayback();
-            return;
-        }
-        _vm.EnsureDefaultPropAnimKeys();
-        _vm.IsPropAnimPlaying = true;
-        _propAnimPlayTimer ??= new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(33) };
-        _propAnimPlayTimer.Tick -= OnPropAnimPlayTick;
-        _propAnimPlayTimer.Tick += OnPropAnimPlayTick;
-        _propAnimPlayTimer.Start();
-        UpdatePropAnimPlayIcon();
-    }
-
-    private void OnPropAnimPlayTick(object? sender, EventArgs e)
-    {
-        double dur = Math.Max(0.1, _vm.PropAnimDuration);
-        _vm.PropAnimPlayhead += 0.033;
-        if (_vm.PropAnimPlayhead >= dur)
-            _vm.PropAnimPlayhead = 0;
-        _vm.ApplyPropAnimPlayheadToTransform();
-        _propAnimCtl.EnsurePlayheadVisible(_vm.PropAnimPlayhead, dur, PropAnimTimelineCanvas?.ActualWidth ?? 400);
-        PropAnimTimelineLayer?.InvalidateVisual();
-    }
-
-    private void OnPropAnimStop(object sender, RoutedEventArgs e)
-    {
-        StopPropAnimPlayback();
-        _vm.PropAnimPlayhead = 0;
-        _vm.ApplyPropAnimPlayheadToTransform();
-        PropAnimTimelineLayer?.InvalidateVisual();
-    }
-
-    private void StopPropAnimPlayback()
-    {
-        _propAnimPlayTimer?.Stop();
-        _vm.IsPropAnimPlaying = false;
-        UpdatePropAnimPlayIcon();
-    }
-
-    private void UpdatePropAnimPlayIcon()
-    {
-        if (PropAnimPlayIcon == null) return;
-        PropAnimPlayIcon.Symbol = _vm.IsPropAnimPlaying
-            ? Wpf.Ui.Controls.SymbolRegular.Pause24
-            : Wpf.Ui.Controls.SymbolRegular.Play24;
-    }
 }

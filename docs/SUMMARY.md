@@ -5,6 +5,8 @@
 ## Guides
 
 * [Vehicles → FiveM](VEHICLES.md)
+* [Vehicle Anim → .ycd](VEHICLE_ANIM.md)
+* [Animated props](PROP_ANIM.md)
 * [3D Model → FiveM](3D_MODEL.md)
 * [Optimize](OPTIMIZE.md)
 * [Mods → RPF](RPF.md)

@@ -89,13 +89,6 @@ public static class UserSettings
         /// = auto-detect (Steam / common paths).</summary>
         public string? GtaFolder { get; set; }
 
-        /// <summary>Path to the external GTA IV resource compiler
-        /// (ResourceBuilder.exe), or its folder. Null = let the engine
-        /// auto-detect. Without it a GTA IV export still produces the
-        /// editable OpenFormats source and its collision, just not the
-        /// compiled .wdr.</summary>
-        public string? IvResourceBuilderPath { get; set; }
-
         public string? ReferenceModelPath { get; set; }
         public bool ShowReferencePed { get; set; } = true;
 
@@ -168,6 +161,9 @@ public static class UserSettings
         /// "Add to RPEmotes" export (remembered across sessions).</summary>
         public string? RpEmotesFolder { get; set; }
 
+        /// <summary>Vehicle Anim editor: where exported clip resources go.</summary>
+        public string? VehicleAnimOutputFolder { get; set; }
+
         /// <summary>FiveOS Cloud Motion API base URL (e.g. http://localhost:5216).</summary>
         public string? MotionCloudBaseUrl { get; set; }
 
@@ -189,6 +185,9 @@ public static class UserSettings
         /// <summary>Props editor panel order per stack key
         /// ("props-left", "props-right"). Values are panel ids.</summary>
         public Dictionary<string, List<string>>? PanelOrders { get; set; }
+
+        /// <summary>Panels the user folded shut, as "&lt;stackKey&gt;:&lt;panelId&gt;".</summary>
+        public List<string>? CollapsedPanels { get; set; }
 
         /// <summary>Left inspector column width in the Props editor.</summary>
         public double PropsSidebarWidth { get; set; }
@@ -355,6 +354,24 @@ public static class UserSettings
         Write(b);
     }
 
+    /// <summary>Whether this sidebar panel is folded shut.</summary>
+    public static bool LoadPanelCollapsed(string stackKey, string panelId)
+    {
+        var list = Read().CollapsedPanels;
+        return list is { Count: > 0 } && list.Contains($"{stackKey}:{panelId}", StringComparer.OrdinalIgnoreCase);
+    }
+
+    public static void SavePanelCollapsed(string stackKey, string panelId, bool collapsed)
+    {
+        if (string.IsNullOrWhiteSpace(stackKey) || string.IsNullOrWhiteSpace(panelId)) return;
+        var b = Read();
+        b.CollapsedPanels ??= new List<string>();
+        var key = $"{stackKey}:{panelId}";
+        b.CollapsedPanels.RemoveAll(k => string.Equals(k, key, StringComparison.OrdinalIgnoreCase));
+        if (collapsed) b.CollapsedPanels.Add(key);
+        Write(b);
+    }
+
     public static double LoadPropsSidebarWidth() => Read().PropsSidebarWidth;
 
     public static void SavePropsSidebarWidth(double width)
@@ -501,6 +518,15 @@ public static class UserSettings
         Write(b);
     }
 
+    public static string? LoadVehicleAnimOutputFolder() => Read().VehicleAnimOutputFolder;
+
+    public static void SaveVehicleAnimOutputFolder(string? folder)
+    {
+        var b = Read();
+        b.VehicleAnimOutputFolder = string.IsNullOrWhiteSpace(folder) ? null : folder;
+        Write(b);
+    }
+
     public static void SaveWorkspaceSession(
         IEnumerable<WorkspaceSessionTabBlob> tabs,
         int activeIndex,
@@ -561,16 +587,6 @@ public static class UserSettings
     {
         var b = Read();
         b.GtaFolder = string.IsNullOrWhiteSpace(folder) ? null : folder;
-        Write(b);
-    }
-
-    /// <summary>Path to the GTA IV resource compiler, or null to let the
-    /// engine look for it. Accepts the .exe itself or the folder holding it.</summary>
-    public static string? LoadIvResourceBuilderPath() => Read().IvResourceBuilderPath;
-    public static void SaveIvResourceBuilderPath(string? path)
-    {
-        var b = Read();
-        b.IvResourceBuilderPath = string.IsNullOrWhiteSpace(path) ? null : path;
         Write(b);
     }
 

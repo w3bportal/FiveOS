@@ -15,8 +15,8 @@ Report bugs on [Discord](https://discord.gg/GEXUCC6TJ6) or [GitHub Issues](https
 
 ## Features
 
-- **Vehicles** — SP add-on cars to FiveM resources; shrink heavy files
-- **3D Model** — .fbx / .glb / .obj / etc. to props
+- **Vehicles** — SP add-on cars to FiveM resources; shrink heavy files; animate doors, bonnet and bones on the real model and export a .ycd
+- **3D Model** — .fbx / .glb / .obj / etc. to props; animate their parts (doors, fans, arms) and export a moving prop
 - **Optimize** — shrink models & textures for better FPS
 - **Mods to RPF** — pack mods, build SP peds, replace stock assets
 - **Emotes** — pose / import animation to dpemotes-ready pack

@@ -79,6 +79,9 @@ __pycache__/
 # Preview videos hosted on GitHub Releases
 docs/videos/
 
+# ── Retired features, kept on disk only (see archive/*/README.md) ─
+/archive/
+
 # ── Internal dev diagnostics & smoke tests (local only, not shipped) ─
 /dev/tests/
 /dev/smoketest/

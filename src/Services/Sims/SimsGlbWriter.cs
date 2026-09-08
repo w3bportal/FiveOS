@@ -36,6 +36,12 @@ public static class SimsGlbWriter
         var gltfMeshes = new List<object>();
         var nodes = new List<object>();
         var nodeIndices = new List<int>();
+        var images = new List<object>();
+        var textures = new List<object>();
+        var materials = new List<object>();
+        // Texture file → material index. Meshes sharing a diffuse share one
+        // material (and one embedded copy of the image).
+        var materialByTexture = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
 
         int AddView(int byteOffset, int byteLength, int? target)
         {
@@ -72,6 +78,50 @@ public static class SimsGlbWriter
         void Align()
         {
             while (bin.Length % 4 != 0) bin.WriteByte(0);
+        }
+
+        // Embed a PNG/JPEG straight into the BIN chunk and wrap it in an
+        // image → texture → material chain. Returns null when the file can't
+        // be read, in which case the mesh just ships untextured.
+        int? MaterialFor(string? texturePath)
+        {
+            if (string.IsNullOrWhiteSpace(texturePath)) return null;
+            if (materialByTexture.TryGetValue(texturePath, out var existing)) return existing;
+
+            byte[] bytes;
+            try { bytes = File.ReadAllBytes(texturePath); }
+            catch { return null; }
+            if (bytes.Length < 8) return null;
+
+            var ext = Path.GetExtension(texturePath).ToLowerInvariant();
+            var mime = ext is ".jpg" or ".jpeg" ? "image/jpeg" : "image/png";
+
+            Align();
+            var off = (int)bin.Length;
+            bin.Write(bytes, 0, bytes.Length);
+            var view = AddView(off, bytes.Length, null);
+
+            images.Add(new Dictionary<string, object>
+            {
+                ["name"] = Path.GetFileNameWithoutExtension(texturePath),
+                ["mimeType"] = mime,
+                ["bufferView"] = view,
+            });
+            textures.Add(new Dictionary<string, object> { ["source"] = images.Count - 1 });
+            materials.Add(new Dictionary<string, object>
+            {
+                ["name"] = Path.GetFileNameWithoutExtension(texturePath),
+                ["pbrMetallicRoughness"] = new Dictionary<string, object>
+                {
+                    ["baseColorTexture"] = new Dictionary<string, object> { ["index"] = textures.Count - 1 },
+                    ["metallicFactor"] = 0.0,
+                    ["roughnessFactor"] = 0.9,
+                },
+                ["doubleSided"] = true,
+            });
+            var idx = materials.Count - 1;
+            materialByTexture[texturePath] = idx;
+            return idx;
         }
 
         foreach (var mesh in meshes)
@@ -127,18 +177,21 @@ public static class SimsGlbWriter
                 AddView(idxOffset, (int)bin.Length - idxOffset, 34963),
                 ComponentUInt, mesh.Indices.Count, "SCALAR");
 
+            var primitive = new Dictionary<string, object>
+            {
+                ["attributes"] = attributes,
+                ["indices"] = idxAccessor,
+                ["mode"] = 4,   // triangles
+            };
+            // Only meshes with UVs can be textured — a material without
+            // TEXCOORD_0 is a glTF validation error, not just a no-op.
+            if (attributes.ContainsKey("TEXCOORD_0") && MaterialFor(mesh.TexturePath) is int material)
+                primitive["material"] = material;
+
             gltfMeshes.Add(new Dictionary<string, object>
             {
                 ["name"] = string.IsNullOrWhiteSpace(mesh.Name) ? $"mesh{gltfMeshes.Count}" : mesh.Name,
-                ["primitives"] = new[]
-                {
-                    new Dictionary<string, object>
-                    {
-                        ["attributes"] = attributes,
-                        ["indices"] = idxAccessor,
-                        ["mode"] = 4,   // triangles
-                    },
-                },
+                ["primitives"] = new[] { primitive },
             });
 
             nodes.Add(new Dictionary<string, object>
@@ -163,6 +216,12 @@ public static class SimsGlbWriter
             ["bufferViews"] = bufferViews,
             ["buffers"] = new[] { new Dictionary<string, object> { ["byteLength"] = binBytes.Length } },
         };
+        if (materials.Count > 0)
+        {
+            gltf["images"] = images;
+            gltf["textures"] = textures;
+            gltf["materials"] = materials;
+        }
 
         var json = JsonSerializer.SerializeToUtf8Bytes(gltf);
         var jsonPad = (4 - json.Length % 4) % 4;

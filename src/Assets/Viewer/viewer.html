@@ -42,6 +42,10 @@
   #empty.hidden { display: none; }
 
   /* Gizmo mode toolbar (top-left, over the viewport) */
+  /* The bone editor owns the stage while it is up (body.vanim). The model
+     loader re-shows this bar on every load, so hiding it by rule beats
+     racing that: no ordering can leave it on top of the editor. */
+  body.vanim #gizmo-bar { display: none !important; }
   #gizmo-bar {
     position: absolute; top: 8px; left: 8px;
     background: rgba(37, 37, 38, 0.92);
@@ -362,6 +366,90 @@
     box-shadow: 0 0 0 1px var(--pose-accent);
   }
   #pose-hud input[type="range"]:active::-webkit-slider-thumb { cursor: grabbing; }
+
+  /* ── Vehicle Animation editor (Vehicles tab, Animate mode) ────────
+     Styled after the Emotes timeline: #1F1F1F body, #2B2B2B transport,
+     26x24 palette buttons (#3D3D3D, hover #4D4D4D, active = accent). */
+  body.vanim #viewport { bottom: 168px; }
+  #vanim-ui.hidden { display: none; }
+  #vanim-hud {
+    position: absolute; top: 10px; left: 10px; z-index: 12;
+    display: flex; flex-direction: column; gap: 3px;
+  }
+  #vanim-hud .vbtn {
+    width: 30px; height: 30px; border-radius: 4px; border: 1px solid #363636;
+    background: rgba(38,38,38,0.94); color: #bfbfbf; cursor: pointer;
+    display: flex; align-items: center; justify-content: center; padding: 0;
+  }
+  #vanim-hud .vbtn:hover { background: #3d3d3d; }
+  #vanim-hud .vbtn.active { background: var(--pose-accent); border-color: transparent; color: #fff; }
+  #vanim-hud .vbtn svg { width: 15px; height: 15px; }
+  #vanim-sel {
+    position: absolute; top: 10px; left: 48px; z-index: 12; white-space: nowrap;
+    font: 11px "Segoe UI", system-ui, sans-serif; color: #cccccc;
+    background: rgba(38,38,38,0.94); border: 1px solid #363636; border-radius: 4px; padding: 6px 9px;
+  }
+  #vanim-sel.hidden { display: none; }
+  #vanim-sel .dim { color: #858585; }
+  #vanim-timeline {
+    position: absolute; left: 0; right: 0; bottom: 0; height: 168px; z-index: 12;
+    background: #1f1f1f; border-top: 1px solid #2f2f2f;
+    display: flex; flex-direction: column; user-select: none;
+    font: 12px "Segoe UI", system-ui, sans-serif; color: #cccccc;
+  }
+  #vanim-transport {
+    height: 34px; flex: 0 0 34px; display: flex; align-items: center; gap: 2px;
+    padding: 0 8px; background: #2b2b2b; border-bottom: 1px solid #1a1a1a;
+  }
+  #vanim-transport .tbtn {
+    width: 26px; height: 24px; margin: 0 1px; padding: 0; border: 0; border-radius: 2px;
+    background: #3d3d3d; color: #bfbfbf; cursor: pointer; display: inline-flex;
+    align-items: center; justify-content: center; font: 12px "Segoe UI", system-ui, sans-serif;
+  }
+  #vanim-transport .tbtn:hover { background: #4d4d4d; }
+  #vanim-transport .tbtn:active, #vanim-transport .tbtn.on { background: var(--pose-accent); color: #fff; }
+  #vanim-transport .tbtn.wide { width: auto; padding: 0 8px; }
+  #vanim-transport .tbtn.danger.on { background: #bd4a4a; }
+  #vanim-transport .tbtn svg { width: 12px; height: 12px; fill: currentColor; }
+  #vanim-transport .sep { width: 1px; height: 18px; background: #454545; margin: 0 7px; }
+  #vanim-transport .lbl { color: #8a8a8a; font-size: 11px; margin: 0 4px 0 6px; }
+  #vanim-transport input, #vanim-transport select {
+    background: #4d4d4d; border: 0; color: #cccccc; border-radius: 3px; height: 24px;
+    font: 12px "Segoe UI", system-ui, sans-serif; padding: 0 6px;
+  }
+  #vanim-transport input[type=number] { width: 44px; text-align: center; }
+  #vanim-transport input:focus, #vanim-transport select:focus { outline: 1px solid var(--pose-accent); }
+  #vanim-frame {
+    background: #4d4d4d; border-radius: 3px; height: 24px; line-height: 24px; padding: 0 10px;
+    margin: 0 2px 0 6px; min-width: 96px; text-align: center; color: #cccccc;
+    font: 12px ui-monospace, "Cascadia Mono", Consolas, monospace;
+  }
+  #vanim-split-bar {
+    position: absolute; bottom: 180px; left: 50%; transform: translateX(-50%);
+    background: rgba(37, 37, 38, 0.94); border: 1px solid var(--vscode-border); border-radius: 6px;
+    padding: 5px 6px 5px 10px; display: none; align-items: center; gap: 8px; z-index: 20;
+    backdrop-filter: blur(6px); box-shadow: 0 4px 16px rgba(0,0,0,.35);
+    font: 12px "Segoe UI", system-ui, sans-serif; color: #cccccc; white-space: nowrap;
+  }
+  #vanim-split-bar.visible { display: flex; }
+  #vanim-split-bar .sb-dot { width: 9px; height: 9px; border-radius: 50%; background: #f59e0b; flex-shrink: 0; }
+  #vanim-split-bar .dim { color: #858585; }
+  #vanim-split-bar .sb-btn {
+    background: transparent; border: 1px solid var(--vscode-border); color: #cccccc; border-radius: 3px;
+    padding: 4px 9px; cursor: pointer; font: 11px "Segoe UI", system-ui, sans-serif;
+  }
+  #vanim-split-bar .sb-btn:hover { background: var(--vscode-hover); }
+  #vanim-split-bar .sb-btn.primary { background: var(--pose-accent); border-color: transparent; color: #fff; }
+  #vanim-split-bar .sb-btn.primary:disabled { opacity: .45; cursor: default; }
+  #vanim-split-bar .sb-close { background: transparent; border: 0; color: #858585; font-size: 16px; cursor: pointer; padding: 0 4px; }
+  #vanim-split-bar .sb-close:hover { color: #fff; }
+  #vanim-ruler { display: block; height: 22px; flex: 0 0 22px; width: 100%; cursor: ew-resize; }
+  #vanim-rows { flex: 1 1 auto; overflow-y: auto; overflow-x: hidden; position: relative; }
+  #vanim-rows canvas { display: block; width: 100%; }
+  #vanim-empty {
+    position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
+    color: #6f6f6f; font-size: 11px; pointer-events: none; text-align: center; line-height: 1.5;
+  }
 </style>
 </head>
 <body>
@@ -674,6 +762,11 @@
       <span>Scale</span>
       <span class="key">R</span>
     </button>
+    <button class="gizmo-btn" data-mode="pivot" title="Move the pivot — the point the model rotates and scales around, and the point the prop is placed by in-game. Drag the arrows to put it on a hinge, a base corner, wherever you need. The model itself does not move. Click again to reset it to the model's centre. Baked into the export once you move it.">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="2.5"/><path d="M12 2v5"/><path d="M12 17v5"/><path d="M2 12h5"/><path d="M17 12h5"/></svg>
+      <span>Pivot</span>
+      <span class="key">P</span>
+    </button>
     <div class="gizmo-divider"></div>
     <div class="gizmo-toggle" title="Force uniform scale on all three axes when dragging the scale handles.">
       <input type="checkbox" id="lock-toggle" checked />
@@ -742,6 +835,61 @@
       <button type="button" class="ref-btn danger" id="ref-remove" title="Remove the reference plane">Remove</button>
     </div>
     <div class="ref-note" id="ref-note"></div>
+  </div>
+
+  <!-- Vehicle Animation editor chrome (Vehicles tab, Animate mode). -->
+  <div id="vanim-ui" class="hidden">
+    <div id="vanim-hud">
+      <button class="vbtn active" id="vanim-mode-rotate" title="Rotate the selected bone around its hinge (E)">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-3-6.7"/><polyline points="21 4 21 9 16 9"/></svg>
+      </button>
+      <button class="vbtn" id="vanim-mode-translate" title="Slide the selected bone (W)">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 9l-3 3 3 3"/><path d="M9 5l3-3 3 3"/><path d="M15 19l-3 3-3-3"/><path d="M19 9l3 3-3 3"/><path d="M2 12h20"/><path d="M12 2v20"/></svg>
+      </button>
+    </div>
+    <div id="vanim-split-bar">
+      <span class="sb-dot"></span>
+      <span id="vsb-name"></span>
+      <span id="vsb-sub" class="dim"></span>
+      <button class="sb-btn primary" id="vsb-split" disabled title="Move the selected pieces onto a new bone of their own (asks for a name).">Split into new bone</button>
+      <button class="sb-btn" id="vsb-grow" title="Add every piece of this bone that touches the selection (repeat to keep growing).">Grow</button>
+      <button class="sb-btn" id="vsb-clear" title="Deselect all">Clear</button>
+      <button class="sb-close" id="vsb-close" title="Deselect pieces">&times;</button>
+    </div>
+    <div id="vanim-sel" class="hidden"></div>
+    <div id="vanim-timeline">
+      <div id="vanim-transport">
+        <button class="tbtn" id="vanim-go-start" title="Go to start (Home)"><svg viewBox="0 0 24 24"><path d="M6 5h2v14H6zM20 5v14L9 12z"/></svg></button>
+        <button class="tbtn" id="vanim-prev-key" title="Previous key (Up)"><svg viewBox="0 0 24 24"><path d="M7 6h2v12H7zm12 0v12l-9-6z"/></svg></button>
+        <button class="tbtn" id="vanim-prev-frame" title="Previous frame (Left)"><svg viewBox="0 0 24 24"><path d="M16 6v12l-9-6z"/></svg></button>
+        <button class="tbtn" id="vanim-play" title="Play / pause (Space)"><svg id="vanim-ic-play" viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg><svg id="vanim-ic-pause" viewBox="0 0 24 24" style="display:none"><path d="M6 5h4v14H6zm8 0h4v14h-4z"/></svg></button>
+        <button class="tbtn" id="vanim-next-frame" title="Next frame (Right)"><svg viewBox="0 0 24 24"><path d="M8 6v12l9-6z"/></svg></button>
+        <button class="tbtn" id="vanim-next-key" title="Next key (Down)"><svg viewBox="0 0 24 24"><path d="M15 6h2v12h-2zM5 6v12l9-6z"/></svg></button>
+        <button class="tbtn" id="vanim-go-end" title="Go to end (End)"><svg viewBox="0 0 24 24"><path d="M16 5h2v14h-2zM4 5v14l11-7z"/></svg></button>
+        <button class="tbtn" id="vanim-loop" title="Loop"><svg viewBox="0 0 24 24"><path d="M17 17H7v-3l-4 4 4 4v-3h12v-6h-2zM7 7h10v3l4-4-4-4v3H5v6h2z"/></svg></button>
+        <span id="vanim-frame">0 / 90</span>
+        <span class="sep"></span>
+        <button class="tbtn" id="vanim-key" title="Add key at the playhead (K)"><svg viewBox="0 0 24 24"><path d="M12 3l9 9-9 9-9-9z"/></svg></button>
+        <button class="tbtn" id="vanim-delkey" title="Delete selected keys (Delete)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 4l8 8-8 8-8-8z"/><path d="M9 12h6"/></svg></button>
+        <button class="tbtn danger" id="vanim-autokey" title="Auto-key: every drag writes a key at the playhead">A</button>
+        <span class="sep"></span>
+        <span class="lbl">Length</span><input type="number" id="vanim-duration" min="0.1" max="600" step="0.1" value="3" title="Clip length in seconds" />
+        <span class="lbl">@</span><input type="number" id="vanim-fps" min="1" max="120" step="1" value="30" title="Frames per second" />
+        <span class="lbl">Ease</span>
+        <select id="vanim-ease" title="How motion leaves a key">
+          <option value="smooth">Smooth</option>
+          <option value="linear">Linear</option>
+          <option value="step">Step</option>
+        </select>
+        <span class="sep"></span>
+        <button class="tbtn wide" id="vanim-fit" title="Fit the whole clip in view">Fit</button>
+      </div>
+      <canvas id="vanim-ruler"></canvas>
+      <div id="vanim-rows">
+        <canvas id="vanim-rows-canvas"></canvas>
+        <div id="vanim-empty">Click a door, bonnet or wheel on the car, drag it &mdash; the key lands here.</div>
+      </div>
+    </div>
   </div>
 
   <div id="status"></div>
@@ -1253,6 +1401,10 @@ function applyHistoryEntry(entry, direction /* 'undo' | 'redo' */) {
           if (it.p) bone.position.set(it.p[0], it.p[1], it.p[2]);
         }
       }
+      break;
+    }
+    case 'prop': {
+      propApplySnapshot(direction === 'undo' ? entry.payload.before : entry.payload.after);
       break;
     }
     case 'keyframes': {
@@ -1787,6 +1939,7 @@ function snapshotFootLockBonesInto(map) {
 let dragPosCapture = null; // Map<boneIdx, [x,y,z]> for FK translate undo
 transformControls.addEventListener('mouseDown', () => {
   if (!poseMode) return;
+  if (propIsSelected()) { propDragCapture = propSnapshot(); return; }
   if (poseIkActiveHandle && transformControls.mode === 'translate') {
     poseIkDragCapture = new Map();
     dragPosCapture = new Map();
@@ -1843,6 +1996,7 @@ function poseAutoKeyCommit(items) {
 
 transformControls.addEventListener('mouseUp', () => {
   if (!poseMode) return;
+  if (propIsSelected()) { propCommitHistory('move'); return; }
   if (poseIkDragCapture && poseIkDragCapture.size > 0) {
     const items = [];
     for (const [idx, before] of poseIkDragCapture) {
@@ -1942,6 +2096,7 @@ renderer.domElement.addEventListener('pointerup', e => {
   // the user clicked it, and pose mode's capture handler returns early when
   // the rig has no visible handles. refTryPickOnPointerUp declines the click
   // whenever a bone / IK ring / gizmo handle already claimed it.
+  if (propTryPickOnPointerUp(e)) return;
   if (refTryPickOnPointerUp(e)) return;
   // CRITICAL: in pose mode the gizmo belongs to a BONE, not the model
   // root. If we let this handler run, every click that misses a joint
@@ -1965,6 +2120,10 @@ renderer.domElement.addEventListener('pointerup', e => {
   // TransformControls already owns this click.
   if (transformControls.dragging) return;
   if (transformControls.axis) return;
+  // Vehicle Anim page: the gizmo belongs to a vehicle BONE and the editor
+  // routes clicks itself (bone dots / part picking). Without this bail-out
+  // every click would detach the gizmo because there's no currentModel.
+  if (window._vehAnimActive) return;
 
   if (!currentModel) {
     transformControls.detach();
@@ -2064,10 +2223,139 @@ window.applyTransform = function (payload) {
   requestRender();
 };
 
+// ── Custom pivot ────────────────────────────────────────────────────────
+// The loaded model is wrapped in a pivot Group whose origin is what
+// TransformControls rotates and scales about; the inner object carries the
+// compensating offset (see the load path's "Wrap the loaded model in a pivot
+// group" block). By default that origin is the bounding-box centre.
+//
+// Pivot mode lets the user drag that origin anywhere — onto a door's hinge,
+// a base corner, the barrel of a gun — WITHOUT moving the model: the pivot
+// group moves and the inner object moves back by the same amount. Rotate and
+// Scale then work about that point, and the export bakes it (the host sends
+// it as the converter's --pos so the chosen point becomes the prop's origin,
+// which is what the game places and rotates by).
+//
+// `pivotSet` stays false until the user actually moves it, so props exported
+// the way they always were keep their original origin.
+let pivotSet = false;
+const pivotHandle = new THREE.Object3D();   // what the gizmo grabs in pivot mode
+pivotHandle.name = 'fiveos-pivot-handle';
+scene.add(pivotHandle);
+const _pivWorld = new THREE.Vector3(), _pivDelta = new THREE.Vector3(), _pivInv = new THREE.Quaternion();
+
+function modelInner() {
+  return currentModel && currentModel.userData && currentModel.userData.fiveos_inner
+    ? currentModel.userData.fiveos_inner : null;
+}
+
+/// Offset from the pivot origin to the model's own file origin, in the
+/// file's units/axes — exactly what the exporter needs to re-origin the
+/// geometry. Null when there is no pivot wrap (nothing to bake).
+function pivotOffset() {
+  const inner = modelInner();
+  return inner ? [inner.position.x, inner.position.y, inner.position.z] : null;
+}
+
+/// Park the gizmo handle on the model's pivot origin.
+function syncPivotHandle() {
+  if (!currentModel) return;
+  currentModel.updateMatrixWorld(true);
+  currentModel.getWorldPosition(_pivWorld);
+  pivotHandle.position.copy(_pivWorld);
+  pivotHandle.quaternion.copy(currentModel.quaternion);
+  pivotHandle.updateMatrixWorld(true);
+}
+
+/// Apply a world-space move of the pivot origin, keeping the mesh still.
+function movePivotTo(worldPos) {
+  const inner = modelInner();
+  if (!currentModel || !inner) return;
+  _pivDelta.copy(worldPos).sub(currentModel.position);
+  if (_pivDelta.lengthSq() < 1e-12) return;
+  currentModel.position.add(_pivDelta);
+  // Undo the same move inside the wrap so the model stays where it was.
+  // The inner object lives under the group's rotation and scale, so the
+  // world delta has to come back through both.
+  _pivInv.copy(currentModel.quaternion).invert();
+  const local = _pivDelta.clone().applyQuaternion(_pivInv);
+  local.x /= (currentModel.scale.x || 1);
+  local.y /= (currentModel.scale.y || 1);
+  local.z /= (currentModel.scale.z || 1);
+  inner.position.sub(local);
+  currentModel.updateMatrixWorld(true);
+  pivotSet = true;
+  syncPivotHandle();
+  requestRender();
+}
+
+/// Read-only pivot state, for the headless harness and for debugging: where
+/// the pivot sits, the offset the exporter would bake, and the model's
+/// current bounds (so a test can prove the mesh did not move).
+window.debugPivotState = function () {
+  const inner = modelInner();
+  if (!currentModel) return null;
+  const box = new THREE.Box3().setFromObject(currentModel);
+  const c = new THREE.Vector3(); box.getCenter(c);
+  return {
+    mode: gizmoMode,
+    pivotSet,
+    offset: pivotOffset(),
+    pivotWorld: [currentModel.position.x, currentModel.position.y, currentModel.position.z],
+    innerLocal: inner ? [inner.position.x, inner.position.y, inner.position.z] : null,
+    boundsCentre: [c.x, c.y, c.z],
+    boundsMin: [box.min.x, box.min.y, box.min.z],
+    boundsMax: [box.max.x, box.max.y, box.max.z],
+  };
+};
+
+/// Move the pivot to a WORLD point — what a gizmo drag ends up calling.
+/// Exposed so the harness can exercise the same path the drag does.
+window.movePivotToWorld = function (x, y, z) {
+  movePivotTo(new THREE.Vector3(x, y, z));
+  postTransformToHost();   // same as the end of a real pivot drag
+  return window.debugPivotState();
+};
+
+/// Put the pivot at a given offset (the value pivotOffset() reports) — the
+/// host calls this to replay an undo/redo or to restore a saved pivot.
+window.setPivotOffset = function (arr, isSet) {
+  const inner = modelInner();
+  if (!currentModel || !inner || !arr || arr.length !== 3) return;
+  // inner.position must END UP at `arr`; moving the pivot by world delta d
+  // changes inner.position by -(R*S)^-1 d, so d = R*S*(current - target).
+  const delta = new THREE.Vector3(
+    inner.position.x - arr[0], inner.position.y - arr[1], inner.position.z - arr[2]);
+  if (delta.lengthSq() < 1e-12) { pivotSet = !!isSet; syncPivotHandle(); return; }
+  delta.x *= (currentModel.scale.x || 1);
+  delta.y *= (currentModel.scale.y || 1);
+  delta.z *= (currentModel.scale.z || 1);
+  delta.applyQuaternion(currentModel.quaternion);
+  movePivotTo(new THREE.Vector3().copy(currentModel.position).add(delta));
+  pivotSet = !!isSet;
+  syncPivotHandle();
+};
+
+/// Back to the automatic centre-of-bounds pivot.
+window.resetPivot = function () {
+  const inner = modelInner();
+  if (!currentModel || !inner) return;
+  const box = new THREE.Box3().setFromObject(currentModel);
+  if (!isFinite(box.min.x) || !isFinite(box.max.x)) return;
+  const centre = new THREE.Vector3();
+  box.getCenter(centre);
+  // Keep the historical baseline: centred in X/Z, model's own height in Y.
+  movePivotTo(new THREE.Vector3(centre.x, currentModel.position.y, centre.z));
+  pivotSet = false;
+  syncPivotHandle();
+  postTransformToHost();
+};
+
 function postTransformToHost() {
   if (!currentModel) return;
   postToHost({
     kind: 'transform',
+    pivot: pivotSet ? pivotOffset() : null,
     pos: [currentModel.position.x, currentModel.position.y, currentModel.position.z],
     rot: [
       THREE.MathUtils.radToDeg(currentModel.rotation.x),
@@ -2085,6 +2373,13 @@ function postTransformToHost() {
 // converter when the user clicks Convert.
 transformControls.addEventListener('change', () => {
   if (!currentModel) return;
+  if (window._vehAnimActive) return;   // the gizmo is on a bone, not the model
+  if (gizmoMode === 'pivot') {
+    if (transformControls.object === pivotHandle && transformControls.dragging)
+      movePivotTo(pivotHandle.position);
+    postTransformToHost();
+    return;   // the model's own pos/rot/scale did not change
+  }
   postTransformToHost();
   syncTransformInputs();
 });
@@ -2107,7 +2402,8 @@ transformControls.addEventListener('objectChange', () => {
   }
 });
 
-// Mode buttons (Move / Rotate / Scale).
+// Mode buttons (Move / Rotate / Scale / Pivot).
+let gizmoMode = 'translate';
 function setGizmoMode(mode) {
   let matched = false;
   document.querySelectorAll('.gizmo-btn[data-mode]').forEach(b => {
@@ -2115,12 +2411,28 @@ function setGizmoMode(mode) {
     b.classList.toggle('active', isMatch);
     if (isMatch) matched = true;
   });
-  if (matched) transformControls.setMode(mode);
+  if (!matched) return;
+  gizmoMode = mode;
+  if (mode === 'pivot') {
+    // The pivot is dragged with the move handles, but they grab a separate
+    // helper object — dragging the model itself would take the mesh along.
+    if (!currentModel) return;
+    syncPivotHandle();
+    transformControls.attach(pivotHandle);
+    transformControls.setMode('translate');
+  } else {
+    if (currentModel && transformControls.object !== currentModel) transformControls.attach(currentModel);
+    transformControls.setMode(mode);
+  }
+  requestRender();
 }
 document.querySelectorAll('.gizmo-btn[data-mode]').forEach(btn => {
   btn.addEventListener('click', () => {
-    if (poseMode) window.poseSetTransformMode(btn.dataset.mode);
-    else setGizmoMode(btn.dataset.mode);
+    if (poseMode) { window.poseSetTransformMode(btn.dataset.mode); return; }
+    // Clicking Pivot while already in pivot mode puts it back on the
+    // model's centre — the way out of a pivot you dragged somewhere odd.
+    if (btn.dataset.mode === 'pivot' && gizmoMode === 'pivot') { window.resetPivot(); return; }
+    setGizmoMode(btn.dataset.mode);
   });
 });
 
@@ -2290,12 +2602,26 @@ window.addEventListener('keydown', e => {
   }
 
   // Non-pose-mode (prop / scale workspace) bindings.
+  //
+  // Undo first: the viewport is a WebView2, so once the user has dragged the
+  // gizmo the keyboard focus is IN HERE and the WPF window's Ctrl+Z binding
+  // never sees the key — pressing undo right after a drag (exactly when you
+  // want it) did nothing at all. Hand those two through to the host, which
+  // owns the Props history.
+  if (ctrl && !e.altKey && (lower === 'z' || lower === 'y')) {
+    postToHost({ kind: (lower === 'y' || e.shiftKey) ? 'request-redo' : 'request-undo' });
+    e.preventDefault();
+    return;
+  }
   if (ctrl || e.altKey) return;
   if (!currentModel || !transformControls.object) return;
   switch (lower) {
-    case 'w': if (!poseMode) setGizmoMode('translate'); break;
-    case 'e': if (!poseMode) setGizmoMode('rotate'); break;
-    case 'r': if (!poseMode) setGizmoMode('scale'); break;
+    case 'w': if (!poseMode || propIsSelected()) setGizmoMode('translate'); break;
+    case 'e': if (!poseMode || propIsSelected()) setGizmoMode('rotate'); break;
+    case 'r': if (!poseMode || propIsSelected()) setGizmoMode('scale'); break;
+    // P = move the pivot (the point rotate/scale and the in-game placement
+    // use). Prop workspace only — pose mode has its own bone pivots.
+    case 'p': if (!poseMode) setGizmoMode('pivot'); break;
     case 'f':
       // Wireframe overlay toggle outside pose mode.
       if (!poseMode && currentModel) setWireframeEnabled(!wireframeEnabled);
@@ -2440,8 +2766,15 @@ function setWireframeEnabled(enabled) {
 }
 
 function clearModel() {
+  if (window._vehAnimActive && window.fiveosBoneAnim && window.fiveosBoneAnim.isObjectMode && window.fiveosBoneAnim.isObjectMode())
+    window.fiveosBoneAnim.deactivate();
+  window._fiveosGltfAssoc = null; window._fiveosHasClips = false; window._fiveosSourceClips = null;
   if (!currentModel) return;
+  if (propIsSelected()) propOnDeselect();
   transformControls.detach();
+  // The prop hangs off a bone of THIS model — lift it out (placement
+  // remembered) or the traverse below disposes its geometry with the rig.
+  propDetachToScene(true);
   // Drop any sub-mesh overlay's geometry reference BEFORE we dispose the
   // model's geometries below, or the overlay would keep pointing at freed
   // buffers.
@@ -2890,6 +3223,9 @@ window.loadModel = function (url) {
       clearModel();
       dotLoader.hide();
 
+      // glTF keeps a node↔object map; the bone editor uses it to tell a
+      // node with several primitives (one part) from several nodes (parts).
+      window._fiveosGltfAssoc = (asset && asset.parser && asset.parser.associations) ? asset.parser.associations : null;
       let obj;
       if (asset.scene) obj = asset.scene;
       else if (asset.isObject3D) obj = asset;
@@ -2916,6 +3252,18 @@ window.loadModel = function (url) {
       const animationClips = (asset.animations && asset.animations.length)
         ? asset.animations
         : (obj.animations || []);
+      window._fiveosHasClips = animationClips.length > 0;   // read back by the bone editor on exit
+      // The preview mixer strips position/scale below (it would fight the
+      // pivot/scale fix-ups). Keep the untouched track list first — the bone
+      // editor imports the clip from these, and a prop that slides as well as
+      // turns has to keep its translation.
+      const sourceClips = animationClips.map(c => ({ clip: c, tracks: c.tracks.slice(), duration: c.duration || 0 }));
+      window._fiveosSourceClips = sourceClips;
+      // Also hang it on the model: parking a layer and activating it again
+      // keeps the object but not page globals, and the clip has to survive
+      // that round trip (the pivot wrap below shares this same userData).
+      obj.userData = obj.userData || {};
+      obj.userData.fiveos_sourceClips = sourceClips;
       if (animationClips.length > 0) {
         currentMixer = new THREE.AnimationMixer(obj);
         window._srcDuration = Math.max.apply(null, animationClips.map(c => c.duration || 0));
@@ -3047,6 +3395,12 @@ window.loadModel = function (url) {
       requestAnimationFrame(() => {
         scene.add(obj);
         currentModel = obj;
+        // A fresh model gets the automatic centre pivot back, and the gizmo
+        // leaves pivot mode — otherwise the handle would sit on the old
+        // model's pivot and the export would bake a point from a file the
+        // user has already replaced.
+        pivotSet = false;
+        if (typeof gizmoMode !== 'undefined' && gizmoMode === 'pivot') setGizmoMode('translate');
         // Honour the view-panel's see-through opacity slider on every
         // model swap so the bones underneath stay visible by default
         // once the user enters pose mode.
@@ -3541,6 +3895,13 @@ const parkedModels = new Map();   // id -> Object3D
 
 window.parkCurrentModel = function (id) {
   if (!currentModel) return false;
+  // A parked model must leave with its own meshes: end the bone editor's
+  // loan first (the host re-enters Animated on whatever becomes active).
+  if (window._vehAnimActive && window.fiveosBoneAnim && window.fiveosBoneAnim.isObjectMode && window.fiveosBoneAnim.isObjectMode())
+    window.fiveosBoneAnim.deactivate();
+  // The parked object keeps its own clips in userData; only the page-level
+  // caches are dropped here.
+  window._fiveosGltfAssoc = null;
   const key = String(id);
   window.removeParkedModel(key);   // re-park same layer: drop the old ghost
   transformControls.detach();
@@ -3554,6 +3915,7 @@ window.parkCurrentModel = function (id) {
   m.name = 'fiveos_parked_' + key;
   parkedModels.set(key, m);
   currentModel = null;             // next load's clearModel() must not touch it
+  pivotSet = false;
   gizmoBar.style.display = 'none';
   requestRender();
   return true;
@@ -3670,6 +4032,12 @@ function partHasGlass(root) {
 }
 
 function getModelPartsList() {
+  // Animated mode has the meshes on loan under bone groups; answer with the
+  // list taken just before they moved.
+  if (window._vehAnimActive && window.fiveosBoneAnim && window.fiveosBoneAnim.isObjectMode && window.fiveosBoneAnim.isObjectMode()) {
+    const cached = window.fiveosBoneAnim.partsCache();
+    if (cached) return cached;
+  }
   const parts = [];
   const root = getPartsRoot();
   if (!root) return parts;
@@ -3703,7 +4071,11 @@ function getModelPartsList() {
 function findPartByDisplayName(name) {
   const root = getPartsRoot();
   if (!root) return null;
-  for (const child of root.children) {
+  // Animated mode: the part meshes are on loan under bone groups; answer
+  // from the part nodes recorded when they left.
+  const inObjectMode = window._vehAnimActive && window.fiveosBoneAnim && window.fiveosBoneAnim.isObjectMode && window.fiveosBoneAnim.isObjectMode();
+  const children = inObjectMode ? window.fiveosBoneAnim.partNodes() : root.children;
+  for (const child of children) {
     const dn = child.userData?.fiveos_displayName ?? child.name;
     if (dn === name) return child;
   }
@@ -3712,7 +4084,11 @@ function findPartByDisplayName(name) {
 
 window.setPartVisible = function (name, visible) {
   const part = findPartByDisplayName(name);
-  if (part) { part.visible = !!visible; requestRender(); }
+  if (!part) return;
+  part.visible = !!visible;
+  if (window._vehAnimActive && window.fiveosBoneAnim && window.fiveosBoneAnim.isObjectMode && window.fiveosBoneAnim.isObjectMode())
+    window.fiveosBoneAnim.setPartVisible(part, !!visible);
+  requestRender();
 };
 
 window.getModelParts = function () {
@@ -3729,11 +4105,14 @@ window.getModelParts = function () {
 window.applyPartMaterial = function (partName, preset) {
   const part = findPartByDisplayName(partName);
   if (!part) return false;
-  part.traverse(obj => {
+  const touch = obj => {
     if (!obj.isMesh || !obj.material) return;
     const mats = Array.isArray(obj.material) ? obj.material : [obj.material];
     for (const mat of mats) applyPresetToMaterial(mat, preset);
-  });
+  };
+  part.traverse(touch);
+  if (window._vehAnimActive && window.fiveosBoneAnim && window.fiveosBoneAnim.isObjectMode && window.fiveosBoneAnim.isObjectMode())
+    for (const m of window.fiveosBoneAnim.partMeshes(part)) touch(m);
   requestRender();
   return true;
 };
@@ -4076,7 +4455,7 @@ document.getElementById('sb-close').addEventListener('click', () => clearSubMesh
 // (so orbit/pan drags don't flicker the overlay) and the gizmo isn't the
 // thing under the cursor.
 renderer.domElement.addEventListener('pointermove', e => {
-  if (poseMode || !currentModel) return;
+  if (poseMode || !currentModel || window._vehAnimActive) return;
   if (e.buttons !== 0) return;
   if (transformControls.dragging || transformControls.axis) {
     if (subMeshHover) { subMeshHover = null; subMeshHoverOverlay.visible = false; requestRender(); }
@@ -4869,17 +5248,48 @@ function loadSyntheticGtaSkeleton(variant) {
 }
 
 // ════════════════════════════════════════════════════════════════════
-// PROP IMPORT
+// PROP (emote-with-prop authoring)
 //
-// User imports a .glb / .fbx prop (a beer bottle, gun, phone, whatever)
-// and moves/rotates it with TransformControls so they can author a pose
-// that interacts with the prop visually. On export, we compute the
-// prop's transform RELATIVE to a chosen GTA player skeleton bone -- the
-// "PropPlacement" 6-tuple that dpemotes' PropEmotes format expects.
+// The user puts a prop (phone, bottle, mic, …) in the posed ped's hand.
+// In-game the prop is a GTA model the emote script spawns and attaches with
+// AttachEntityToEntity(bone, PropPlacement). Here the preview mesh is
+// PARENTED UNDER THE SAME BONE, so it rides the pose and the animation the
+// way the game will move it, and the placement the export writes is simply
+// the carrier's local transform.
+//
+// Two-level object:
+//   propModel (carrier) — child of the attach bone. Its LOCAL transform is
+//                         the PropPlacement (bone-local metres + degrees).
+//                         Gizmo edits land here.
+//   propInner (mesh)    — the loaded geometry. The up-axis correction and
+//                         the centimetre-units fix live here so they never
+//                         leak into the placement.
 // ════════════════════════════════════════════════════════════════════
 let propModel = null;
-let propAttachBoneName = 'SKEL_R_Hand_1';   // default: right-hand attachment (most common)
-let propAttachBoneId = 28422;               // dpemotes-style runtime bone tag for R hand
+let propInner = null;
+// Bones to try, in preference order. PH_* are the game's prop-handle bones
+// (a zero placement there is the natural palm grip — it's where the vanilla
+// phone sits); the SKEL_* hand is the fallback for rigs without PH_ helpers.
+let propAttachCandidates = [
+  { name: 'PH_R_Hand', id: 28422 },
+  { name: 'SKEL_R_Hand', id: 57005 },
+];
+let propAttachBoneName = 'PH_R_Hand';   // bone actually resolved on this rig
+let propAttachBoneId = 28422;           // its RAGE bone tag (PropBone in the export)
+let propAttachedBone = null;            // THREE.Bone the carrier hangs off (null = loose in the scene)
+let propSavedLocal = null;              // { p, q } kept across rig reloads
+let propPendingReattach = false;
+let propLabel = '';
+let propSource = '';                    // 'file' | 'game' | 'placeholder'
+let propYUpFix = true;                  // treat a user file as a Y-up (Blender/glTF) export
+let propGizmoShown = false;
+// GTA applies PropPlacement rotations with rotationOrder 1 — every emote
+// script (rpemotes, dpemotes and our packs) passes 1 to AttachEntityToEntity.
+// The native's order table names the matrix product left to right (2, the
+// default, is ZXY = yaw·pitch·roll, which is exactly what the well-known
+// RotationToDirection formula expands to) and three.js names Euler orders
+// the same way, so order 1 (YZX) maps straight onto Euler 'YZX'.
+const PROP_EULER_ORDER = 'YZX';
 const _tmpMat = new THREE.Matrix4();
 const _tmpMatInv = new THREE.Matrix4();
 const _tmpVec = new THREE.Vector3();
@@ -5857,17 +6267,265 @@ document.getElementById('bone-tree-close')?.addEventListener('click', () => wind
 // Keep the panel closed if anything left it visible from an older build.
 window.hideBoneTree();
 
-window.loadProp = function (url) {
-  // Tear down any existing prop first so the user can swap props
-  // without restarting the session.
-  if (propModel) window.removeProp();
+// Walk the loaded skeleton for a bone by name (tolerates Sollumz's _1
+// suffix). Pose-session lists first (body bones, then PH_/IK_/RB_ helpers),
+// then the raw hierarchy so a prop can attach before pose mode has booted.
+function findBoneByNameFlex(name) {
+  if (!name) return null;
+  const want = String(name).toLowerCase();
+  const match = b => {
+    const n = (b && b.name || '').toLowerCase();
+    return n === want || n.startsWith(want + '_') || n.startsWith(want + '.');
+  };
+  for (const b of poseBones) if (match(b)) return b;
+  for (const b of poseAuxBones) if (match(b)) return b;
+  if (currentModel) {
+    let found = null;
+    currentModel.traverse(o => { if (!found && o.isBone && match(o)) found = o; });
+    return found;
+  }
+  return null;
+}
 
+// First candidate that exists on this rig → { bone, name, id }.
+function propResolveBone(cands) {
+  const list = Array.isArray(cands) && cands.length ? cands : propAttachCandidates;
+  for (const c of list) {
+    if (!c || !c.name) continue;
+    let bone = null;
+    try { bone = poseBoneByBaseName(c.name); } catch (e) { bone = null; }
+    if (!bone && poseAuxByName && poseAuxByName.size) bone = poseAuxByName.get(c.name) || null;
+    if (!bone) bone = findBoneByNameFlex(c.name);
+    if (bone) return { bone, name: c.name, id: (typeof c.id === 'number') ? c.id : propAttachBoneId };
+  }
+  return null;
+}
+
+// Parent the carrier under a bone.
+//   'snap'    → identity local transform: prop origin ON the bone, axes aligned
+//               (what a zero PropPlacement does in-game).
+//   'keep'    → preserve the current world transform (re-express under the bone).
+//   'restore' → re-apply propSavedLocal (after a rig reload).
+function propAttachTo(bone, mode) {
+  if (!propModel || !bone) return false;
+  bone.updateWorldMatrix(true, false);
+  if (mode === 'keep') {
+    propModel.updateWorldMatrix(true, false);
+    _tmpMat.copy(bone.matrixWorld).invert().multiply(propModel.matrixWorld);
+    _tmpMat.decompose(_tmpVec, _tmpQuat, _tmpScale);
+    if (propModel.parent) propModel.parent.remove(propModel);
+    bone.add(propModel);
+    propModel.position.copy(_tmpVec);
+    propModel.quaternion.copy(_tmpQuat);
+    propModel.scale.copy(_tmpScale);
+  } else {
+    if (propModel.parent) propModel.parent.remove(propModel);
+    bone.add(propModel);
+    if (mode === 'restore' && propSavedLocal) {
+      propModel.position.copy(propSavedLocal.p);
+      propModel.quaternion.copy(propSavedLocal.q);
+    } else {
+      propModel.position.set(0, 0, 0);
+      propModel.quaternion.identity();
+    }
+    propModel.scale.set(1, 1, 1);
+  }
+  propAttachedBone = bone;
+  propPendingReattach = false;
+  propModel.updateMatrixWorld(true);
+  return true;
+}
+
+// Lift the carrier back to scene level (world transform kept). Called before
+// the rig it hangs off is disposed; `remember` keeps the placement so the
+// prop lands back on the same bone once the next rig is up.
+function propDetachToScene(remember) {
+  if (!propModel || !propAttachedBone) return;
+  if (remember) {
+    propSavedLocal = { p: propModel.position.clone(), q: propModel.quaternion.clone() };
+    propPendingReattach = true;
+  }
+  propModel.updateWorldMatrix(true, false);
+  _tmpMat.copy(propModel.matrixWorld);
+  propAttachedBone.remove(propModel);
+  scene.add(propModel);
+  _tmpMat.decompose(propModel.position, propModel.quaternion, propModel.scale);
+  propAttachedBone = null;
+}
+
+function propReattachAfterRigLoad() {
+  if (!propModel || !propPendingReattach) return;
+  const r = propResolveBone(propAttachCandidates);
+  if (!r) return;
+  propAttachBoneName = r.name;
+  propAttachBoneId = r.id;
+  propAttachTo(r.bone, 'restore');
+  propPostState();
+}
+
+// Bone-local placement: position (m) + Euler (deg, game order). Works whether
+// the carrier is attached or still loose.
+function propLocalPlacement() {
+  if (!propModel) return null;
+  const pos = new THREE.Vector3();
+  const quat = new THREE.Quaternion();
+  if (propAttachedBone) {
+    pos.copy(propModel.position);
+    quat.copy(propModel.quaternion);
+  } else {
+    const r = propResolveBone(propAttachCandidates);
+    if (r) {
+      r.bone.updateWorldMatrix(true, false);
+      propModel.updateWorldMatrix(true, false);
+      _tmpMat.copy(r.bone.matrixWorld).invert().multiply(propModel.matrixWorld);
+      _tmpMat.decompose(pos, quat, _tmpScale);
+    } else {
+      // No bone to measure against — world transform, flagged via `attached`.
+      pos.copy(propModel.position);
+      quat.copy(propModel.quaternion);
+    }
+  }
+  const e = new THREE.Euler().setFromQuaternion(quat, PROP_EULER_ORDER);
+  return {
+    pos: [pos.x, pos.y, pos.z],
+    rot_deg: [THREE.MathUtils.radToDeg(e.x), THREE.MathUtils.radToDeg(e.y), THREE.MathUtils.radToDeg(e.z)],
+  };
+}
+
+function propPostState(extra) {
+  if (!propModel) return;
+  const pl = propLocalPlacement() || { pos: [0, 0, 0], rot_deg: [0, 0, 0] };
+  postToHost(Object.assign({
+    kind: 'prop-state',
+    attached: !!propAttachedBone,
+    bone_name: propAttachBoneName,
+    bone_id: propAttachBoneId,
+    pos: pl.pos,
+    rot_deg: pl.rot_deg,
+    label: propLabel,
+    source: propSource,
+    yUpFix: propYUpFix,
+  }, extra || {}));
+}
+
+// Blender/glTF exports are Y-up; RAGE models are Z-up. +90° about X puts a
+// Y-up export back in the game's model space, so a zero placement here means
+// the same thing it does in-game. Game extracts are already RAGE space.
+function propApplyInnerFix() {
+  if (!propInner) return;
+  propInner.rotation.set(propYUpFix && propSource !== 'game' ? Math.PI / 2 : 0, 0, 0);
+}
+
+// Built-in demo prop: a smartphone in RAGE model space (X width, Y height,
+// Z thickness) — shown when there is no game extract / user mesh, so the
+// feature is visible the moment the popup opens and there is something to
+// author an offset against.
+function propBuildPlaceholder() {
+  const g = new THREE.Group();
+  const W = 0.072, H = 0.150, T = 0.0085, R = 0.008;
+  const shape = new THREE.Shape();
+  shape.moveTo(-W / 2 + R, -H / 2);
+  shape.lineTo(W / 2 - R, -H / 2);
+  shape.quadraticCurveTo(W / 2, -H / 2, W / 2, -H / 2 + R);
+  shape.lineTo(W / 2, H / 2 - R);
+  shape.quadraticCurveTo(W / 2, H / 2, W / 2 - R, H / 2);
+  shape.lineTo(-W / 2 + R, H / 2);
+  shape.quadraticCurveTo(-W / 2, H / 2, -W / 2, H / 2 - R);
+  shape.lineTo(-W / 2, -H / 2 + R);
+  shape.quadraticCurveTo(-W / 2, -H / 2, -W / 2 + R, -H / 2);
+  const bodyGeo = new THREE.ExtrudeGeometry(shape, { depth: T, bevelEnabled: true, bevelThickness: 0.0012, bevelSize: 0.0012, bevelSegments: 2, curveSegments: 8 });
+  bodyGeo.translate(0, 0, -T / 2);
+  const body = new THREE.Mesh(bodyGeo, new THREE.MeshStandardMaterial({ color: 0x1E1F24, metalness: 0.55, roughness: 0.35 }));
+  g.add(body);
+  // Screen (front, +Z): dark glass with a faint glow.
+  const screen = new THREE.Mesh(
+    new THREE.PlaneGeometry(W - 0.006, H - 0.010),
+    new THREE.MeshStandardMaterial({ color: 0x0C1B2A, emissive: 0x1C4A78, emissiveIntensity: 0.55, metalness: 0.1, roughness: 0.15 }));
+  screen.position.set(0, 0, T / 2 + 0.0015);
+  g.add(screen);
+  // Camera island (back, -Z).
+  const cam = new THREE.Mesh(
+    new THREE.BoxGeometry(0.022, 0.022, 0.002),
+    new THREE.MeshStandardMaterial({ color: 0x2A2C33, metalness: 0.5, roughness: 0.4 }));
+  cam.position.set(-W / 2 + 0.016, H / 2 - 0.016, -T / 2 - 0.001);
+  g.add(cam);
+  const lens = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.0045, 0.0045, 0.0015, 16),
+    new THREE.MeshStandardMaterial({ color: 0x0A0A0C, metalness: 0.2, roughness: 0.1 }));
+  lens.rotation.x = Math.PI / 2;
+  lens.position.set(-W / 2 + 0.016, H / 2 - 0.016, -T / 2 - 0.0025);
+  g.add(lens);
+  // Side buttons.
+  for (const [y, len] of [[0.030, 0.012], [0.012, 0.012]]) {
+    const b = new THREE.Mesh(new THREE.BoxGeometry(0.0015, len, 0.004),
+      new THREE.MeshStandardMaterial({ color: 0x2A2C33, metalness: 0.5, roughness: 0.4 }));
+    b.position.set(-W / 2 - 0.0007, y, 0);
+    g.add(b);
+  }
+  g.traverse(o => { if (o.isMesh) { o.castShadow = true; o.receiveShadow = true; } });
+  return g;
+}
+
+function propInstall(obj, opts) {
+  if (propModel) window.removeProp(true);
+  opts = opts || {};
+  propLabel = opts.label || '';
+  propSource = opts.source || 'file';
+  if (typeof opts.yUpFix === 'boolean') propYUpFix = opts.yUpFix;
+  if (typeof upgradeGlassMaterials === 'function') { try { upgradeGlassMaterials(obj); } catch (e) {} }
+
+  propInner = new THREE.Group();
+  propInner.name = 'PropMesh';
+  propInner.add(obj);
+  // Centimetre-units heuristic: FBX props commonly import 100x too big. A
+  // bbox over 5 m is not a hand prop; real GTA props are well under that.
+  const box = new THREE.Box3().setFromObject(obj);
+  const size = box.getSize(new THREE.Vector3()).length();
+  if (size > 5) propInner.scale.setScalar(0.01);
+  propApplyInnerFix();
+
+  propModel = new THREE.Group();
+  propModel.name = 'PropModel';
+  propModel.userData.isProp = true;
+  propModel.add(propInner);
+  propModel.traverse(o => { if (o.isMesh) o.castShadow = true; });
+  scene.add(propModel);
+  propSavedLocal = null;
+  propPendingReattach = false;
+
+  const r = propResolveBone(propAttachCandidates);
+  if (r && opts.snap !== false) {
+    propAttachBoneName = r.name;
+    propAttachBoneId = r.id;
+    propAttachTo(r.bone, 'snap');
+  } else {
+    // No rig yet: park it near where a hand would be. It snaps as soon as
+    // a rig is loaded (see enterPoseMode → propReattachAfterRigLoad).
+    propModel.position.set(0, 1.0, 0.25);
+    propPendingReattach = true;
+  }
+
+  postToHost({
+    kind: 'prop-loaded', label: propLabel, source: propSource,
+    attached: !!propAttachedBone, size: size > 5 ? size / 100 : size,
+  });
+  propPostState();
+  requestRender();
+}
+
+// opts: { label, source: 'file'|'game'|'placeholder', yUpFix, snap }.
+// url 'placeholder' builds the stand-in slab instead of loading a file.
+window.loadProp = function (url, opts) {
+  opts = opts || {};
+  if (url === 'placeholder') {
+    propInstall(propBuildPlaceholder(), Object.assign({ source: 'placeholder', label: 'placeholder' }, opts));
+    return;
+  }
   const loader = pickLoader(url);
   if (!loader) {
     postToHost({ kind: 'prop-error', message: 'Unsupported prop format: ' + url });
     return;
   }
-
   loader.load(
     url,
     asset => {
@@ -5875,135 +6533,214 @@ window.loadProp = function (url) {
       if (asset.scene) obj = asset.scene;
       else if (asset.isObject3D) obj = asset;
       else if (asset.isBufferGeometry) {
-        const mat = new THREE.MeshStandardMaterial({ color: 0xCC9966, metalness: 0.1, roughness: 0.5 });
-        obj = new THREE.Mesh(asset, mat);
-      } else if (asset.isGroup) obj = asset;
-      else { postToHost({ kind: 'prop-error', message: 'No displayable prop object' }); return; }
-
-      // Reflective glass for any window shaders on the prop (see loadModel).
-      upgradeGlassMaterials(obj);
-
-      // Spawn at world origin so it lands near the loaded character's
-      // hand for typical hand-held props. User drags from there.
-      obj.position.set(0, 1.0, 0.25);
-      obj.userData.isProp = true;
-      obj.name = 'PropModel';
-
-      // Centimetre-units heuristic: FBX props commonly import 100x too
-      // big. If the prop's bbox exceeds 5m it almost certainly needs
-      // the divide-by-100 fix (real GTA props are well under that).
-      const box = new THREE.Box3().setFromObject(obj);
-      const size = box.getSize(new THREE.Vector3()).length();
-      if (size > 5) {
-        obj.scale.setScalar(0.01);
-        obj.updateMatrixWorld(true);
+        obj = new THREE.Mesh(asset, new THREE.MeshStandardMaterial({ color: 0xCC9966, metalness: 0.1, roughness: 0.5 }));
+      } else { postToHost({ kind: 'prop-error', message: 'No displayable prop object' }); return; }
+      // Game extracts carry no materials — clay so they read against the ped.
+      if (opts.source === 'game') {
+        obj.traverse(o => {
+          if (o.isMesh) o.material = new THREE.MeshStandardMaterial({ color: 0xB8B0A4, metalness: 0.05, roughness: 0.6 });
+        });
       }
-
-      scene.add(obj);
-      propModel = obj;
-
-      // Attach the gizmo right away so the user can position from frame
-      // zero. Rotation mode is more useful here than translate for
-      // most prop tweaks (props are usually grabbed at-position), but
-      // translate is the default so they can move it onto the hand
-      // first.
-      transformControls.attach(propModel);
-      transformControls.setMode('translate');
-      gizmoBar.style.display = 'flex';
-
-      postToHost({ kind: 'prop-loaded', source: url });
-      requestRender();
+      propInstall(obj, opts);
     },
     undefined,
     err => { postToHost({ kind: 'prop-error', message: 'Prop load failed: ' + (err && err.message || err) }); }
   );
 };
 
-window.removeProp = function () {
+window.removeProp = function (silent) {
   if (!propModel) return;
-  if (transformControls.object === propModel) transformControls.detach();
-  scene.remove(propModel);
+  if (transformControls.object === propModel) { transformControls.detach(); propOnDeselect(); }
+  if (propModel.parent) propModel.parent.remove(propModel);
   propModel.traverse(obj => {
     if (obj.geometry) obj.geometry.dispose();
     if (obj.material) {
       const m = Array.isArray(obj.material) ? obj.material : [obj.material];
-      m.forEach(mat => mat.dispose());
+      m.forEach(mat => mat && mat.dispose && mat.dispose());
     }
   });
   propModel = null;
-  postToHost({ kind: 'prop-removed' });
+  propInner = null;
+  propAttachedBone = null;
+  propSavedLocal = null;
+  propPendingReattach = false;
+  if (!silent) postToHost({ kind: 'prop-removed' });
   requestRender();
 };
 
+function propIsSelected() { return !!propModel && transformControls.object === propModel; }
+
+// ── Undo / redo ──
+// Prop edits ride the same history as bone edits (kind 'prop'): a gizmo
+// drag, a snap, a bone switch or a numeric placement each push one entry
+// holding the carrier's full state before/after, so Ctrl+Z walks them back
+// in order with everything else.
+let propDragCapture = null;
+function propSnapshot() {
+  if (!propModel) return null;
+  return {
+    bone: { name: propAttachBoneName, id: propAttachBoneId },
+    cands: propAttachCandidates.map(c => ({ name: c.name, id: c.id })),
+    attached: !!propAttachedBone,
+    p: [propModel.position.x, propModel.position.y, propModel.position.z],
+    q: [propModel.quaternion.x, propModel.quaternion.y, propModel.quaternion.z, propModel.quaternion.w],
+    s: [propModel.scale.x, propModel.scale.y, propModel.scale.z],
+  };
+}
+function propStateDiffers(a, b) {
+  if (!a || !b) return false;
+  if (a.attached !== b.attached || a.bone.name !== b.bone.name) return true;
+  const eq = (x, y) => x.length === y.length && x.every((v, i) => Math.abs(v - y[i]) <= 1e-7);
+  return !(eq(a.p, b.p) && eq(a.q, b.q) && eq(a.s, b.s));
+}
+function propCommitHistory(op, before) {
+  const b = before || propDragCapture;
+  propDragCapture = null;
+  if (!b || !propModel) return;
+  const a = propSnapshot();
+  if (!propStateDiffers(a, b)) return;
+  pushHistory({ kind: 'prop', op: op || 'move', payload: { before: b, after: a } });
+}
+function propApplySnapshot(st) {
+  if (!propModel || !st) return;
+  if (Array.isArray(st.cands) && st.cands.length) propAttachCandidates = st.cands.map(c => ({ name: c.name, id: c.id }));
+  if (st.attached) {
+    const r = propResolveBone([st.bone]) || propResolveBone(propAttachCandidates);
+    if (r) {
+      propAttachBoneName = r.name;
+      propAttachBoneId = r.id;
+      if (propAttachedBone !== r.bone) propAttachTo(r.bone, 'snap');
+    }
+  } else if (propAttachedBone) {
+    propDetachToScene(false);
+  }
+  propModel.position.set(st.p[0], st.p[1], st.p[2]);
+  propModel.quaternion.set(st.q[0], st.q[1], st.q[2], st.q[3]);
+  propModel.scale.set(st.s[0], st.s[1], st.s[2]);
+  propModel.updateMatrixWorld(true);
+  propPostState();
+}
+
+// Gizmo leaves the prop (bone picked, prop removed). In pose mode the mode
+// bar is normally hidden and the gizmo is rotate-only — put that back.
+function propOnDeselect() {
+  if (!propGizmoShown) return;
+  propGizmoShown = false;
+  if (poseMode) {
+    gizmoBar.style.display = 'none';
+    transformControls.setMode('rotate');
+  }
+}
+
 window.selectProp = function () {
-  // Allow the host to programmatically reattach the gizmo to the prop
-  // (e.g. user clicked "Edit Prop" after picking a bone in the sidebar).
   if (!propModel) return false;
+  if (currentModel) currentModel.updateMatrixWorld(true);
   transformControls.attach(propModel);
   transformControls.setMode('translate');
   gizmoBar.style.display = 'flex';
+  propGizmoShown = true;
+  requestRender();
   return true;
 };
 
-window.setPropAttachBone = function (name, id) {
-  // The bone the prop will hang off in-game. We don't move the prop in
-  // world space when this changes -- the user authored its world
-  // position relative to where they SEE the bone, so re-decomposing
-  // against a different bone just reframes the placement values.
-  propAttachBoneName = name || propAttachBoneName;
-  propAttachBoneId = (typeof id === 'number') ? id : propAttachBoneId;
-  postToHost({ kind: 'prop-attach-set', name: propAttachBoneName, id: propAttachBoneId });
+// cands: [{name,id}, …] in preference order (legacy (name, id) still works).
+// snap=false re-expresses the current world pose under the new bone instead
+// of zeroing the placement.
+window.setPropAttachBone = function (cands, snap) {
+  if (typeof cands === 'string') {
+    cands = [{ name: cands, id: (typeof snap === 'number') ? snap : propAttachBoneId }];
+    snap = true;
+  }
+  const before = propSnapshot();
+  if (Array.isArray(cands) && cands.length) propAttachCandidates = cands;
+  const r = propResolveBone(propAttachCandidates);
+  if (r) { propAttachBoneName = r.name; propAttachBoneId = r.id; }
+  else { propAttachBoneName = propAttachCandidates[0].name; propAttachBoneId = propAttachCandidates[0].id; }
+  if (propModel && r) propAttachTo(r.bone, snap === false ? 'keep' : 'snap');
+  propCommitHistory('attach', before);
+  propPostState({ resolved: !!r });
+  requestRender();
 };
 
-// Walk the loaded skeleton for a bone by name (tolerates Sollumz's _1
-// suffix). Returns null if not found.
-function findBoneByNameFlex(name) {
-  if (!poseBones || poseBones.length === 0) return null;
-  if (!name) return null;
-  const want = name.toLowerCase();
-  for (const b of poseBones) {
-    const n = (b.name || '').toLowerCase();
-    if (n === want) return b;
-    if (n.startsWith(want + '_') || n.startsWith(want + '.')) return b;
+// Zero the placement: prop origin on the bone, axes aligned.
+window.snapPropToBone = function () {
+  if (!propModel) return false;
+  const r = propResolveBone(propAttachCandidates);
+  if (!r) {
+    postToHost({ kind: 'prop-error', message: 'No ' + propAttachCandidates[0].name + ' bone in this rig — load the GTA ped first.' });
+    return false;
   }
-  return null;
-}
+  const before = propSnapshot();
+  propAttachBoneName = r.name;
+  propAttachBoneId = r.id;
+  propAttachTo(r.bone, 'snap');
+  propCommitHistory('snap', before);
+  propPostState();
+  requestRender();
+  return true;
+};
+
+// Numeric placement (metres, degrees in game order) — the host's fields.
+window.setPropPlacement = function (x, y, z, rx, ry, rz) {
+  if (!propModel) return;
+  if (!propAttachedBone && !window.snapPropToBone()) return;
+  const before = propSnapshot();
+  propModel.position.set(+x || 0, +y || 0, +z || 0);
+  propModel.quaternion.setFromEuler(new THREE.Euler(
+    THREE.MathUtils.degToRad(+rx || 0), THREE.MathUtils.degToRad(+ry || 0), THREE.MathUtils.degToRad(+rz || 0),
+    PROP_EULER_ORDER));
+  propCommitHistory('placement', before);
+  propPostState();
+  requestRender();
+};
+
+window.setPropYUpFix = function (on) {
+  propYUpFix = !!on;
+  propApplyInnerFix();
+  propPostState();
+  requestRender();
+};
 
 window.getPropTransform = function () {
-  // Compute the prop's pos+rot in the chosen bone's local space.
-  // PropPlacement in dpemotes is metres + degrees; we return the
-  // decomposed values so the host can stamp them straight into the
-  // Lua snippet.
+  // PropPlacement for the export: bone-local metres + degrees. When the
+  // carrier is attached these are literally its local position/rotation.
   if (!propModel) return null;
-  const bone = findBoneByNameFlex(propAttachBoneName);
-  let localPos = new THREE.Vector3();
-  let localQuat = new THREE.Quaternion();
-  if (bone) {
-    bone.updateWorldMatrix(true, false);
-    propModel.updateWorldMatrix(true, false);
-    _tmpMat.copy(bone.matrixWorld).invert();
-    _tmpMatInv.multiplyMatrices(_tmpMat, propModel.matrixWorld);
-    _tmpMatInv.decompose(localPos, localQuat, _tmpScale);
-  } else {
-    // No bone match -> just return world transform. Caller (host) can
-    // still write it; will be wrong in-game but at least the export
-    // path doesn't fail.
-    localPos.copy(propModel.position);
-    localQuat.copy(propModel.quaternion);
-  }
-  // Convert quat -> Euler (XYZ order, degrees) for dpemotes.
-  const e = new THREE.Euler().setFromQuaternion(localQuat, 'XYZ');
+  const pl = propLocalPlacement();
   return JSON.stringify({
     bone_name: propAttachBoneName,
     bone_id: propAttachBoneId,
-    pos: [localPos.x, localPos.y, localPos.z],
-    rot_deg: [
-      THREE.MathUtils.radToDeg(e.x),
-      THREE.MathUtils.radToDeg(e.y),
-      THREE.MathUtils.radToDeg(e.z),
-    ],
+    attached: !!propAttachedBone,
+    pos: pl.pos,
+    rot_deg: pl.rot_deg,
   });
 };
+
+// Click on the prop → gizmo on the prop. Bones, IK rings and gizmo handles
+// already claimed by pose mode's capture handler always outrank it.
+function propTryPickOnPointerUp(e) {
+  if (!propModel) return false;
+  if (transformControls.dragging || transformControls.axis) return false;
+  if (pointerDownOnJointMarker || pointerDownOnGizmoHandle || pointerDownIkHandle) return false;
+  const start = pointerDownAt;
+  if (start && Math.hypot(e.clientX - start.x, e.clientY - start.y) > 4) return false;
+
+  const rect = renderer.domElement.getBoundingClientRect();
+  ndc.x = ((e.clientX - rect.left) / rect.width) * 2 - 1;
+  ndc.y = -((e.clientY - rect.top) / rect.height) * 2 + 1;
+  raycaster.setFromCamera(ndc, camera);
+  const hit = raycaster.intersectObject(propModel, true);
+  if (hit.length === 0) return false;
+  if (!poseMode && currentModel) {
+    const modelHits = raycaster.intersectObject(currentModel, true);
+    if (modelHits.length > 0 && modelHits[0].distance < hit[0].distance) return false;
+  }
+  window.selectProp();
+  pointerDownAt = null;
+  return true;
+}
+
+// Placement readout after a gizmo drag (either mode).
+transformControls.addEventListener('mouseUp', () => { if (propIsSelected()) propPostState(); });
 
 // ════════════════════════════════════════════════════════════════════
 // POSE MODE (Pose -> Emote feature)
@@ -7555,6 +8292,7 @@ window.enterPoseMode = function () {
   applyAxisLockToGizmo();
   updatePoseHud();
 
+  propReattachAfterRigLoad();
   postPoseModeEntered();
   fosTelemetry.info('system', `pose mode entered: ${poseBones.length} bones`);
   _posePaintPending = true;   // host holds its boot splash until 'pose-painted'
@@ -12449,6 +13187,7 @@ function poseTimelineTick() {
 
 function attachPoseBone(bone, additive = false) {
   if (!bone) return;
+  if (propIsSelected()) propOnDeselect();
   // FK joint pick clears any active IK handle and freezes every IK chain
   // so a later FK rotate can't accidentally re-trigger a solve.
   poseIkActiveHandle = null;
@@ -12773,6 +13512,7 @@ const _deltaTmpA = new THREE.Quaternion();
 const _deltaTmpB = new THREE.Quaternion();
 transformControls.addEventListener('objectChange', () => {
   if (!poseMode) return;
+  if (propIsSelected()) { requestRender(); return; }
 
   // IK translate: solve limb chain into FK rotations every drag frame.
   if (poseIkActiveHandle && transformControls.mode === 'translate') {
@@ -13329,6 +14069,1795 @@ window.removeReferenceMedia = function () {
 
   refEl('ref-remove')?.addEventListener('click', () => window.removeReferenceMedia());
   refEl('ref-hide-bar')?.addEventListener('click', () => bar.classList.add('hidden'));
+})();
+
+// ═══════════════════════════════════════════════════════════════════════
+// VEHICLE ANIMATION EDITOR  (host: vehanim-viewer.local)
+//
+// Keyframe the bones of a real vehicle .yft on the live model and bake the
+// result to a .ycd. The host (VehicleAnimView) sends the same grouped-part
+// payload the car previewer uses, plus `skeleton` (every bone with its
+// tag, parent and LOCAL rest transform) and a `bone` index on every part.
+//
+// Scene graph: one THREE.Group per bone, parented per the yft hierarchy,
+// carrying the bone's rest transform. Part meshes are modelled in vehicle
+// space, so each is parented to its bone with the INVERSE of the bone's
+// rest world matrix — at rest everything lands exactly where the file put
+// it, and rotating a door bone swings the door around its real hinge.
+//
+// Spaces: RAGE is Z-up, three.js is Y-up. Everything in here lives in Y-up
+// (positions (x,y,z)→(x,z,-y), quaternions (x,y,z,w)→(x,z,-y,w)) and
+// sample()/getState() convert back on the way out ((x,y,z)→(x,-z,y)).
+// Keys store the bone's ABSOLUTE local transform (not a delta from rest),
+// which is exactly what a .ycd rotation/position track carries.
+// ═══════════════════════════════════════════════════════════════════════
+(function () {
+  const isVehAnimPage = location.hostname === 'vehanim-viewer.local';
+  const $ = id => document.getElementById(id);
+  const ui = $('vanim-ui'), hud = $('vanim-hud'), selLabel = $('vanim-sel');
+  const rulerCv = $('vanim-ruler'), rowsBox = $('vanim-rows'), rowsCv = $('vanim-rows-canvas');
+  const emptyNote = $('vanim-empty');
+  const NAMES_W = 150, ROW_H = 20, PAD_R = 10;
+  const COL = { accent: '#0078d4', key: '#f0c419', keySel: '#ffffff', dot: '#8fa3bf', dotKeyed: '#f0c419',
+                dotSel: '#3aa0ff', text: '#cccccc', dim: '#858585', grid: '#2c2c2d', rowAlt: '#1f1f20', ghost: '#5a5a5a' };
+
+  const va = {
+    active: false, bones: [], byName: new Map(), root: null, selected: -1,
+    time: 0, duration: 3, fps: 30, loop: true, playing: false, autoKey: true, ease: 'smooth',
+    mode: 'rotate', undo: [], redo: [], selKeys: new Set(), view: { start: 0, dur: 3 },
+    maxDim: 5, showDots: true, dragSnap: null, lastPost: 0, rafId: 0, lastTs: 0,
+    // Object mode (Props ▸ Animated): bones derived from the prop already on
+    // the stage; meshes borrowed from it and handed back on reset.
+    objectMode: false, restore: [], meshes: [], partsCache: null, partNodes: [], imported: null, modelRef: null,
+    keysRev: 0,   // bumps on every key mutation so the host can keep its export sidecar fresh
+    // Several parts picked in the LAYERS tree; groupRoots are the ones that
+    // actually move (the rest are nested under one of them and ride along).
+    group: [], groupRoots: [], groupProxy: null, groupDrag: null,
+  };
+
+  // ── Small helpers ────────────────────────────────────────────────────
+  const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
+  const snapT = t => clamp(Math.round(t * va.fps) / va.fps, 0, va.duration);
+  const frameOf = t => Math.round(t * va.fps);
+  const totalFrames = () => Math.max(1, Math.round(va.duration * va.fps));
+  // Payload space: vehicle payloads are RAGE Z-up; a prop loaded from its own
+  // file (object mode) is already three.js Y-up, so nothing converts there.
+  const yUpV = a => va.objectMode ? new THREE.Vector3(a[0], a[1], a[2]) : new THREE.Vector3(a[0], a[2], -a[1]);
+  const yUpQ = a => (va.objectMode ? new THREE.Quaternion(a[0], a[1], a[2], a[3]) : new THREE.Quaternion(a[0], a[2], -a[1], a[3])).normalize();
+  const zUpV = v => va.objectMode ? [v.x, v.y, v.z] : [v.x, -v.z, v.y];
+  const zUpQ = q => va.objectMode ? [q.x, q.y, q.z, q.w] : [q.x, -q.z, q.y, q.w];
+  const _one = new THREE.Vector3(1, 1, 1), _v = new THREE.Vector3(), _wp = new THREE.Vector3(), _wq = new THREE.Quaternion(), _ws = new THREE.Vector3();
+  const easeFn = (kind, u) => kind === 'linear' ? u : kind === 'step' ? 0 : (u * u * (3 - 2 * u));
+  const _p = new THREE.Vector3(), _q = new THREE.Quaternion(), _qa = new THREE.Quaternion(), _qb = new THREE.Quaternion();
+  const _e = new THREE.Euler(), _m = new THREE.Matrix4();
+
+  function keyCount() { let n = 0; for (const b of va.bones) n += b.keys.length; return n; }
+
+  // Bone LOCAL (parent-relative) transform, composed through the pivot
+  // group — what keys, the host echo and the .ycd all speak.
+  const _pp = new THREE.Vector3(), _sc = new THREE.Vector3();
+  function getBoneLocal(b, outPos, outQuat) {
+    b.pv.updateMatrix(); b.obj.updateMatrix();
+    _m.multiplyMatrices(b.pv.matrix, b.obj.matrix);
+    _m.decompose(outPos, outQuat, _sc);
+  }
+  function setBoneLocal(b, pos, quat) {
+    // pv rides on the transformed pivot point, keeps the bone's rest frame
+    // as its axes (so the gizmo's local handles are the bone's axes);
+    // obj carries the remainder. world = T(pv) Qrest T(obj) Qobj = T(pos) quat.
+    _pp.copy(b.pivotLocal).applyQuaternion(quat).add(pos);
+    b.pv.position.copy(_pp); b.pv.quaternion.copy(b.rest.quat);
+    _qa.copy(b.rest.quat).invert();
+    b.obj.quaternion.copy(_qa).multiply(quat);
+    b.obj.position.copy(pos).sub(_pp).applyQuaternion(_qa);
+  }
+  // After a gizmo drag pv carries the rotation; fold it back into obj so
+  // scrubbing / undo / export all read one consistent pose.
+  function foldPivot(b) { getBoneLocal(b, _p, _q); setBoneLocal(b, _p, _q); }
+  function keyedBones() { return va.bones.filter(b => b.keys.length > 0); }
+
+  // ── Bone dots (screen-constant sprites at every bone origin) ─────────
+  function dotTexture() {
+    const c = document.createElement('canvas'); c.width = c.height = 32;
+    const g = c.getContext('2d');
+    g.beginPath(); g.arc(16, 16, 12, 0, Math.PI * 2); g.fillStyle = '#fff'; g.fill();
+    g.lineWidth = 3; g.strokeStyle = 'rgba(0,0,0,0.55)'; g.stroke();
+    const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace; return t;
+  }
+  let dotTex = null;
+  function makeDot(b) {
+    if (!dotTex) dotTex = dotTexture();
+    const mat = new THREE.SpriteMaterial({ map: dotTex, color: COL.dot, depthTest: false, depthWrite: false,
+      sizeAttenuation: false, transparent: true, opacity: 0.95 });
+    const s = new THREE.Sprite(mat);
+    s.scale.set(0.018, 0.018, 1); s.renderOrder = 1000; s.userData.vaBoneIdx = b.index;
+    s.name = 'vadot_' + b.name;
+    return s;
+  }
+  function refreshDots() {
+    for (const b of va.bones) {
+      if (!b.dot) continue;
+      const sel = b.index === va.selected;
+      b.dot.material.color.set(sel ? COL.dotSel : b.keys.length ? COL.dotKeyed : COL.dot);
+      b.dot.scale.setScalar(sel ? 0.024 : 0.018); b.dot.scale.z = 1;
+      b.dot.visible = va.showDots && (sel || b.pickable);
+    }
+    requestRender();
+  }
+
+  // ── Load / reset ─────────────────────────────────────────────────────
+  function reset() {
+    va.playing = false; if (va.rafId) cancelAnimationFrame(va.rafId); va.rafId = 0;
+    transformControls.detach();
+    clearGroup();
+    for (const [, s] of sp.sel) scene.remove(s.ov);
+    sp.sel = new Map(); sp.bone = -1; sp.hover = null; if (sp.hoverOv) sp.hoverOv.visible = false;
+    splitBar.classList.remove('visible');
+    if (va.objectMode) {
+      // Hand every borrowed mesh back to the node it came from, as it was.
+      for (const r of va.restore) {
+        if (r.mesh.parent !== r.parent) r.parent.add(r.mesh);
+        r.mesh.matrix.copy(r.matrix); r.mesh.matrix.decompose(r.mesh.position, r.mesh.quaternion, r.mesh.scale);
+        r.mesh.visible = r.visible;   // part-level visibility lives on the part node again
+        delete r.mesh.userData.vaBoneIdx;
+      }
+      va.restore = []; va.meshes = []; va.partNodes = []; va.modelRef = null;
+      setDuration(3);                       // the length belonged to the old clip
+      if (va.root && va.root.parent) va.root.parent.remove(va.root);
+      if (currentModel) currentModel.updateMatrixWorld(true);
+    } else {
+      // The workbench owns the part meshes (wireframe / edges / disposal) —
+      // its reset also clears any preview-mode door groups left behind.
+      window.fiveosWorkbench.reset();
+      if (va.root) { workbenchGroup.remove(va.root); }
+    }
+    for (const b of va.bones) if (b.dot) { b.dot.material.dispose(); }
+    va.root = null; va.bones = []; va.byName = new Map(); va.selected = -1;
+    va.undo = []; va.redo = []; va.selKeys = new Set(); va.time = 0;
+    updateSelLabel(); drawTimeline(); requestRender();
+  }
+
+  function load(payload) {
+    if (!va.active) activate();
+    reset();
+    va.objectMode = false; va.partsCache = null;
+    if (empty) empty.classList.add('hidden');
+    workbenchPaintMode = !!(payload && payload.paint);
+    workbenchPaintMats = [];
+    const skel = (payload && payload.skeleton) || [];
+    va.root = new THREE.Group(); va.root.name = 'vanim_root';
+    workbenchGroup.add(va.root);
+
+    va.bones = skel.map((s, i) => ({
+      name: s.name || ('bone_' + i), tag: s.tag | 0, index: i, parent: (typeof s.parent === 'number') ? s.parent : -1,
+      kind: s.kind || null, keys: [], meshes: [], obj: new THREE.Group(), dot: null, pickable: !!s.kind,
+      rest: { pos: yUpV(s.pos || [0, 0, 0]), quat: yUpQ(s.rot || [0, 0, 0, 1]) },
+    }));
+    // Scene graph per bone: parent → pv (the gizmo's handle, sitting at the
+    // PIVOT) → obj (the bone itself; meshes + child bones hang off it).
+    // Normally the pivot is the bone origin. When a modder parked a bone's
+    // origin metres away from the part it drives (speaker walls, racks…),
+    // the pivot moves to the part's centre and the compensating translation
+    // is baked into the bone's position track — so it turns in place, in
+    // the editor and in game.
+    for (const b of va.bones) {
+      b.obj.name = 'vabone_' + b.name;
+      b.pv = new THREE.Group(); b.pv.name = 'vapivot_' + b.name;
+      b.pv.position.copy(b.rest.pos); b.pv.quaternion.copy(b.rest.quat);
+      b.pv.userData.vaBoneIdx = b.index;
+      b.obj.userData.vaBoneIdx = b.index;
+      b.pivotLocal = new THREE.Vector3();
+      const parent = (b.parent >= 0 && b.parent < va.bones.length && b.parent !== b.index) ? va.bones[b.parent].obj : va.root;
+      parent.add(b.pv); b.pv.add(b.obj);
+      va.byName.set(b.name.toLowerCase(), b);
+    }
+    va.root.updateMatrixWorld(true);
+    const rootInv = new THREE.Matrix4().copy(va.root.matrixWorld).invert();
+
+    for (const part of (payload && payload.parts) || []) {
+      const mesh = buildWorkbenchPart(part);
+      applyWorkbenchModes(mesh);
+      const bi = (typeof part.bone === 'number' && part.bone >= 0 && part.bone < va.bones.length) ? part.bone : -1;
+      if (bi >= 0) {
+        const b = va.bones[bi];
+        // vehicle space → bone local: inverse of the bone's rest world matrix.
+        _m.copy(rootInv).multiply(b.obj.matrixWorld).invert();
+        _m.decompose(mesh.position, mesh.quaternion, mesh.scale);
+        b.obj.add(mesh); b.meshes.push(mesh); b.pickable = true;
+        mesh.userData.vaBoneIdx = bi;
+      } else {
+        va.root.add(mesh);
+      }
+      workbenchMeshes.push(mesh);
+    }
+    // Pivot choice: bone origin, unless it lies outside the part's own box
+    // (+35 cm slack — a door hinge sits at the edge of its door, inside).
+    va.root.updateMatrixWorld(true);
+    const _origin = new THREE.Vector3(), _c = new THREE.Vector3();
+    for (const b of va.bones) {
+      b.pivotAuto = false;
+      if (!b.meshes.length) continue;
+      const box = new THREE.Box3(); for (const m of b.meshes) box.expandByObject(m);
+      if (!isFinite(box.min.x)) continue;
+      // Hinges (door / bonnet / boot) swing about their real edge pivot;
+      // everything else turns about its own centre so the gizmo sits on the
+      // part, not off at the bone's authored origin.
+      const HINGE = new Set(['door_l', 'door_r', 'bonnet', 'boot']);
+      if (HINGE.has(b.kind)) continue;
+      box.getCenter(_c);
+      b.pivotLocal.copy(b.obj.worldToLocal(_c.clone()));
+      b.pivotAuto = true;
+    }
+    for (const b of va.bones) setBoneLocal(b, b.rest.pos, b.rest.quat);
+
+    // Dots only where a click means something: bones that own geometry, or
+    // the classic hinges. Dummies (lights, seats, neon…) stay list-only —
+    // sixty dots over a car just hide each other. Dots sit on the pivot.
+    const HINGE = new Set(['door_l', 'door_r', 'bonnet', 'boot', 'extra', 'wheel']);
+    for (const b of va.bones) { b.pickable = b.meshes.length > 0 || HINGE.has(b.kind); b.dot = makeDot(b); b.pv.add(b.dot); }
+
+    // Frame + size the gizmo for a car-sized object.
+    va.root.updateMatrixWorld(true);
+    const box = new THREE.Box3();
+    for (const m of workbenchMeshes) box.expandByObject(m);
+    const size = new THREE.Vector3(); if (isFinite(box.min.x)) box.getSize(size);
+    va.maxDim = Math.max(size.x, size.y, size.z) || 5;
+    gizmoTargetWorldSize = Math.max(0.4, va.maxDim * 0.16);
+    if (!payload || payload.frame !== false) frameWorkbench();
+
+    transformControls.setSpace('local');
+    transformControls.setMode(va.mode);
+    setViewFit();
+    refreshDots(); updateSelLabel(); drawTimeline();
+    postToHost({ kind: 'workbench-loaded', lod: 'HIGH', tris: (payload && payload.tris) | 0, verts: 0 });
+    postState(true);
+  }
+
+  // ── Object mode: animate the parts of the prop already on the stage ──
+  // Bones come from the model's own node tree: every node that owns geometry
+  // (and every ancestor of one) becomes a bone; a synthetic root (bone 0)
+  // sits at the model's origin and is never animated. Meshes are re-parented
+  // under their bone with the same world placement, so nothing moves at rest;
+  // reset() hands them back. Everything is measured in the loader root's
+  // child space — the node space the exporter works in — so the pivot wrap,
+  // ground snap, unit fix and user gizmo above it never leak into the keys.
+  // Sample the model's own animation clip into per-bone LOCAL transforms, on
+  // the node tree as loaded. Returns null when the model ships no animation.
+  //
+  // Times come from the clip's own keyframes (the author's timing, and far
+  // fewer keys than a blanket resample); a clip with a very dense or
+  // per-frame track is resampled at 30 fps instead. Scale is dropped — RAGE
+  // bones carry none — and a bone that never leaves its rest gets no keys.
+  function sampleSourceClip(inner) {
+    // Prefer the clips carried by the model itself; the page global is only a
+    // fallback for models loaded before that existed.
+    const src = (currentModel && currentModel.userData && currentModel.userData.fiveos_sourceClips)
+      || (inner && inner.userData && inner.userData.fiveos_sourceClips)
+      || window._fiveosSourceClips;
+    const bail = (why, extra) => { va.imported = Object.assign({ skipped: why }, extra || {}); return null; };
+    if (!src || !src.length) return bail('no-source-clips', { srcIsNull: !src });
+    if (!va.bones.length) return bail('no-bones');
+    let pick = src[0];
+    for (const c of src) if ((c.duration || 0) > (pick.duration || 0)) pick = c;
+    const tracks = (pick.tracks || []).filter(t => t && t.times && t.times.length);
+    const duration = Math.max(0.05, pick.duration || 0);
+    if (!tracks.length) return bail('no-tracks', { clips: src.length });
+
+    // Resolve every track to the node + property it drives, and keep its
+    // interpolant (three.js's own, so LINEAR / STEP / CUBICSPLINE all behave).
+    const nodeOfBone = new Map();
+    for (const b of va.bones) if (b.node) nodeOfBone.set(b.node, b);
+    const animated = new Set();
+    const channels = [];
+    for (const t of tracks) {
+      let node = null, prop = null;
+      try {
+        const parsed = THREE.PropertyBinding.parseTrackName(t.name);
+        node = THREE.PropertyBinding.findNode(inner, parsed.nodeName);
+        prop = parsed.propertyName;
+      } catch (e) { node = null; }
+      if (!node || (prop !== 'position' && prop !== 'quaternion' && prop !== 'scale')) continue;
+      let interp = null;
+      try { interp = t.createInterpolant(); } catch (e) { interp = null; }
+      if (!interp) continue;
+      channels.push({ node, prop, interp });
+      for (let o = node; o; o = o.parent) {
+        const b = nodeOfBone.get(o);
+        if (b) { animated.add(b.index); break; }
+        if (o === inner) break;
+      }
+    }
+    if (!channels.length || !animated.size)
+      return bail('no-channels-resolved', { tracks: tracks.length, channels: channels.length, candidates: animated.size,
+        names: tracks.slice(0, 4).map(t => t.name) });
+
+    let times = [...new Set(tracks.flatMap(t => Array.from(t.times)))]
+      .filter(t => t >= 0 && t <= duration + 1e-6).sort((a, b) => a - b);
+    if (times.length > 300 || times.length < 2) {
+      const n = Math.min(300, Math.max(2, Math.round(duration * 30) + 1));
+      times = Array.from({ length: n }, (_, i) => duration * i / (n - 1));
+    }
+    if (times[0] > 1e-6) times.unshift(0);
+    if (times[times.length - 1] < duration - 1e-6) times.push(duration);
+
+    // Pose the tree from the tracks directly — no AnimationMixer, so nothing
+    // about binding lookup or the preview mixer's own actions can make this
+    // silently write nothing.
+    const snapshot = [];
+    inner.traverse(o => snapshot.push([o, o.position.clone(), o.quaternion.clone(), o.scale.clone()]));
+
+    const innerInv = new THREE.Matrix4();
+    const frames = [];
+    const _w = new THREE.Matrix4(), _l = new THREE.Matrix4(), _s2 = new THREE.Vector3();
+    for (const t of times) {
+      for (const c of channels) {
+        const v = c.interp.evaluate(t);
+        if (c.prop === 'quaternion') c.node.quaternion.set(v[0], v[1], v[2], v[3]).normalize();
+        else if (c.prop === 'position') c.node.position.set(v[0], v[1], v[2]);
+        else c.node.scale.set(v[0], v[1], v[2]);
+      }
+      inner.updateMatrixWorld(true);
+      innerInv.copy(inner.matrixWorld).invert();
+      const world = new Array(va.bones.length);
+      for (const b of va.bones) world[b.index] = b.node
+        ? new THREE.Matrix4().multiplyMatrices(innerInv, b.node.matrixWorld)
+        : new THREE.Matrix4();
+      const row = new Array(va.bones.length);
+      for (const b of va.bones) {
+        _w.copy(world[b.index]);
+        if (b.parent >= 0) _l.copy(world[b.parent]).invert().multiply(_w); else _l.copy(_w);
+        const pos = new THREE.Vector3(), quat = new THREE.Quaternion();
+        _l.decompose(pos, quat, _s2);
+        row[b.index] = { pos, quat };
+      }
+      frames.push({ t, row });
+    }
+
+    for (const [o, p, q, sc] of snapshot) { o.position.copy(p); o.quaternion.copy(q); o.scale.copy(sc); }
+    inner.updateMatrixWorld(true);
+    return { name: pick.clip.name || 'source', duration, frames, animated, channels: channels.length };
+  }
+
+  // Turn a sampled clip into editor keys. Called once the bone graph exists.
+  function applyImportedClip(imp) {
+    va.imported = { name: imp.name, duration: +imp.duration.toFixed(3), candidates: imp.animated.size, channels: imp.channels || 0, frames: imp.frames.length, keys: 0, bones: 0 };
+    // Work out what actually moves BEFORE touching the timeline: a clip that
+    // keys nothing must not leave its length behind on an empty timeline.
+    const movers = [];
+    for (const b of va.bones) {
+      if (!imp.animated.has(b.index)) continue;
+      // Skip a bone the clip never actually moves off its rest.
+      // Moving means: away from rest at some point, OR simply not constant
+      // across the clip (a clip whose rest pose IS its first frame still
+      // animates — comparing only against rest would drop it).
+      const f0 = imp.frames[0].row[b.index];
+      let moves = false;
+      for (const f of imp.frames) {
+        const v = f.row[b.index];
+        if (v.pos.distanceTo(b.rest.pos) > 1e-4 || Math.abs(1 - Math.abs(v.quat.dot(b.rest.quat))) > 1e-6
+         || v.pos.distanceTo(f0.pos) > 1e-4 || Math.abs(1 - Math.abs(v.quat.dot(f0.quat))) > 1e-6) { moves = true; break; }
+      }
+      if (!moves) continue;
+      movers.push(b);
+    }
+    if (!movers.length) { va.imported.skipped = 'no-moving-bones'; return 0; }
+
+    setDuration(imp.duration);
+    let keyed = 0;
+    for (const b of movers) {
+      b.keys = imp.frames.map(f => ({
+        t: clamp(f.t, 0, va.duration),
+        pos: f.row[b.index].pos.toArray(),
+        quat: f.row[b.index].quat.toArray(),
+        ease: 'linear',                      // the source's own timing, not ours
+      })).sort((x, y) => x.t - y.t);
+      keyed++;
+      va.imported.keys += b.keys.length;
+    }
+    va.imported.bones = keyed;
+    va.keysRev++;
+    va.undo = []; va.redo = [];              // the import is the baseline
+    setViewFit(); setTime(0);
+    refreshDots(); updateSelLabel(); drawTimeline(); postState(true);
+    return keyed;
+  }
+
+  function loadObject() {
+    if (!currentModel) return null;
+    if (!va.active) activate();
+    if (va.objectMode && va.root && va.modelRef === currentModel && va.bones.length) {
+      takeOverStage();          // still hand the stage over, but keep the bones + keys
+      requestRender(); postState(true);
+      return skeletonInfo();
+    }
+    reset();
+    takeOverStage();       // a fresh model re-shows the previewer's chrome
+    va.objectMode = true; va.imported = null; va.modelRef = currentModel;
+    const inner = (currentModel.userData && currentModel.userData.fiveos_inner) || currentModel;
+    const holder = inner.parent || currentModel;
+    va.partsCache = (typeof getModelPartsList === 'function') ? getModelPartsList() : null;
+    va.partNodes = [...inner.children];   // what the Layers panel addresses by display name
+    inner.updateMatrixWorld(true);
+    // glTF: a node with several primitives loads as a Group of Meshes; those
+    // Meshes are pieces of ONE part, not parts (the loader's associations tell
+    // nodes and primitives apart). Other formats: every Mesh is a node.
+    const assoc = window._fiveosGltfAssoc || null;
+    const isPrimitiveSplit = o => !!(assoc && o.isMesh && assoc.get(o) && assoc.get(o).nodes === undefined && o.parent && o.parent !== inner);
+    const hasGeo = o => { if (o.isMesh) return true; for (const c of o.children) if (hasGeo(c)) return true; return false; };
+    // va.root mirrors inner's own transform, so bone space == inner's child space.
+    va.root = new THREE.Group(); va.root.name = 'vanim_root';
+    va.root.position.copy(inner.position); va.root.quaternion.copy(inner.quaternion); va.root.scale.copy(inner.scale);
+    holder.add(va.root);
+    va.bones = [{ name: 'root', tag: 0, index: 0, parent: -1, kind: null, keys: [], meshes: [], obj: new THREE.Group(), dot: null, pickable: false,
+      rest: { pos: new THREE.Vector3(), quat: new THREE.Quaternion() } }];
+    const names = new Set(['root']);
+    const innerInv = new THREE.Matrix4().copy(inner.matrixWorld).invert();
+    const meshOwners = [];        // [mesh, boneIdx, partNode]
+    const visit = (node, parentIdx, part) => {
+      let myIdx = parentIdx;
+      if (node !== inner || node.isMesh) {
+        if (!part) part = node;   // the top-level node the Layers panel knows this geometry by
+        // A part hidden in Layers is left out of the export, so it stays
+        // where it is and gets no bone — the exporter's bounds and ours agree.
+        if (!hasGeo(node) || node.visible === false || (node.userData && node.userData.fiveosOverlay)) return;
+        // FBX turns limb/null chains into Bone nodes; the meshes under them
+        // are ordinary parts — walk through without making the Bone a bone.
+        if (node.isBone) { for (const c of [...node.children]) visit(c, parentIdx, part); return; }
+        if (isPrimitiveSplit(node)) { meshOwners.push([node, parentIdx, part]); return; }
+        let base = String(node.name || '').trim() || (node.isMesh ? 'part' : 'group');
+        base = base.replace(/[^A-Za-z0-9_\-. ]/g, '_');
+        let nm = base, n = 2; while (names.has(nm.toLowerCase())) nm = base + '_' + (n++);
+        names.add(nm.toLowerCase());
+        // Rest = the node's placement relative to inner, scale dropped (the
+        // mesh keeps any scale in its own local matrix below).
+        _m.copy(innerInv).multiply(node.matrixWorld).decompose(_wp, _wq, _ws);
+        const b = { name: nm, tag: 0, index: va.bones.length, parent: parentIdx, kind: null, keys: [], meshes: [], obj: new THREE.Group(), dot: null,
+          pickable: false, node, rest: { pos: _wp.clone(), quat: _wq.clone().normalize() } };
+        va.bones.push(b); myIdx = b.index;
+        if (node.isMesh) meshOwners.push([node, b.index, part]);
+      }
+      for (const c of [...node.children]) visit(c, myIdx, part);
+    };
+    visit(inner, 0, null);
+    // Read the model's own animation off the pristine node tree, before the
+    // meshes move under bone groups (a track binds to a node by name, and a
+    // borrowed mesh would no longer be found under `inner`).
+    const imported = sampleSourceClip(inner);
+    // World rest → parent-relative rest, then the pv/obj chain per bone.
+    const world = va.bones.map(b => new THREE.Matrix4().compose(b.rest.pos, b.rest.quat, _one));
+    for (const b of va.bones) {
+      if (b.parent >= 0) { _m.copy(world[b.parent]).invert().multiply(world[b.index]); _m.decompose(b.rest.pos, b.rest.quat, _ws); }
+      b.obj.name = 'vabone_' + b.name;
+      b.pv = new THREE.Group(); b.pv.name = 'vapivot_' + b.name;
+      b.pv.position.copy(b.rest.pos); b.pv.quaternion.copy(b.rest.quat);
+      b.pv.userData.vaBoneIdx = b.index; b.obj.userData.vaBoneIdx = b.index;
+      b.pivotLocal = new THREE.Vector3();
+      const parent = b.parent >= 0 ? va.bones[b.parent].obj : va.root;
+      parent.add(b.pv); b.pv.add(b.obj);
+      va.byName.set(b.name.toLowerCase(), b);
+    }
+    va.root.updateMatrixWorld(true);
+    // Borrow the meshes: same world placement, new parent.
+    for (const [mesh, bi, part] of meshOwners) {
+      const b = va.bones[bi];
+      mesh.updateWorldMatrix(true, false);
+      va.restore.push({ mesh, parent: mesh.parent, matrix: mesh.matrix.clone(), visible: mesh.visible, part });
+      _m.copy(b.obj.matrixWorld).invert().multiply(mesh.matrixWorld);
+      b.obj.add(mesh);
+      _m.decompose(mesh.position, mesh.quaternion, mesh.scale);
+      mesh.updateMatrix();
+      b.meshes.push(mesh); mesh.userData.vaBoneIdx = bi; va.meshes.push(mesh);
+    }
+    va.root.updateMatrixWorld(true);
+    // Pivot: the part's own origin when the author put it on the part (a
+    // hinge on a door's edge, a hub at a fan's centre); the geometry centre
+    // when the origin sits somewhere else entirely (everything at world zero).
+    const _origin = new THREE.Vector3(), _c = new THREE.Vector3(), _sz = new THREE.Vector3();
+    for (const b of va.bones) {
+      b.pivotAuto = false;
+      if (!b.meshes.length) continue;
+      const box = new THREE.Box3(); for (const m of b.meshes) box.expandByObject(m);
+      if (!isFinite(box.min.x)) continue;
+      b.obj.getWorldPosition(_origin); box.getSize(_sz);
+      const pad = Math.max(0.35, Math.max(_sz.x, _sz.y, _sz.z) * 0.35);
+      const inside = _origin.x >= box.min.x - pad && _origin.x <= box.max.x + pad
+        && _origin.y >= box.min.y - pad && _origin.y <= box.max.y + pad
+        && _origin.z >= box.min.z - pad && _origin.z <= box.max.z + pad;
+      if (inside) continue;
+      box.getCenter(_c);
+      b.pivotLocal.copy(b.obj.worldToLocal(_c.clone()));
+      b.pivotAuto = true;
+    }
+    for (const b of va.bones) setBoneLocal(b, b.rest.pos, b.rest.quat);
+    for (const b of va.bones) { b.pickable = b.meshes.length > 0; b.dot = makeDot(b); b.pv.add(b.dot); }
+    if (imported) applyImportedClip(imported);
+    // Gizmo sized for the prop; the camera stays where the user had it.
+    va.root.updateMatrixWorld(true);
+    const box = new THREE.Box3(); for (const m of va.meshes) box.expandByObject(m);
+    const size = new THREE.Vector3(); if (isFinite(box.min.x)) box.getSize(size);
+    va.maxDim = Math.max(size.x, size.y, size.z) || 1;
+    gizmoTargetWorldSize = Math.max(0.12, va.maxDim * 0.3);
+    transformControls.setSpace('local'); transformControls.setMode(va.mode);
+    setViewFit(); refreshDots(); updateSelLabel(); drawTimeline();
+    // A one-piece prop: select its only part so it is ready to key.
+    const parts = va.bones.filter(b => b.meshes.length);
+    if (parts.length === 1) select(parts[0].index, { silent: true });
+    requestRender();
+    postState(true);
+    return skeletonInfo();
+  }
+  function effectivelyVisible(o) {
+    for (let p = o; p && p !== va.root; p = p.parent) if (p.visible === false) return false;
+    return true;
+  }
+  // Layers-panel bridge (object mode): the meshes a top-level part node
+  // owns are on loan under bone groups, so visibility / material changes
+  // addressed to the part have to reach them here.
+  function partMeshes(node) {
+    return va.restore.filter(r => r.part === node).map(r => r.mesh);
+  }
+  function setPartVisible(node, on) {
+    let hit = false;
+    for (const m of partMeshes(node)) { m.visible = !!on; hit = true; }
+    if (hit) requestRender();
+    return hit;
+  }
+  // Bone list for the host outliner (object mode).
+  function skeletonInfo() {
+    const depthOf = b => { let d = 0; while (b.parent >= 0) { b = va.bones[b.parent]; d++; } return d; };
+    return JSON.stringify(va.bones.map(b => ({ name: b.name, index: b.index, parent: b.parent, depth: depthOf(b), hasGeometry: b.meshes.length > 0, meshes: b.meshes.length })));
+  }
+  // One-click turntable: a full revolution of a bone about a WORLD axis
+  // ('y' = vertical on screen, which is the game's up once exported), linear
+  // so the speed is constant; the last key equals the first for a seamless
+  // loop. Turns in place about the bone's pivot, like the gizmo does.
+  function spin(name, axis, reverse) {
+    const b = name ? va.byName.get(String(name).toLowerCase()) : va.bones[va.selected];
+    if (!b) return false;
+    pushUndo('spin');
+    b.keys = [];
+    // 'y' = vertical (the game's Z once exported), 'x' = sideways, 'gy' = the
+    // game's Y (forward) which is the viewer's -Z; plain 'z' is kept for tests.
+    const ax = axis === 'x' ? new THREE.Vector3(1, 0, 0) : axis === 'z' ? new THREE.Vector3(0, 0, 1)
+      : axis === 'gy' ? new THREE.Vector3(0, 0, -1) : new THREE.Vector3(0, 1, 0);
+    const parentQ = new THREE.Quaternion();
+    (b.parent >= 0 ? va.bones[b.parent].obj : va.root).getWorldQuaternion(parentQ);
+    const axLocal = ax.applyQuaternion(parentQ.invert()).normalize();
+    const steps = 4, dir = reverse ? -1 : 1;
+    const pivotRest = b.pivotLocal.clone().applyQuaternion(b.rest.quat).add(b.rest.pos);
+    for (let i = 0; i <= steps; i++) {
+      _qa.setFromAxisAngle(axLocal, dir * 2 * Math.PI * (i % steps) / steps);
+      _q.copy(_qa).multiply(b.rest.quat);
+      _p.copy(pivotRest).sub(b.pivotLocal.clone().applyQuaternion(_q));
+      b.keys.push({ t: snapT(va.duration * i / steps), pos: _p.toArray(), quat: _q.toArray(), ease: 'linear' });
+    }
+    setTime(0); refreshDots(); updateSelLabel(); drawTimeline(); postState(true);
+    return true;
+  }
+
+  // ── Selection ────────────────────────────────────────────────────────
+  function select(idx, opts) {
+    idx = (typeof idx === 'number' && idx >= 0 && idx < va.bones.length) ? idx : -1;
+    clearGroup();
+    va.selected = idx;
+    if (idx >= 0) {
+      transformControls.attach(va.bones[idx].pv);
+      transformControls.setSpace('local');
+      transformControls.setMode(va.mode);
+    } else {
+      transformControls.detach();
+    }
+    refreshDots(); updateSelLabel(); drawTimeline();
+    if (!(opts && opts.silent)) postState(true);
+  }
+  // ── Several parts at once ────────────────────────────────────────────
+  // Picking a run of parts in the LAYERS tree moves them as one: the gizmo
+  // rides a proxy at the middle of the group and its delta is replayed onto
+  // every top-most part in it. A part nested under another selected part is
+  // left out — its parent already carries it.
+  const _gm = new THREE.Matrix4(), _gm2 = new THREE.Matrix4();
+  const _gp = new THREE.Vector3(), _gq = new THREE.Quaternion(), _gs = new THREE.Vector3();
+
+  function clearGroup() {
+    va.group = []; va.groupRoots = []; va.groupDrag = null;
+    if (va.groupProxy && va.groupProxy.parent) va.groupProxy.parent.remove(va.groupProxy);
+  }
+
+  function placeGroupProxy() {
+    if (!va.groupProxy) { va.groupProxy = new THREE.Group(); va.groupProxy.name = 'vagroup'; }
+    if (va.groupProxy.parent !== scene) scene.add(va.groupProxy);
+    scene.updateMatrixWorld(true);
+    const c = va.groupProxy.position.set(0, 0, 0);
+    for (const b of va.groupRoots) { b.pv.getWorldPosition(_gp); c.add(_gp); }
+    c.divideScalar(Math.max(1, va.groupRoots.length));
+    // Orient like the part clicked last, so the local handles still read as
+    // that part's own axes.
+    const lead = va.bones[va.selected];
+    if (lead) lead.pv.getWorldQuaternion(va.groupProxy.quaternion);
+    else va.groupProxy.quaternion.identity();
+    va.groupProxy.scale.set(1, 1, 1);
+    va.groupProxy.updateMatrixWorld(true);
+    transformControls.attach(va.groupProxy);
+    transformControls.setSpace('local');
+    transformControls.setMode(va.mode);
+  }
+
+  // Parts to move together, the one the gizmo answers to last.
+  function selectMany(names) {
+    let list = names;
+    if (typeof list === 'string') { try { list = JSON.parse(list); } catch (e) { list = [list]; } }
+    if (!Array.isArray(list)) list = [];
+    const picked = [];
+    for (const n of list) {
+      const b = va.byName.get(String(n || '').toLowerCase());
+      if (b && picked.indexOf(b) < 0) picked.push(b);
+    }
+    if (picked.length < 2) return selectByName(picked.length ? picked[0].name : '');
+
+    clearGroup();
+    va.group = picked.map(b => b.index);
+    const inGroup = new Set(va.group);
+    va.groupRoots = picked.filter(b => {
+      for (let p = b.parent; p >= 0; p = va.bones[p].parent) if (inGroup.has(p)) return false;
+      return true;
+    });
+    va.selected = picked[picked.length - 1].index;
+    placeGroupProxy();
+    refreshDots(); updateSelLabel(); drawTimeline(); requestRender(); postState(true);
+    return true;
+  }
+
+  function beginGroupDrag() {
+    scene.updateMatrixWorld(true);
+    const items = [];
+    for (const b of va.groupRoots) {
+      const parent = b.pv.parent || va.root;
+      parent.updateWorldMatrix(true, false);
+      getBoneLocal(b, _gp, _gq);
+      const world = new THREE.Matrix4().multiplyMatrices(
+        parent.matrixWorld,
+        new THREE.Matrix4().compose(_gp, _gq, new THREE.Vector3(1, 1, 1)));
+      items.push({ b, world, parentInv: new THREE.Matrix4().copy(parent.matrixWorld).invert() });
+    }
+    va.groupDrag = {
+      p0: va.groupProxy.position.clone(),
+      q0: va.groupProxy.quaternion.clone(),
+      items,
+    };
+  }
+
+  function applyGroupDrag() {
+    const g = va.groupDrag; if (!g) return;
+    const dq = va.groupProxy.quaternion.clone().multiply(g.q0.clone().invert());
+    const dp = va.groupProxy.position.clone().sub(g.p0);
+    for (const it of g.items) {
+      it.world.decompose(_gp, _gq, _gs);
+      // Turn about the gizmo, then carry the whole group along.
+      _gp.sub(g.p0).applyQuaternion(dq).add(g.p0).add(dp);
+      _gq.premultiply(dq);
+      _gm.compose(_gp, _gq, _gs);
+      _gm2.multiplyMatrices(it.parentInv, _gm);
+      _gm2.decompose(_gp, _gq, _gs);
+      setBoneLocal(it.b, _gp, _gq);
+    }
+  }
+
+  function endGroupDrag() {
+    const g = va.groupDrag; if (!g) return;
+    for (const it of g.items) foldPivot(it.b);
+    if (va.autoKey) for (const it of g.items) setKey(it.b.index, va.time, { noUndo: true });
+    va.groupDrag = null;
+    placeGroupProxy();
+  }
+
+  function selectByName(name) {
+    if (name == null || name === '') { select(-1); return true; }
+    const b = va.byName.get(String(name).toLowerCase());
+    if (!b) return false;
+    select(b.index); return true;
+  }
+  function updateSelLabel() {
+    const b = va.bones[va.selected];
+    if (!b) { selLabel.classList.add('hidden'); selLabel.textContent = ''; return; }
+    if (va.group.length > 1) {
+      const moved = va.groupRoots.length;
+      selLabel.classList.remove('hidden');
+      selLabel.innerHTML = escapeHtml(va.group.length + ' parts') +
+        ' <span class="dim">\u00b7 ' +
+        (moved === va.group.length ? 'move together' : moved + ' move, the rest ride along') +
+        '</span>';
+      return;
+    }
+    const k = b.keys.length;
+    selLabel.classList.remove('hidden');
+    selLabel.innerHTML = `${escapeHtml(b.name)} <span class="dim">· ${k ? k + (k === 1 ? ' key' : ' keys') : 'no keys'}</span>`;
+  }
+  function escapeHtml(s) { return String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c])); }
+
+  function setMode(mode) {
+    va.mode = mode === 'translate' ? 'translate' : 'rotate';
+    $('vanim-mode-rotate').classList.toggle('active', va.mode === 'rotate');
+    $('vanim-mode-translate').classList.toggle('active', va.mode === 'translate');
+    if (transformControls.object) transformControls.setMode(va.mode);
+    requestRender();
+  }
+
+  // ── Picking (bone dots first, then part meshes) ──────────────────────
+  let downAt = null;
+  const _ndc = new THREE.Vector2();
+  renderer.domElement.addEventListener('pointerdown', e => { if (va.active) downAt = { x: e.clientX, y: e.clientY }; });
+  renderer.domElement.addEventListener('pointerup', e => {
+    if (!va.active) return;
+    const start = downAt; downAt = null;
+    if (!start || e.button !== 0) return;
+    if (Math.hypot(e.clientX - start.x, e.clientY - start.y) > 4) return;
+    if (transformControls.dragging || transformControls.axis) return;
+    if (!va.root) return;
+    const rect = renderer.domElement.getBoundingClientRect();
+    _ndc.x = ((e.clientX - rect.left) / rect.width) * 2 - 1;
+    _ndc.y = -((e.clientY - rect.top) / rect.height) * 2 + 1;
+    raycaster.setFromCamera(_ndc, camera);
+    // Clicking any surface of the car picks that PIECE (and everything mounted
+    // on it) for splitting AND selects its bone for animating. Bone dots only
+    // matter for bones that have no geometry of their own (rare hinges) — the
+    // mesh under the cursor wins whenever there is one, so a dot sitting over a
+    // panel never steals the click.
+    if (va.objectMode) {
+      // Click a part → its bone. Dots cover the parts that have none.
+      const hit = raycaster.intersectObjects(va.meshes.filter(effectivelyVisible), false)[0];
+      if (hit) { select(hit.object.userData.vaBoneIdx); return; }
+      const dots = va.bones.filter(b => b.dot && b.dot.visible).map(b => b.dot);
+      const dotHit = raycaster.intersectObjects(dots, false)[0];
+      select(dotHit ? dotHit.object.userData.vaBoneIdx : -1);
+      return;
+    }
+    const piece = pickIsland(e);
+    if (piece) {
+      select(piece.mesh.userData.vaBoneIdx);
+      // Plain click = just this piece (replace). Shift+click = add/remove this
+      // one piece — build up a section click by click. Double-click grabs the
+      // whole unit; Grow spreads to touching pieces.
+      if (!e.shiftKey) clearSplitSel(true);
+      toggleIsland(piece.mesh, piece.isl, true);
+    } else {
+      const dots = va.bones.filter(b => b.dot && b.dot.visible).map(b => b.dot);
+      const dotHit = raycaster.intersectObjects(dots, false)[0];
+      select(dotHit ? dotHit.object.userData.vaBoneIdx : -1);
+      clearSplitSel();
+    }
+  });
+  // Double-click = the whole connected unit under the cursor (one speaker).
+  renderer.domElement.addEventListener('dblclick', e => {
+    if (!va.active || !va.root) return;
+    const piece = pickIsland(e);
+    if (!piece) return;
+    select(piece.mesh.userData.vaBoneIdx);
+    if (!e.shiftKey) clearSplitSel(true);
+    toggleIsland(piece.mesh, piece.isl, false);
+  });
+
+  // ── Gizmo → keys / undo ──────────────────────────────────────────────
+  transformControls.addEventListener('mouseDown', () => {
+    if (!va.active || va.selected < 0) return;
+    va.dragSnap = snapshot();
+    if (va.groupRoots.length > 1 && transformControls.object === va.groupProxy) beginGroupDrag();
+  });
+  transformControls.addEventListener('mouseUp', () => {
+    if (!va.active || va.selected < 0) return;
+    if (va.groupDrag) {
+      if (va.dragSnap) { pushUndoSnapshot(va.dragSnap, 'move parts'); va.dragSnap = null; }
+      endGroupDrag();
+      refreshDots(); updateSelLabel(); drawTimeline(); postState(true);
+      return;
+    }
+    if (va.dragSnap) { pushUndoSnapshot(va.dragSnap, 'move bone'); va.dragSnap = null; }
+    foldPivot(va.bones[va.selected]);
+    if (va.autoKey) setKey(va.selected, va.time, { noUndo: true });
+    postState(true);
+  });
+  transformControls.addEventListener('objectChange', () => {
+    if (!va.active) return;
+    if (va.groupDrag) applyGroupDrag();
+    refreshOverlays(); requestRender(); postState(false);
+  });
+
+  // ── Keys ─────────────────────────────────────────────────────────────
+  function setKey(bi, t, opts) {
+    const b = va.bones[bi]; if (!b) return false;
+    const tt = snapT(t);
+    if (!(opts && opts.noUndo)) pushUndo('key');
+    getBoneLocal(b, _p, _q);
+    const k = { t: tt, pos: _p.toArray(), quat: _q.toArray(), ease: va.ease };
+    const i = b.keys.findIndex(x => Math.abs(x.t - tt) < 1e-6);
+    if (i >= 0) { k.ease = b.keys[i].ease || va.ease; b.keys[i] = k; }
+    else { b.keys.push(k); b.keys.sort((x, y) => x.t - y.t); }
+    refreshDots(); updateSelLabel(); drawTimeline(); postState(true);
+    return true;
+  }
+  function keyPosed() {
+    // Key every bone that is already keyed or whose pose left its rest.
+    pushUndo('key posed');
+    let n = 0;
+    for (const b of va.bones) {
+      getBoneLocal(b, _p, _q);
+      const moved = _p.distanceTo(b.rest.pos) > 1e-4 || Math.abs(1 - Math.abs(_q.dot(b.rest.quat))) > 1e-6;
+      if (b.keys.length || moved) { setKey(b.index, va.time, { noUndo: true }); n++; }
+    }
+    return n;
+  }
+  function deleteKeys() {
+    if (va.selKeys.size) {
+      pushUndo('delete keys');
+      for (const b of va.bones) b.keys = b.keys.filter(k => !va.selKeys.has(k));
+      va.selKeys = new Set();
+    } else {
+      const b = va.bones[va.selected]; if (!b) return false;
+      const i = b.keys.findIndex(k => Math.abs(k.t - snapT(va.time)) < 1e-6);
+      if (i < 0) return false;
+      pushUndo('delete key'); b.keys.splice(i, 1);
+    }
+    applyTime(va.time); refreshDots(); updateSelLabel(); drawTimeline(); postState(true);
+    return true;
+  }
+  function clearBoneKeys(name) {
+    const b = name ? va.byName.get(String(name).toLowerCase()) : va.bones[va.selected];
+    if (!b || !b.keys.length) return false;
+    pushUndo('clear bone keys'); b.keys = []; va.selKeys = new Set();
+    setBoneLocal(b, b.rest.pos, b.rest.quat);   // nothing left to pose it — back to rest
+    refreshDots(); updateSelLabel(); drawTimeline(); requestRender(); postState(true); return true;
+  }
+  function clearAllKeys() {
+    if (!keyCount()) return false;
+    pushUndo('clear keys');
+    for (const b of va.bones) { b.keys = []; setBoneLocal(b, b.rest.pos, b.rest.quat); }
+    va.selKeys = new Set();
+    refreshDots(); updateSelLabel(); drawTimeline(); requestRender(); postState(true); return true;
+  }
+  function resetBone(all) {
+    pushUndo(all ? 'reset pose' : 'reset bone');
+    const list = all ? va.bones : [va.bones[va.selected]].filter(Boolean);
+    for (const b of list) setBoneLocal(b, b.rest.pos, b.rest.quat);
+    if (va.autoKey && !all) for (const b of list) if (b.keys.length) setKey(b.index, va.time, { noUndo: true });
+    requestRender(); postState(true);
+  }
+
+  // Bone offset from rest, reported in RAGE (Z-up) space so the host's
+  // number boxes read like the game: 0/0/0 at rest, degrees + metres.
+  const _lp = new THREE.Vector3(), _lq = new THREE.Quaternion();
+  function boneOffset(b) {
+    getBoneLocal(b, _lp, _lq);
+    _qa.copy(b.rest.quat).invert().multiply(_lq);                         // delta (Y-up)
+    const dq = zUpQ(_qa); _qb.set(dq[0], dq[1], dq[2], dq[3]);
+    _e.setFromQuaternion(_qb, 'XYZ');
+    // Translation offset measured at the PIVOT, so an in-place rotation
+    // reads as 0/0/0 movement even when the bone origin swung around.
+    _pp.copy(b.pivotLocal).applyQuaternion(_lq).add(_lp)
+       .sub(b.pivotLocal.clone().applyQuaternion(b.rest.quat).add(b.rest.pos));
+    const dp = zUpV(_pp);
+    return { rot: [_e.x, _e.y, _e.z].map(r => r * 180 / Math.PI), pos: dp };
+  }
+  function setBoneOffset(name, rotDeg, pos) {
+    const b = name ? va.byName.get(String(name).toLowerCase()) : va.bones[va.selected];
+    if (!b) return false;
+    pushUndo('edit bone');
+    getBoneLocal(b, _lp, _lq);
+    if (rotDeg) {
+      _e.set(rotDeg[0] * Math.PI / 180, rotDeg[1] * Math.PI / 180, rotDeg[2] * Math.PI / 180, 'XYZ');
+      _qb.setFromEuler(_e);                                              // delta (Z-up)
+      if (va.objectMode) _qa.copy(_qb); else _qa.set(_qb.x, _qb.z, -_qb.y, _qb.w);   // → Y-up
+      _lq.copy(b.rest.quat).multiply(_qa);
+    }
+    // Rotate IN PLACE about the pivot (same as the gizmo): the pivot point
+    // stays where rest put it, the bone origin swings to compensate.
+    const pivotRest = b.pivotLocal.clone().applyQuaternion(b.rest.quat).add(b.rest.pos);
+    _lp.copy(pivotRest).sub(b.pivotLocal.clone().applyQuaternion(_lq));
+    if (pos) _lp.add(yUpV(pos));
+    setBoneLocal(b, _lp, _lq);
+    if (va.autoKey) setKey(b.index, va.time, { noUndo: true });
+    requestRender(); postState(true); return true;
+  }
+
+  // ── Evaluation / playback ────────────────────────────────────────────
+  function evalBone(b, t, outPos, outQuat) {
+    const ks = b.keys; if (!ks.length) return false;
+    if (t <= ks[0].t || ks.length === 1) { outPos.fromArray(ks[0].pos); outQuat.fromArray(ks[0].quat); return true; }
+    const last = ks[ks.length - 1];
+    if (t >= last.t) { outPos.fromArray(last.pos); outQuat.fromArray(last.quat); return true; }
+    let i = 0; while (i < ks.length - 2 && ks[i + 1].t <= t) i++;
+    const a = ks[i], c = ks[i + 1];
+    let u = (t - a.t) / Math.max(1e-6, c.t - a.t);
+    u = easeFn(a.ease || 'smooth', clamp(u, 0, 1));
+    outPos.set(a.pos[0] + (c.pos[0] - a.pos[0]) * u, a.pos[1] + (c.pos[1] - a.pos[1]) * u, a.pos[2] + (c.pos[2] - a.pos[2]) * u);
+    _qa.fromArray(a.quat); _qb.fromArray(c.quat);
+    outQuat.copy(_qa).slerp(_qb, u);
+    return true;
+  }
+  function applyTime(t) {
+    for (const b of va.bones) if (b.keys.length && evalBone(b, t, _p, _q)) setBoneLocal(b, _p, _q);
+    refreshOverlays();
+    requestRender();
+  }
+  function setTime(t, opts) {
+    va.time = clamp(t, 0, va.duration);
+    if (!(opts && opts.raw)) va.time = snapT(va.time);
+    applyTime(va.time);
+    ensurePlayheadVisible();
+    drawTimeline();
+    postState(!(opts && opts.fromPlay));
+  }
+  function tick(ts) {
+    if (!va.playing) { va.rafId = 0; return; }
+    const dt = va.lastTs ? (ts - va.lastTs) / 1000 : 0; va.lastTs = ts;
+    let t = va.time + dt;
+    if (t >= va.duration) {
+      if (va.loop) t = va.duration > 0 ? t % va.duration : 0;
+      else { t = va.duration; va.playing = false; updatePlayBtn(); }
+    }
+    setTime(t, { raw: true, fromPlay: true });
+    va.rafId = va.playing ? requestAnimationFrame(tick) : 0;
+    if (!va.playing) postState(true);
+  }
+  function play() {
+    if (va.playing) return;
+    if (!va.loop && va.time >= va.duration - 1e-6) va.time = 0;
+    va.playing = true; va.lastTs = 0; updatePlayBtn();
+    if (!va.rafId) va.rafId = requestAnimationFrame(tick);
+    postState(true);
+  }
+  function pause() { va.playing = false; updatePlayBtn(); setTime(va.time); }
+  function stop() { va.playing = false; updatePlayBtn(); setTime(0); }
+  function updatePlayBtn() {
+    $('vanim-ic-play').style.display = va.playing ? 'none' : '';
+    $('vanim-ic-pause').style.display = va.playing ? '' : 'none';
+    $('vanim-play').classList.toggle('on', va.playing);
+  }
+  function keyTimes() {
+    const s = new Set(); for (const b of va.bones) for (const k of b.keys) s.add(Math.round(k.t * 1e5) / 1e5);
+    return [...s].sort((a, b) => a - b);
+  }
+  function jumpKey(dir) {
+    const ts = keyTimes(); if (!ts.length) return;
+    const cur = va.time + (dir > 0 ? 1e-4 : -1e-4);
+    const t = dir > 0 ? ts.find(x => x > cur) : [...ts].reverse().find(x => x < cur);
+    if (t != null) setTime(t);
+  }
+
+  // ── Settings ─────────────────────────────────────────────────────────
+  function setFps(n) {
+    n = clamp(Math.round(+n || 30), 1, 120); if (n === va.fps) return;
+    va.fps = n; $('vanim-fps').value = n; setTime(va.time); postState(true);
+  }
+  function setDuration(sec) {
+    sec = clamp(+sec || 3, 0.1, 600); if (Math.abs(sec - va.duration) < 1e-9) return;
+    va.duration = Math.round(sec * 1000) / 1000; $('vanim-duration').value = va.duration;
+    if (va.time > va.duration) va.time = va.duration;
+    setViewFit(); setTime(va.time); postState(true);
+  }
+  function setLoop(on) { va.loop = !!on; $('vanim-loop').classList.toggle('on', va.loop); postState(true); }
+  function setAutoKey(on) { va.autoKey = !!on; $('vanim-autokey').classList.toggle('on', va.autoKey); postState(true); }
+  function setEase(kind) { va.ease = ['smooth', 'linear', 'step'].includes(kind) ? kind : 'smooth'; $('vanim-ease').value = va.ease; postState(true); }
+
+  // ── Undo / redo ──────────────────────────────────────────────────────
+  function snapshot() {
+    return {
+      time: va.time,
+      keys: va.bones.map(b => b.keys.map(k => ({ t: k.t, pos: k.pos.slice(), quat: k.quat.slice(), ease: k.ease }))),
+      pose: va.bones.map(b => { getBoneLocal(b, _p, _q); return [_p.toArray(), _q.toArray()]; }),
+    };
+  }
+  function restore(s) {
+    if (!s) return;
+    va.keysRev++;
+    va.bones.forEach((b, i) => {
+      b.keys = (s.keys[i] || []).map(k => ({ t: k.t, pos: k.pos.slice(), quat: k.quat.slice(), ease: k.ease }));
+      if (s.pose[i]) { _p.fromArray(s.pose[i][0]); _q.fromArray(s.pose[i][1]); setBoneLocal(b, _p, _q); }
+    });
+    va.selKeys = new Set();
+    refreshDots(); updateSelLabel(); drawTimeline(); requestRender();
+  }
+  function pushUndoSnapshot(before, label) {
+    va.keysRev++;
+    va.undo.push({ label: label || '', before, after: null });
+    if (va.undo.length > 100) va.undo.shift();
+    va.redo = [];
+  }
+  function pushUndo(label) { pushUndoSnapshot(snapshot(), label); }
+  function undo() {
+    const e = va.undo.pop(); if (!e) return false;
+    e.after = snapshot(); va.redo.push(e); restore(e.before); postState(true); return true;
+  }
+  function redo() {
+    const e = va.redo.pop(); if (!e) return false;
+    va.undo.push(e); restore(e.after); postState(true); return true;
+  }
+
+  // ── Export sampling / sessions ───────────────────────────────────────
+  function sample() {
+    const fps = va.fps, frames = Math.max(2, totalFrames());
+    if (va.objectMode) return sampleObject(fps, frames);
+    const bones = [];
+    for (const b of va.bones) {
+      if (!b.keys.length) continue;
+      const rot = [], pos = [];
+      for (let f = 0; f < frames; f++) {
+        evalBone(b, Math.min(va.duration, f / fps), _p, _q);
+        rot.push(zUpQ(_q)); pos.push(zUpV(_p));
+      }
+      bones.push({ name: b.name, tag: b.tag, rot, pos, restPos: zUpV(b.rest.pos), restRot: zUpQ(b.rest.quat) });
+    }
+    return JSON.stringify({ fps, frames, duration: va.duration, loop: va.loop, bones });
+  }
+  // Object mode export: the whole derived skeleton (root-relative rest, the
+  // centroid + box of every mesh a bone owns, the model's bounds) plus the
+  // keyed bones' per-frame LOCAL transforms — all in the loader root's child
+  // space, which the exporter maps onto the converted drawable.
+  function sampleObject(fps, frames) {
+    const restWorld = va.bones.map(() => new THREE.Matrix4());
+    for (const b of va.bones) {
+      _m.compose(b.rest.pos, b.rest.quat, _one);
+      restWorld[b.index] = b.parent >= 0 ? new THREE.Matrix4().multiplyMatrices(restWorld[b.parent], _m) : _m.clone();
+    }
+    const all = new THREE.Box3();
+    const skeleton = va.bones.map(b => {
+      restWorld[b.index].decompose(_wp, _wq, _ws);
+      const meshes = b.meshes.filter(m => m.visible).map(m => {
+        const M = new THREE.Matrix4().multiplyMatrices(restWorld[b.index], m.matrix);
+        const g = m.geometry; if (!g.boundingBox) g.computeBoundingBox();
+        const box = g.boundingBox.clone().applyMatrix4(M);
+        const pos = g.attributes.position; const c = new THREE.Vector3();
+        const step = Math.max(1, Math.floor(pos.count / 20000)); let n = 0;
+        for (let i = 0; i < pos.count; i += step) { _v.fromBufferAttribute(pos, i).applyMatrix4(M); c.add(_v); n++; }
+        if (n) c.multiplyScalar(1 / n); else box.getCenter(c);
+        all.union(box);
+        return { c: c.toArray(), min: box.min.toArray(), max: box.max.toArray() };
+      });
+      return { name: b.name, parent: b.parent, wpos: _wp.toArray(), wrot: _wq.toArray(), meshes };
+    });
+    const tracks = [];
+    for (const b of va.bones) {
+      if (!b.keys.length) continue;
+      const rot = [], pos = [];
+      for (let f = 0; f < frames; f++) { evalBone(b, Math.min(va.duration, f / fps), _p, _q); rot.push(_q.toArray()); pos.push(_p.toArray()); }
+      tracks.push({ bone: b.index, name: b.name, rot, pos });
+    }
+    const bbox = isFinite(all.min.x) ? { min: all.min.toArray(), max: all.max.toArray() } : { min: [0, 0, 0], max: [0, 0, 0] };
+    return JSON.stringify({ version: 2, space: 'source', fps, frames, duration: va.duration, loop: va.loop, bbox, skeleton, tracks });
+  }
+  function getSession() {
+    return JSON.stringify({
+      version: 1, fps: va.fps, duration: va.duration, loop: va.loop, ease: va.ease, autoKey: va.autoKey,
+      bones: va.bones.filter(b => b.keys.length).map(b => ({ name: b.name, tag: b.tag, keys: b.keys })),
+    });
+  }
+  function setSession(json) {
+    let s = json; if (typeof s === 'string') { try { s = JSON.parse(s); } catch (e) { return { ok: false, error: 'bad json' }; } }
+    if (!s || !Array.isArray(s.bones)) return { ok: false, error: 'no bones' };
+    // A session that carries nothing, or names bones this model does not have,
+    // is a mismatch — not an instruction to clear the timeline. Bail before
+    // touching anything (this used to wipe a freshly imported clip).
+    const matchable = s.bones.filter(sb => va.byName.has(String(sb.name || '').toLowerCase()));
+    if (!s.bones.length || !matchable.length)
+      return { ok: false, error: s.bones.length ? 'session matches no bone on this model' : 'empty session',
+               matched: 0, missing: s.bones.map(sb => sb.name) };
+    pushUndo('load session');
+    if (s.fps) { va.fps = clamp(Math.round(+s.fps), 1, 120); $('vanim-fps').value = va.fps; }
+    if (s.duration) { va.duration = clamp(+s.duration, 0.1, 600); $('vanim-duration').value = va.duration; }
+    if (typeof s.loop === 'boolean') setLoop(s.loop);
+    if (s.ease) setEase(s.ease);
+    for (const b of va.bones) b.keys = [];
+    let matched = 0, missing = [];
+    for (const sb of s.bones) {
+      const b = va.byName.get(String(sb.name || '').toLowerCase());
+      if (!b) { missing.push(sb.name); continue; }
+      b.keys = (sb.keys || []).map(k => ({ t: clamp(+k.t || 0, 0, va.duration), pos: (k.pos || zUpV(b.rest.pos)).slice(0, 3),
+        quat: (k.quat || [0, 0, 0, 1]).slice(0, 4), ease: k.ease || 'smooth' })).sort((x, y) => x.t - y.t);
+      matched++;
+    }
+    setViewFit(); setTime(0); refreshDots(); updateSelLabel(); drawTimeline(); postState(true);
+    return { ok: true, matched, missing };
+  }
+
+  // ── Host state echo ──────────────────────────────────────────────────
+  function stateObject() {
+    const b = va.bones[va.selected];
+    const off = b ? boneOffset(b) : null;
+    return {
+      kind: 'vanim-state', time: va.time, frame: frameOf(va.time), frames: totalFrames(), fps: va.fps,
+      duration: va.duration, playing: va.playing, loop: va.loop, autoKey: va.autoKey, ease: va.ease, mode: va.mode,
+      canUndo: va.undo.length > 0, canRedo: va.redo.length > 0, totalKeys: keyCount(), splitMode: sp.on, objectMode: va.objectMode, keysRev: va.keysRev,
+      imported: va.imported,
+      keyedBones: keyedBones().map(x => ({ name: x.name, count: x.keys.length })),
+      selected: b ? { name: b.name, tag: b.tag, index: b.index, kind: b.kind, keys: b.keys.length, pivotAuto: !!b.pivotAuto,
+        keyHere: b.keys.some(k => Math.abs(k.t - snapT(va.time)) < 1e-6), rot: off.rot, pos: off.pos } : null,
+    };
+  }
+  function postState(force) {
+    if (!va.active) return;
+    const now = performance.now();
+    if (!force && now - va.lastPost < 66) return;
+    va.lastPost = now;
+    postToHost(stateObject());
+  }
+
+  // ── Timeline drawing ─────────────────────────────────────────────────
+  function rows() {
+    const list = keyedBones().map(b => ({ bone: b, ghost: false }));
+    const sel = va.bones[va.selected];
+    if (sel && !sel.keys.length) list.unshift({ bone: sel, ghost: true });
+    return list;
+  }
+  function laneW(cv) { return Math.max(10, cv.clientWidth - NAMES_W - PAD_R); }
+  function tToX(t, cv) { return NAMES_W + (t - va.view.start) / va.view.dur * laneW(cv); }
+  function xToT(x, cv) { return va.view.start + (x - NAMES_W) / laneW(cv) * va.view.dur; }
+  function setViewFit() { va.view.start = -va.duration * 0.02; va.view.dur = va.duration * 1.06; }
+  function ensurePlayheadVisible() {
+    if (va.time < va.view.start) va.view.start = va.time - va.view.dur * 0.1;
+    else if (va.time > va.view.start + va.view.dur) va.view.start = va.time - va.view.dur * 0.9;
+  }
+  function prepCanvas(cv, cssH) {
+    const dpr = window.devicePixelRatio || 1;
+    const w = cv.clientWidth || cv.parentElement.clientWidth || 300;
+    cv.style.height = cssH + 'px';
+    if (cv.width !== Math.round(w * dpr) || cv.height !== Math.round(cssH * dpr)) { cv.width = Math.round(w * dpr); cv.height = Math.round(cssH * dpr); }
+    const g = cv.getContext('2d'); g.setTransform(dpr, 0, 0, dpr, 0, 0);
+    return g;
+  }
+  function tickStep() {
+    // Frames per major tick so labels stay ≥ 60px apart.
+    const pxPerFrame = laneW(rulerCv) / (va.view.dur * va.fps);
+    const steps = [1, 2, 5, 10, 15, 30, 60, 120, 300, 600, 1200];
+    for (const s of steps) if (s * pxPerFrame >= 60) return s;
+    return steps[steps.length - 1];
+  }
+  function diamond(g, x, y, r, fill, stroke) {
+    g.beginPath(); g.moveTo(x, y - r); g.lineTo(x + r, y); g.lineTo(x, y + r); g.lineTo(x - r, y); g.closePath();
+    g.fillStyle = fill; g.fill();
+    if (stroke) { g.strokeStyle = stroke; g.lineWidth = 1.2; g.stroke(); }
+  }
+  function drawTimeline() {
+    if (!va.active || !ui || ui.classList.contains('hidden')) return;
+    const list = rows();
+    emptyNote.style.display = list.length ? 'none' : '';
+    const W = rulerCv.clientWidth || 300;
+    const step = tickStep(), fps = va.fps;
+    // Ruler
+    let g = prepCanvas(rulerCv, 22);
+    g.fillStyle = '#202021'; g.fillRect(0, 0, W, 22);
+    g.fillStyle = '#242425'; g.fillRect(0, 0, NAMES_W, 22);
+    g.fillStyle = COL.dim; g.font = '10px "Segoe UI", system-ui, sans-serif'; g.textBaseline = 'middle';
+    g.fillText('BONES', 8, 11);
+    const f0 = Math.max(0, Math.floor(va.view.start * fps / step) * step), f1 = Math.ceil((va.view.start + va.view.dur) * fps);
+    g.save(); g.beginPath(); g.rect(NAMES_W, 0, W - NAMES_W, 22); g.clip();
+    for (let f = f0; f <= Math.min(f1, totalFrames()); f += step) {
+      const x = tToX(f / fps, rulerCv);
+      g.fillStyle = '#4a4a4b'; g.fillRect(Math.round(x), 12, 1, 10);
+      g.fillStyle = COL.dim; g.fillText(String(f), Math.round(x) + 3, 8);
+    }
+    // clip end marker
+    const xe = tToX(va.duration, rulerCv);
+    g.fillStyle = '#6a6a6b'; g.fillRect(Math.round(xe), 0, 1, 22);
+    g.restore();
+    const xp = tToX(va.time, rulerCv);
+    g.fillStyle = COL.accent; g.fillRect(Math.round(xp) - 1, 0, 2, 22);
+    g.beginPath(); g.moveTo(xp - 6, 0); g.lineTo(xp + 6, 0); g.lineTo(xp, 8); g.closePath(); g.fill();
+
+    // Rows
+    const boxH = rowsBox.clientHeight || 100;
+    const H = Math.max(boxH, (list.length + 1) * ROW_H);
+    g = prepCanvas(rowsCv, H);
+    g.fillStyle = '#1b1b1c'; g.fillRect(0, 0, W, H);
+    g.font = '11px "Segoe UI", system-ui, sans-serif'; g.textBaseline = 'middle';
+    // Summary row
+    const drawRow = (i, label, keys, opts) => {
+      const y = i * ROW_H;
+      g.fillStyle = i % 2 ? COL.rowAlt : '#1b1b1c'; g.fillRect(0, y, W, ROW_H);
+      if (opts.selected) { g.fillStyle = 'rgba(0,120,212,0.16)'; g.fillRect(0, y, W, ROW_H); }
+      g.fillStyle = '#242425'; g.fillRect(0, y, NAMES_W, ROW_H);
+      g.fillStyle = opts.ghost ? COL.ghost : opts.summary ? COL.dim : COL.text;
+      g.fillText(label.length > 20 ? label.slice(0, 19) + '…' : label, 8, y + ROW_H / 2);
+      g.fillStyle = COL.grid; g.fillRect(0, y + ROW_H - 1, W, 1);
+      g.save(); g.beginPath(); g.rect(NAMES_W, y, W - NAMES_W, ROW_H); g.clip();
+      // frame grid (major ticks)
+      for (let f = f0; f <= Math.min(f1, totalFrames()); f += step) { const x = Math.round(tToX(f / fps, rowsCv)); g.fillStyle = '#242425'; g.fillRect(x, y, 1, ROW_H); }
+      g.fillStyle = '#3a3a3b'; g.fillRect(Math.round(tToX(va.duration, rowsCv)), y, 1, ROW_H);
+      if (opts.ghost) { g.fillStyle = COL.ghost; g.font = '10px "Segoe UI", system-ui, sans-serif'; g.fillText('no keys — press K at the playhead to add one', NAMES_W + 8, y + ROW_H / 2); g.font = '11px "Segoe UI", system-ui, sans-serif'; }
+      for (const k of keys) {
+        const x = tToX(k.t, rowsCv);
+        const sel = va.selKeys.has(k);
+        diamond(g, x, y + ROW_H / 2, opts.summary ? 3.5 : 5, opts.summary ? '#8a8a8a' : sel ? COL.keySel : COL.key, sel ? COL.accent : 'rgba(0,0,0,0.5)');
+      }
+      g.restore();
+    };
+    const all = keyTimes().map(t => ({ t }));
+    drawRow(0, `All keys (${keyCount()})`, all, { summary: true });
+    list.forEach((r, i) => drawRow(i + 1, r.bone.name, r.bone.keys, { selected: r.bone.index === va.selected, ghost: r.ghost }));
+    // Playhead
+    const xr = tToX(va.time, rowsCv);
+    g.fillStyle = 'rgba(0,120,212,0.85)'; g.fillRect(Math.round(xr) - 1, 0, 2, H);
+    // Frame readout
+    $('vanim-frame').textContent = `${frameOf(va.time)} / ${totalFrames()}`;
+  }
+
+  // ── Timeline interaction ─────────────────────────────────────────────
+  let tlDrag = null;   // { kind: 'scrub' | 'keys', ... }
+  function keyAt(x, y) {
+    const list = rows(); const ri = Math.floor(y / ROW_H) - 1;
+    if (ri < 0 || ri >= list.length) {
+      if (ri === -1) { // summary row: pick nearest key of any bone at this x
+        let best = null, bd = 7;
+        for (const b of va.bones) for (const k of b.keys) { const d = Math.abs(tToX(k.t, rowsCv) - x); if (d < bd) { bd = d; best = { key: k, bone: b, all: true }; } }
+        return best;
+      }
+      return null;
+    }
+    const b = list[ri].bone; let best = null, bd = 7;
+    for (const k of b.keys) { const d = Math.abs(tToX(k.t, rowsCv) - x); if (d < bd) { bd = d; best = { key: k, bone: b }; } }
+    return best;
+  }
+  function canvasXY(e, cv) { const r = cv.getBoundingClientRect(); return { x: e.clientX - r.left, y: e.clientY - r.top }; }
+  rulerCv.addEventListener('pointerdown', e => {
+    if (!va.active || e.button !== 0) return;
+    rulerCv.setPointerCapture(e.pointerId);
+    const { x } = canvasXY(e, rulerCv);
+    if (x < NAMES_W) return;
+    tlDrag = { kind: 'scrub' }; if (va.playing) pause();
+    setTime(xToT(x, rulerCv));
+  });
+  rulerCv.addEventListener('pointermove', e => { if (tlDrag && tlDrag.kind === 'scrub') setTime(xToT(canvasXY(e, rulerCv).x, rulerCv)); });
+  rulerCv.addEventListener('pointerup', () => { tlDrag = null; });
+  rowsCv.addEventListener('pointerdown', e => {
+    if (!va.active || e.button !== 0) return;
+    const { x, y } = canvasXY(e, rowsCv);
+    const list = rows(); const ri = Math.floor(y / ROW_H) - 1;
+    if (x < NAMES_W) {          // names column → select that bone
+      if (ri >= 0 && ri < list.length) select(list[ri].bone.index);
+      return;
+    }
+    const hit = keyAt(x, y);
+    rowsCv.setPointerCapture(e.pointerId);
+    if (hit) {
+      if (hit.all) {   // summary row: grab every key at that time
+        const keys = []; for (const b of va.bones) for (const k of b.keys) if (Math.abs(k.t - hit.key.t) < 1e-6) keys.push(k);
+        if (e.shiftKey) keys.forEach(k => va.selKeys.has(k) ? va.selKeys.delete(k) : va.selKeys.add(k));
+        else if (!va.selKeys.has(hit.key)) va.selKeys = new Set(keys);
+      } else {
+        if (e.shiftKey) { va.selKeys.has(hit.key) ? va.selKeys.delete(hit.key) : va.selKeys.add(hit.key); }
+        else if (!va.selKeys.has(hit.key)) va.selKeys = new Set([hit.key]);
+        if (hit.bone.index !== va.selected) select(hit.bone.index, { silent: true });
+      }
+      tlDrag = { kind: 'keys', t0: xToT(x, rowsCv), orig: new Map([...va.selKeys].map(k => [k, k.t])), pre: snapshot(), moved: false };
+      setTime(hit.key.t);
+      drawTimeline();
+    } else {
+      if (!e.shiftKey) va.selKeys = new Set();
+      tlDrag = { kind: 'scrub' }; if (va.playing) pause();
+      setTime(xToT(x, rowsCv));
+    }
+  });
+  rowsCv.addEventListener('pointermove', e => {
+    if (!tlDrag) return;
+    const { x } = canvasXY(e, rowsCv);
+    if (tlDrag.kind === 'scrub') { setTime(xToT(x, rowsCv)); return; }
+    const dt = xToT(x, rowsCv) - tlDrag.t0;
+    if (!tlDrag.moved && Math.abs(dt * va.fps) < 0.5) return;
+    if (!tlDrag.moved) { tlDrag.moved = true; pushUndoSnapshot(tlDrag.pre, 'move keys'); }
+    for (const [k, t] of tlDrag.orig) k.t = snapT(t + dt);
+    for (const b of va.bones) b.keys.sort((a, c) => a.t - c.t);
+    applyTime(va.time); drawTimeline();
+  });
+  rowsCv.addEventListener('pointerup', () => {
+    if (tlDrag && tlDrag.kind === 'keys' && tlDrag.moved) {
+      // A moved key landing on another key of the same bone replaces it.
+      for (const b of va.bones) {
+        const out = [];
+        for (const k of b.keys) {
+          const dup = out.findIndex(o => Math.abs(o.t - k.t) < 1e-6);
+          if (dup >= 0) { if (va.selKeys.has(k)) out[dup] = k; } else out.push(k);
+        }
+        b.keys = out;
+      }
+      applyTime(va.time); refreshDots(); updateSelLabel(); drawTimeline(); postState(true);
+    }
+    tlDrag = null;
+  });
+  rowsCv.addEventListener('dblclick', e => {
+    if (!va.active) return;
+    const { x, y } = canvasXY(e, rowsCv);
+    const list = rows(); const ri = Math.floor(y / ROW_H) - 1;
+    if (x < NAMES_W || ri < 0 || ri >= list.length) return;
+    const b = list[ri].bone; const t = snapT(xToT(x, rowsCv));
+    setTime(t); select(b.index, { silent: true }); setKey(b.index, t);
+  });
+  const onWheel = e => {
+    if (!va.active) return;
+    e.preventDefault();
+    const cv = e.currentTarget === rulerCv ? rulerCv : rowsCv;
+    const { x } = canvasXY(e, cv);
+    if (e.shiftKey || Math.abs(e.deltaX) > Math.abs(e.deltaY)) {
+      va.view.start += (e.deltaX || e.deltaY) / laneW(cv) * va.view.dur;
+    } else {
+      const anchor = xToT(x, cv);
+      const f = e.deltaY > 0 ? 1.15 : 1 / 1.15;
+      va.view.dur = clamp(va.view.dur * f, 4 / va.fps, va.duration * 4);
+      va.view.start = anchor - (x - NAMES_W) / laneW(cv) * va.view.dur;
+    }
+    va.view.start = clamp(va.view.start, -va.view.dur * 0.5, va.duration - va.view.dur * 0.5);
+    drawTimeline();
+  };
+  rulerCv.addEventListener('wheel', onWheel, { passive: false });
+  rowsCv.addEventListener('wheel', e => { if (e.ctrlKey || e.shiftKey || Math.abs(e.deltaX) > 0) onWheel(e); else if (rowsCv.clientHeight <= rowsBox.clientHeight) onWheel(e); }, { passive: false });
+
+  // ── Transport buttons ────────────────────────────────────────────────
+  $('vanim-go-start').addEventListener('click', () => setTime(0));
+  $('vanim-go-end').addEventListener('click', () => setTime(va.duration));
+  $('vanim-prev-frame').addEventListener('click', () => setTime(va.time - 1 / va.fps));
+  $('vanim-next-frame').addEventListener('click', () => setTime(va.time + 1 / va.fps));
+  $('vanim-prev-key').addEventListener('click', () => jumpKey(-1));
+  $('vanim-next-key').addEventListener('click', () => jumpKey(1));
+  $('vanim-play').addEventListener('click', () => va.playing ? pause() : play());
+  $('vanim-loop').addEventListener('click', () => setLoop(!va.loop));
+  $('vanim-autokey').addEventListener('click', () => setAutoKey(!va.autoKey));
+  $('vanim-key').addEventListener('click', () => { if (va.selected >= 0) setKey(va.selected, va.time); else keyPosed(); });
+  $('vanim-delkey').addEventListener('click', () => deleteKeys());
+  $('vanim-fit').addEventListener('click', () => { setViewFit(); drawTimeline(); });
+  $('vanim-fps').addEventListener('change', e => setFps(e.target.value));
+  $('vanim-duration').addEventListener('change', e => setDuration(e.target.value));
+  $('vanim-ease').addEventListener('change', e => setEase(e.target.value));
+  $('vanim-mode-rotate').addEventListener('click', () => setMode('rotate'));
+  $('vanim-mode-translate').addEventListener('click', () => setMode('translate'));
+  // Inputs inside the WebView keep keyboard focus otherwise → hotkeys die.
+  for (const el of [$('vanim-fps'), $('vanim-duration'), $('vanim-ease')])
+    el.addEventListener('keydown', e => { if (e.key === 'Enter' || e.key === 'Escape') el.blur(); });
+  if (typeof ResizeObserver !== 'undefined') new ResizeObserver(() => drawTimeline()).observe($('vanim-timeline'));
+
+  // ── Hotkeys (capture phase so the prop/pose bindings never see them) ──
+  window.addEventListener('keydown', e => {
+    if (!va.active) return;
+    if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement || e.target instanceof HTMLSelectElement) return;
+    const k = e.key, lower = k.toLowerCase(), ctrl = e.ctrlKey || e.metaKey;
+    let handled = true;
+    if (ctrl && lower === 'z' && !e.shiftKey) undo();
+    else if (ctrl && (lower === 'y' || (lower === 'z' && e.shiftKey))) redo();
+    else if (ctrl && lower === 's') postToHost({ kind: 'vanim-request-save' });
+    else if (k === ' ') va.playing ? pause() : play();
+    else if (lower === 'k' && !ctrl) { if (va.selected >= 0) setKey(va.selected, va.time); else keyPosed(); }
+    else if (k === 'Delete' || k === 'Backspace') deleteKeys();
+    else if (lower === 'w' && !ctrl) setMode('translate');
+    else if (lower === 'e' && !ctrl) setMode('rotate');
+    else if (lower === 'r' && !ctrl) { /* no scale on bones */ }
+    else if (k === 'ArrowLeft' || k === ',') setTime(va.time - (e.shiftKey ? 10 : 1) / va.fps);
+    else if (k === 'ArrowRight' || k === '.') setTime(va.time + (e.shiftKey ? 10 : 1) / va.fps);
+    else if (k === 'ArrowUp') jumpKey(-1);
+    else if (k === 'ArrowDown') jumpKey(1);
+    else if (k === 'Home') setTime(0);
+    else if (k === 'End') setTime(va.duration);
+    else if (k === 'Escape') { if (sp.sel.size) clearSplitSel(); else if (va.selKeys.size) { va.selKeys = new Set(); drawTimeline(); } else select(-1); }
+    else if (lower === 'f' && !ctrl) { if (va.objectMode) frameAll(); else frameWorkbench(); }
+    else handled = false;
+    if (handled) { e.preventDefault(); e.stopImmediatePropagation(); }
+  }, true);
+
+  // ── Split mode: pick loose pieces on the model, hand them a new bone ──
+  // A "piece" is a connected island of triangles (welded by position) inside
+  // one bone's mesh — finer than the raw parts, so one speaker box out of a
+  // wall is pickable. Overlays borrow geometry the way the Assets picker does.
+  const splitBar = $('vanim-split-bar');
+  const sp = { on: true, hover: null, sel: new Map(), hoverOv: null, bone: -1 };
+  function ovMat(color, opacity) {
+    return new THREE.MeshBasicMaterial({ color, transparent: true, opacity, depthTest: true, depthWrite: false,
+      side: THREE.DoubleSide, polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -1 });
+  }
+  const spHoverMat = ovMat(0x38bdf8, 0.30), spSelMat = ovMat(0xf59e0b, 0.42);
+  function makeOverlay(mat) {
+    const m = new THREE.Mesh(new THREE.BufferGeometry(), mat);
+    m.matrixAutoUpdate = false; m.visible = false; m.renderOrder = 990; m.frustumCulled = false;
+    m.userData.fiveosOverlay = true; scene.add(m); return m;
+  }
+  function islandsOf(mesh) {
+    if (mesh.userData.vaIslands) return mesh.userData.vaIslands;
+    const g = mesh.geometry, pos = g.attributes.position.array, idx = g.index ? g.index.array : null;
+    const vc = pos.length / 3, triCount = idx ? (idx.length / 3) | 0 : (vc / 3) | 0;
+    const weld = new Int32Array(vc), keyMap = new Map();
+    for (let v = 0; v < vc; v++) {
+      const k = Math.round(pos[v * 3] * 1e4) + ',' + Math.round(pos[v * 3 + 1] * 1e4) + ',' + Math.round(pos[v * 3 + 2] * 1e4);
+      let w = keyMap.get(k); if (w === undefined) { w = keyMap.size; keyMap.set(k, w); } weld[v] = w;
+    }
+    const parent = new Int32Array(keyMap.size); for (let i = 0; i < parent.length; i++) parent[i] = i;
+    const find = a => { while (parent[a] !== a) { parent[a] = parent[parent[a]]; a = parent[a]; } return a; };
+    const union = (a, b) => { a = find(a); b = find(b); if (a !== b) parent[a] = b; };
+    const vi = i => idx ? idx[i] : i;
+    for (let t = 0; t < triCount; t++) { const a = weld[vi(t * 3)], b = weld[vi(t * 3 + 1)], c = weld[vi(t * 3 + 2)]; union(a, b); union(b, c); }
+    const triIsland = new Int32Array(triCount), islands = new Map();
+    for (let t = 0; t < triCount; t++) {
+      const id = find(weld[vi(t * 3)]); triIsland[t] = id;
+      let isl = islands.get(id); if (!isl) { isl = { id, tris: [], geo: null }; islands.set(id, isl); }
+      isl.tris.push(t);
+    }
+    return (mesh.userData.vaIslands = { triIsland, islands, idx, pos });
+  }
+  function islandGeo(mesh, isl) {
+    if (isl.geo) return isl.geo;
+    const { idx, pos } = islandsOf(mesh);
+    const out = new Float32Array(isl.tris.length * 9); let o = 0;
+    for (const t of isl.tris) for (let k = 0; k < 3; k++) { const v = idx ? idx[t * 3 + k] : t * 3 + k; out[o++] = pos[v * 3]; out[o++] = pos[v * 3 + 1]; out[o++] = pos[v * 3 + 2]; }
+    const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.BufferAttribute(out, 3));
+    return (isl.geo = g);
+  }
+  function islandBox(mesh, isl) {
+    if (isl.box) return isl.box;
+    const { idx, pos } = islandsOf(mesh);
+    const mn = [Infinity, Infinity, Infinity], mx = [-Infinity, -Infinity, -Infinity];
+    for (const t of isl.tris) for (let k = 0; k < 3; k++) {
+      const v = idx ? idx[t * 3 + k] : t * 3 + k;
+      for (let a = 0; a < 3; a++) { const c = pos[v * 3 + a]; if (c < mn[a]) mn[a] = c; if (c > mx[a]) mx[a] = c; }
+    }
+    return (isl.box = { mn, mx });
+  }
+  const boxInside = (b, outer, pad) => b.mn[0] >= outer.mn[0] - pad && b.mx[0] <= outer.mx[0] + pad
+    && b.mn[1] >= outer.mn[1] - pad && b.mx[1] <= outer.mx[1] + pad && b.mn[2] >= outer.mn[2] - pad && b.mx[2] <= outer.mx[2] + pad;
+  const boxTouch = (a, b, pad) => a.mn[0] <= b.mx[0] + pad && a.mx[0] >= b.mn[0] - pad
+    && a.mn[1] <= b.mx[1] + pad && a.mx[1] >= b.mn[1] - pad && a.mn[2] <= b.mx[2] + pad && a.mx[2] >= b.mn[2] - pad;
+  function boneIslands(bone) {
+    const out = [];
+    for (const m of workbenchMeshes) {
+      if (m.userData.vaBoneIdx !== bone || !m.visible) continue;
+      for (const [, isl] of islandsOf(m).islands) out.push({ mesh: m, isl });
+    }
+    return out;
+  }
+  const boxVol = b => Math.max(1e-6, (b.mx[0] - b.mn[0])) * Math.max(1e-6, (b.mx[1] - b.mn[1])) * Math.max(1e-6, (b.mx[2] - b.mn[2]));
+  // A click grabs a whole "unit": the clicked piece plus the pieces around it
+  // that TOUCH it and are of COMPARABLE size (a speaker's cone + ring + grille
+  // + its little mount), stopping at the big backing panel that spans the wall
+  // — that panel is far larger than any one speaker, so it never bridges two.
+  // Small bits sitting ON a selected piece (badges) are pulled in by containment.
+  function groupFor(mesh, isl, single) {
+    if (single) return [{ mesh, isl }];
+    const bone = mesh.userData.vaBoneIdx;
+    const all = boneIslands(bone).map(it => ({ it, box: islandBox(it.mesh, it.isl), vol: boxVol(islandBox(it.mesh, it.isl)) }));
+    const startKey = mesh.uuid + ':' + isl.id;
+    const idxOf = new Map(); all.forEach((a, i) => idxOf.set(a.it.mesh.uuid + ':' + a.it.isl.id, i));
+    const start = idxOf.get(startKey); if (start == null) return [{ mesh, isl }];
+    const sb = all[start].box;
+    const dim = a => sb.mx[a] - sb.mn[a];
+    const size0 = Math.max(dim(0), dim(1), dim(2));
+    const pad = 0.02 + size0 * 0.05;
+    // Cap the section to the clicked piece's own neighbourhood: the combined
+    // box may grow to ~2.4x the clicked piece per axis, so one speaker of a
+    // packed wall comes in whole but the next one over does not. (Grow / Shift
+    // extend past this on purpose.)
+    const span = 2.4;
+    const lim = { mn: [sb.mn[0] - dim(0) * (span - 1), sb.mn[1] - dim(1) * (span - 1), sb.mn[2] - dim(2) * (span - 1)],
+                  mx: [sb.mx[0] + dim(0) * (span - 1), sb.mx[1] + dim(1) * (span - 1), sb.mx[2] + dim(2) * (span - 1)] };
+    const within = b => b.mn[0] >= lim.mn[0] && b.mx[0] <= lim.mx[0] && b.mn[1] >= lim.mn[1] && b.mx[1] <= lim.mx[1] && b.mn[2] >= lim.mn[2] && b.mx[2] <= lim.mx[2];
+    const seen = new Set([start]); const queue = [start];
+    while (queue.length) {
+      const cur = queue.shift(), cb = all[cur].box, cv = all[cur].vol;
+      for (let i = 0; i < all.length; i++) {
+        if (seen.has(i)) continue;
+        const nb = all[i].box, nv = all[i].vol;
+        if (!boxTouch(nb, cb, pad)) continue;
+        const ratio = Math.min(cv, nv) / Math.max(cv, nv);
+        const contained = boxInside(nb, cb, pad) || boxInside(cb, nb, pad);
+        if ((ratio >= 0.08 && within(nb)) || contained) { seen.add(i); queue.push(i); }
+      }
+    }
+    return [...seen].map(i => all[i].it);
+  }
+  function groupGeo(group) {
+    let n = 0; for (const g of group) n += g.isl.tris.length * 9;
+    const out = new Float32Array(n); let o = 0;
+    for (const g of group) { const a = islandGeo(g.mesh, g.isl).attributes.position.array; out.set(a, o); o += a.length; }
+    const geo = new THREE.BufferGeometry(); geo.setAttribute('position', new THREE.BufferAttribute(out, 3)); return geo;
+  }
+  function growSelection() {
+    if (!sp.sel.size) return;
+    const boxes = [...sp.sel.values()].map(s => islandBox(s.mesh, s.isl));
+    for (const bone of selBones()) for (const it of boneIslands(bone)) {
+      const key = it.mesh.uuid + ':' + it.isl.id;
+      if (sp.sel.has(key)) continue;
+      const b = islandBox(it.mesh, it.isl);
+      if (boxes.some(x => boxTouch(b, x, 0.02))) { const ov = makeOverlay(spSelMat); placeOverlay(ov, it.mesh, it.isl); sp.sel.set(key, { mesh: it.mesh, isl: it.isl, ov }); }
+    }
+    updateSplitBar(); requestRender();
+  }
+  function pickIsland(e) {
+    if (!va.root) return null;
+    const rect = renderer.domElement.getBoundingClientRect();
+    _ndc.x = ((e.clientX - rect.left) / rect.width) * 2 - 1;
+    _ndc.y = -((e.clientY - rect.top) / rect.height) * 2 + 1;
+    raycaster.setFromCamera(_ndc, camera);
+    const hit = raycaster.intersectObjects(workbenchMeshes.filter(m => m.visible && typeof m.userData.vaBoneIdx === 'number'), false)[0];
+    if (!hit || hit.faceIndex == null) return null;
+    const info = islandsOf(hit.object);
+    const isl = info.islands.get(info.triIsland[hit.faceIndex]);
+    return isl ? { mesh: hit.object, isl } : null;
+  }
+  function placeOverlay(ov, mesh, isl) {
+    mesh.updateWorldMatrix(true, false);
+    ov.geometry = islandGeo(mesh, isl); ov.matrix.copy(mesh.matrixWorld); ov.visible = true;
+  }
+  function clearSplitSel(quiet) {
+    for (const [, s] of sp.sel) { scene.remove(s.ov); }
+    sp.sel = new Map(); sp.bone = -1;
+    if (!quiet) { if (sp.hoverOv) sp.hoverOv.visible = false; sp.hover = null; updateSplitBar(); requestRender(); }
+  }
+  // Overlays sit on a bone's meshes — keep them glued when the bone moves.
+  function refreshOverlays() {
+    for (const [, s] of sp.sel) { s.mesh.updateWorldMatrix(true, false); s.ov.matrix.copy(s.mesh.matrixWorld); }
+    if (sp.hover && sp.hoverOv && sp.hoverOv.visible) { sp.hover.mesh.updateWorldMatrix(true, false); sp.hoverOv.matrix.copy(sp.hover.mesh.matrixWorld); }
+  }
+  function toggleIsland(mesh, isl, single) {
+    const clickedKey = mesh.uuid + ':' + isl.id;
+    // Toggling the exact clicked piece off (Shift+click something already in).
+    if (single && sp.sel.has(clickedKey)) {
+      const cur = sp.sel.get(clickedKey); scene.remove(cur.ov); sp.sel.delete(clickedKey);
+      updateSplitBar(); requestRender(); return;
+    }
+    const group = groupFor(mesh, isl, single);
+    for (const g of group) {
+      const key = g.mesh.uuid + ':' + g.isl.id;
+      if (sp.sel.has(key)) continue;
+      const ov = makeOverlay(spSelMat); placeOverlay(ov, g.mesh, g.isl); sp.sel.set(key, { mesh: g.mesh, isl: g.isl, ov });
+    }
+    updateSplitBar(); requestRender();
+  }
+  function selBones() { const set = new Set(); for (const [, s] of sp.sel) set.add(s.mesh.userData.vaBoneIdx); return [...set]; }
+  function selTris() { let n = 0; for (const [, s] of sp.sel) n += s.isl.tris.length; return n; }
+  function updateSplitBar() {
+    if (!sp.sel.size) { splitBar.classList.remove('visible'); return; }
+    splitBar.classList.add('visible');
+    const bones = selBones();
+    const where = bones.length === 1 ? (va.bones[bones[0]] ? va.bones[bones[0]].name : '?') : `${bones.length} parts`;
+    $('vsb-name').textContent = `${sp.sel.size} piece${sp.sel.size === 1 ? '' : 's'} · ${where}`;
+    $('vsb-sub').textContent = `· ${selTris().toLocaleString()} tris · Shift+click adds · double-click a part · Grow spreads`;
+    $('vsb-split').disabled = !sp.sel.size;
+  }
+  // Hover-to-highlight and piece picking are always on; this only clears.
+  function setSplitMode(on) { sp.on = true; if (!on) clearSplitSel(); }
+  function requestSplit() {
+    if (!sp.sel.size) return;
+    // Group the picked pieces by their source bone. Each becomes its own new
+    // bone (a part on a different bone can't share one), but it's one action.
+    const byBone = new Map();
+    for (const [, s] of sp.sel) {
+      const bi = s.mesh.userData.vaBoneIdx;
+      let e = byBone.get(bi); if (!e) { e = { seen: new Set(), positions: [], mn: [Infinity, Infinity, Infinity], mx: [-Infinity, -Infinity, -Infinity] }; byBone.set(bi, e); }
+      const { idx, pos } = islandsOf(s.mesh);
+      for (const t of s.isl.tris) for (let k = 0; k < 3; k++) {
+        const v = idx ? idx[t * 3 + k] : t * 3 + k;
+        const x = pos[v * 3], y = -pos[v * 3 + 2], z = pos[v * 3 + 1];          // Y-up → RAGE Z-up
+        const key = Math.round(x * 1e4) + ',' + Math.round(y * 1e4) + ',' + Math.round(z * 1e4);
+        if (e.seen.has(key)) continue; e.seen.add(key); e.positions.push([x, y, z]);
+        if (x < e.mn[0]) e.mn[0] = x; if (y < e.mn[1]) e.mn[1] = y; if (z < e.mn[2]) e.mn[2] = z;
+        if (x > e.mx[0]) e.mx[0] = x; if (y > e.mx[1]) e.mx[1] = y; if (z > e.mx[2]) e.mx[2] = z;
+      }
+    }
+    const parts = [];
+    for (const [bi, e] of byBone) parts.push({ bone: va.bones[bi].name, positions: e.positions, box: { min: e.mn, max: e.mx } });
+    postToHost({ kind: 'vanim-split-request', pieces: sp.sel.size, tris: selTris(), parts });
+  }
+  renderer.domElement.addEventListener('pointermove', e => {
+    if (va.objectMode) return;   // no piece splitting on a prop — the parts are the parts
+    if (!va.active || !va.root || transformControls.dragging || transformControls.axis) { if (sp.hover && sp.hoverOv) { sp.hover = null; sp.hoverOv.visible = false; requestRender(); } return; }
+    if (!sp.hoverOv) sp.hoverOv = makeOverlay(spHoverMat);
+    const hit = pickIsland(e);
+    if (!hit) { if (sp.hover) { sp.hover = null; sp.hoverOv.visible = false; requestRender(); } return; }
+    if (sp.hover && sp.hover.mesh === hit.mesh && sp.hover.isl === hit.isl && sp.hover.single === !!e.ctrlKey) return;
+    sp.hover = { mesh: hit.mesh, isl: hit.isl, single: !!e.ctrlKey };
+    const group = groupFor(hit.mesh, hit.isl, !!e.ctrlKey);
+    hit.mesh.updateWorldMatrix(true, false);
+    if (sp.hoverOv.geometry && sp.hoverOv.geometry.userData.vaGroup) sp.hoverOv.geometry.dispose();
+    const geo = group.length === 1 ? islandGeo(hit.mesh, hit.isl) : groupGeo(group);
+    if (group.length > 1) geo.userData.vaGroup = true;
+    sp.hoverOv.geometry = geo; sp.hoverOv.matrix.copy(hit.mesh.matrixWorld); sp.hoverOv.visible = true; requestRender();
+  });
+  $('vsb-split').addEventListener('click', requestSplit);
+  $('vsb-clear').addEventListener('click', clearSplitSel);
+  $('vsb-grow').addEventListener('click', growSelection);
+  $('vsb-close').addEventListener('click', () => clearSplitSel());
+
+  // ── Activation ───────────────────────────────────────────────────────
+  // The editor owns motion and the gizmo while it is up. This runs on every
+  // activate AND on every loadObject: a model loaded while the editor was
+  // already active re-shows the previewer's TRANSFORM bar and re-attaches its
+  // gizmo (see the loader's rAF), which would then sit on top of the editor.
+  function takeOverStage() {
+    if (!currentModel) return;
+    va.prevSeekHold = !!window._srcSeekHold;   // resume only what was playing
+    if (typeof currentMixer !== 'undefined' && currentMixer && typeof propAnimSetPlaying === 'function') propAnimSetPlaying(false);
+    if (typeof animBar !== 'undefined' && animBar) animBar.classList.remove('visible');
+    if (typeof resetSubMeshSelection === 'function') resetSubMeshSelection();
+    transformControls.detach();
+    gizmoBar.style.display = 'none';
+  }
+  function activate() {
+    va.active = true; window._vehAnimActive = true;
+    document.body.classList.add('vanim');
+    ui.classList.remove('hidden');
+    gizmoBar.style.display = 'none';
+    updatePlayBtn(); setLoop(va.loop); setAutoKey(va.autoKey); setEase(va.ease); setMode(va.mode);
+    if (!va.root && !currentModel) window.fiveosWorkbench.setMessage('Pick a car on the left, or drop a .yft here');
+    takeOverStage();
+    drawTimeline();
+  }
+  // Back to the plain car previewer (Vehicles tab "Preview" mode): drop the
+  // bone scene, hide the chrome, hand the stage back to fiveosWorkbench.
+  function deactivate() {
+    if (!va.active) return;
+    reset();
+    const wasObject = va.objectMode;
+    va.objectMode = false; va.partsCache = null;
+    va.active = false; window._vehAnimActive = false;
+    document.body.classList.remove('vanim');
+    ui.classList.add('hidden');
+    if (wasObject && currentModel) {
+      // Back to the plain prop previewer: world-space gizmo on the model in
+      // the mode its bar shows, and the prop's own clip (if any) playing again.
+      transformControls.setSpace('world');
+      const activeBtn = document.querySelector('.gizmo-btn.active[data-mode]');
+      if (activeBtn && typeof setGizmoMode === 'function') setGizmoMode(activeBtn.dataset.mode);
+      transformControls.attach(currentModel);
+      gizmoBar.style.display = 'flex';
+      if (window._fiveosHasClips && typeof currentMixer !== 'undefined' && currentMixer) {
+        if (typeof propAnimSetPlaying === 'function') propAnimSetPlaying(!va.prevSeekHold);
+        if (typeof propAnimShow === 'function') propAnimShow(true);
+      }
+    }
+    requestRender();
+  }
+  if (isVehAnimPage) activate();
+
+  window.fiveosVehicleAnim = {
+    activate, deactivate, load, clear() { reset(); if (empty) empty.classList.remove('hidden'); },
+    // Object mode (Props ▸ Animated): animate the prop already on the stage.
+    loadObject, skeletonInfo, spin, isObjectMode: () => va.objectMode, partsCache: () => va.partsCache,
+    partNodes: () => va.partNodes, partMeshes, setPartVisible,
+    // Test hooks (object mode): where every mesh of the loaded prop sits —
+    // node path under the loader root + world matrix — and gizmo ownership.
+    debugMeshPlacement() {
+      if (!currentModel) return null;
+      const inner = (currentModel.userData && currentModel.userData.fiveos_inner) || currentModel;
+      const out = [];
+      (inner.parent || currentModel).traverse(o => {
+        if (!o.isMesh || o.userData.fiveosOverlay) return;
+        const path = []; let p = o; while (p && p !== inner && p !== currentModel) { path.unshift(p.name); p = p.parent; }
+        o.updateWorldMatrix(true, false);
+        out.push({ path: path.join('/'), world: o.matrixWorld.elements.map(e => +e.toFixed(4)) });
+      });
+      return JSON.stringify(out.sort((a, b) => a.path < b.path ? -1 : 1));
+    },
+    debugGizmoOnModel: () => !!currentModel && transformControls.object === currentModel && !window._vehAnimActive,
+    setSplitMode, isSplitMode: () => sp.on, splitSelection: () => sp.sel.size,
+    isActive: () => va.active,
+    setMessage(text) { reset(); window.fiveosWorkbench.setMessage(text); },
+    select: selectByName, selectMany, setMode, getState: () => JSON.stringify(stateObject()),
+    // Test hook: run a group drag end to end (what the gizmo does between
+    // mouseDown and mouseUp) and report where every part ended up.
+    debugGroupDrag(dPos, dRotDeg) {
+      if (va.groupRoots.length < 2 || !va.groupProxy) return null;
+      const before = va.bones.map(b => { b.obj.updateWorldMatrix(true, false); return b.obj.matrixWorld.elements.slice(); });
+      beginGroupDrag();
+      if (dPos) va.groupProxy.position.add(new THREE.Vector3(dPos[0] || 0, dPos[1] || 0, dPos[2] || 0));
+      if (dRotDeg) {
+        const e = new THREE.Euler(
+          (dRotDeg[0] || 0) * Math.PI / 180, (dRotDeg[1] || 0) * Math.PI / 180, (dRotDeg[2] || 0) * Math.PI / 180, 'XYZ');
+        va.groupProxy.quaternion.premultiply(new THREE.Quaternion().setFromEuler(e));
+      }
+      va.groupProxy.updateMatrixWorld(true);
+      applyGroupDrag();
+      endGroupDrag();
+      va.root.updateMatrixWorld(true);
+      return JSON.stringify(va.bones.map((b, i) => {
+        b.obj.updateWorldMatrix(true, false);
+        const p0 = new THREE.Vector3().setFromMatrixPosition(new THREE.Matrix4().fromArray(before[i]));
+        const p1 = new THREE.Vector3().setFromMatrixPosition(b.obj.matrixWorld);
+        return { name: b.name, moved: +p0.distanceTo(p1).toFixed(5), keys: b.keys.length, inGroup: va.group.indexOf(b.index) >= 0 };
+      }));
+    },
+    debugGroup: () => JSON.stringify({ group: va.group.length, roots: va.groupRoots.map(b => b.name), onProxy: transformControls.object === va.groupProxy }),
+    play, pause, stop, togglePlay() { va.playing ? pause() : play(); },
+    setTime: t => setTime(+t || 0), setFrame: f => setTime((+f || 0) / va.fps), step: n => setTime(va.time + (+n || 0) / va.fps),
+    prevKey: () => jumpKey(-1), nextKey: () => jumpKey(1),
+    setFps, setDuration, setLoop, setAutoKey, setEase,
+    addKey() { return va.selected >= 0 ? setKey(va.selected, va.time) : keyPosed() > 0; },
+    keyPosed, deleteKeys, clearBoneKeys, clearAllKeys,
+    resetBone: () => resetBone(false), resetAll: () => resetBone(true),
+    setBoneOffset, undo, redo, sample, getSession, setSession,
+    frame: () => { if (va.objectMode) frameAll(); else frameWorkbench(); },
+    setShowDots(on) { va.showDots = !!on; refreshDots(); },
+    // Sidebar "Open doors": pose the hinge bones open (no keys written) —
+    // same swing the plain previewer used, about the vehicle's own axes.
+    setDoorsOpen(on) {
+      if (va.objectMode) return;
+      const ax = new THREE.Vector3(), r = new THREE.Quaternion();
+      for (const b of va.bones) {
+        let angle = 0, axis = null;
+        if (b.kind === 'door_l') { angle = 1.0; axis = ax.set(0, 1, 0); }
+        else if (b.kind === 'door_r') { angle = -1.0; axis = ax.set(0, 1, 0); }
+        else if (b.kind === 'bonnet') { angle = -0.9; axis = ax.set(1, 0, 0); }
+        else if (b.kind === 'boot') { angle = 1.0; axis = ax.set(1, 0, 0); }
+        if (!axis || b.keys.length) continue;                 // keyed bones belong to the clip
+        r.setFromAxisAngle(axis, on ? angle : 0);
+        _q.copy(r).multiply(b.rest.quat);                      // swing in parent (vehicle) space
+        setBoneLocal(b, b.rest.pos, _q);
+      }
+      requestRender(); postState(true);
+    },
+    setBoneVisible(name, on) {
+      const b = va.byName.get(String(name || '').toLowerCase()); if (!b) return false;
+      b.obj.visible = !!on; requestRender(); return true;
+    },
+    setWireframe(on) { window.fiveosWorkbench.setWireframe(on); },
+    boneNames: () => va.bones.map(b => b.name),
+    // Test hook: simulate picking island #i and #j of a bone, second with shift.
+    debugTwoIslands(boneName) {
+      const bn = va.byName.get(String(boneName || '').toLowerCase()); if (!bn) return null;
+      if (va.root) va.root.updateMatrixWorld(true);
+      const all = boneIslands(bn.index); if (all.length < 2) return null;
+      // two islands whose boxes are far apart (different units)
+      const boxes = all.map(it => islandBox(it.mesh, it.isl));
+      let a = 0, b = 1, best = -1;
+      for (let i = 0; i < all.length; i++) for (let j = i + 1; j < all.length; j++) {
+        const d = Math.hypot(boxes[i].mn[0]-boxes[j].mn[0], boxes[i].mn[1]-boxes[j].mn[1], boxes[i].mn[2]-boxes[j].mn[2]);
+        if (d > best) { best = d; a = i; b = j; }
+      }
+      const rect = renderer.domElement.getBoundingClientRect();
+      const centreScreen = box => { const c = new THREE.Vector3((box.mn[0]+box.mx[0])/2,(box.mn[1]+box.mx[1])/2,(box.mn[2]+box.mx[2])/2); const p = c.project(camera); return [rect.left+(p.x+1)/2*rect.width, rect.top+(1-p.y)/2*rect.height]; };
+      window.__t = { a: all[a], b: all[b] };
+      return JSON.stringify({ a: centreScreen(boxes[a]), b: centreScreen(boxes[b]), dist: +best.toFixed(2) });
+    },
+    debugClickIsland(which, shift) {
+      const it = window.__t && window.__t[which]; if (!it) return -1;
+      select(it.mesh.userData.vaBoneIdx);
+      if (!shift) clearSplitSel(true);
+      toggleIsland(it.mesh, it.isl, true);
+      return sp.sel.size;
+    },
+    debugClusters(boneName) {
+      const b = va.byName.get(String(boneName || '').toLowerCase()); if (!b) return null;
+      const all = boneIslands(b.index);
+      const seen = new Set(); const sizes = [];
+      for (const it of all) {
+        const key = it.mesh.uuid + ':' + it.isl.id; if (seen.has(key)) continue;
+        const grp = groupFor(it.mesh, it.isl, false);
+        let tris = 0; for (const g of grp) { seen.add(g.mesh.uuid + ':' + g.isl.id); tris += g.isl.tris.length; }
+        sizes.push({ pieces: grp.length, tris });
+      }
+      sizes.sort((x, y) => y.tris - x.tris);
+      return JSON.stringify({ bone: b.name, islands: all.length, clusters: sizes.length, top: sizes.slice(0, 12) });
+    },
+    // Diagnostic: screen position (CSS px) of a bone's origin / its geometry centre.
+    debugProject(name) {
+      const b = va.byName.get(String(name || '').toLowerCase()); if (!b) return null;
+      if (va.root) va.root.updateMatrixWorld(true);
+      const rect = renderer.domElement.getBoundingClientRect();
+      const toScreen = v => { const p = v.clone().project(camera); return [rect.left + (p.x + 1) / 2 * rect.width, rect.top + (1 - p.y) / 2 * rect.height]; };
+      const origin = new THREE.Vector3(); b.pv.getWorldPosition(origin);
+      let centre = null;
+      if (b.meshes.length) { const box = new THREE.Box3(); for (const m of b.meshes) box.expandByObject(m); const c = new THREE.Vector3(); box.getCenter(c); centre = toScreen(c); }
+      return JSON.stringify({ name: b.name, kind: b.kind, meshes: b.meshes.length, pivotAuto: !!b.pivotAuto, dotVisible: !!(b.dot && b.dot.visible), origin: toScreen(origin), centre });
+    },
+    // Diagnostic: world-space bounds per bone that owns geometry (Y-up).
+    debugBounds() {
+      if (va.root) va.root.updateMatrixWorld(true);
+      const out = [];
+      const all = new THREE.Box3();
+      for (const b of va.bones) {
+        if (!b.meshes.length) continue;
+        const box = new THREE.Box3();
+        for (const m of b.meshes) box.expandByObject(m);
+        all.union(box);
+        const s = new THREE.Vector3(), c = new THREE.Vector3(); box.getSize(s); box.getCenter(c);
+        out.push({ name: b.name, meshes: b.meshes.length, size: s.toArray().map(v => +v.toFixed(2)), center: c.toArray().map(v => +v.toFixed(2)) });
+      }
+      const s = new THREE.Vector3(), c = new THREE.Vector3(); all.getSize(s); all.getCenter(c);
+      return JSON.stringify({ all: { size: s.toArray().map(v => +v.toFixed(2)), center: c.toArray().map(v => +v.toFixed(2)) }, camera: camera.position.toArray().map(v => +v.toFixed(2)), bones: out });
+    },
+  };
+  // One editor, two hosts: the Vehicles stage (yft payloads) and the Props
+  // stage in Animated mode (the prop already on the stage).
+  window.fiveosBoneAnim = window.fiveosVehicleAnim;
 })();
 
 postToHost({ kind: 'ready' });

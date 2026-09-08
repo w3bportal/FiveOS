@@ -27,9 +27,11 @@ namespace YdrWriter;
 ///     path CodeWalker/Sollumz use — no fragile resource-block hand-wiring).
 ///   • Each <see cref="DrawableModel"/> (FbxConverter emits one per source
 ///     mesh) is bound to a single bone via <c>DrawableModel.BoneIndex</c>.
-///     The vertex buffers are left BYTE-FOR-BYTE untouched — no skinned
-///     vertex-format surgery, so we can't hand RAGE's streamer a malformed
-///     buffer. This is why rigid binding is the safe technique to ship.
+///     The vertex LAYOUT is untouched — no skinned vertex-format surgery,
+///     so we can't hand RAGE's streamer a malformed buffer — but positions
+///     (and normals/tangents) are moved into the bone's space, which is how
+///     RAGE renders rigidly bound geometry (vertex × bone world matrix; see
+///     <see cref="RebaseModel"/>).
 ///   • A <c>.ycd</c> is written keyed to the SAME bone tags as the
 ///     skeleton (via <see cref="YcdAnimationBuilder"/>), so a client
 ///     script can drive it with <c>PlayEntityAnim</c>.
@@ -42,7 +44,7 @@ namespace YdrWriter;
 /// Everything is best-effort: any failure returns <c>Success=false</c> so
 /// the caller falls back to the plain static export instead of aborting.
 /// </summary>
-internal static class AnimatedPropBuilder
+internal static partial class AnimatedPropBuilder
 {
     public sealed record Result(
         bool Success,
@@ -175,6 +177,14 @@ internal static class AnimatedPropBuilder
                 ? bones[i].Local
                 : bones[i].Local * world[bones[i].ParentIndex];
         var boneWorldPos = world.Select(m => new Vector3(m.M41, m.M42, m.M43)).ToArray();
+        // RAGE bones carry no scale (the vertices already have every node
+        // scale and the user gizmo baked in), so the skeleton and the
+        // vertex rebase both work from rotation+translation-only worlds.
+        var worldTR = world.Select(TrOnly).ToArray();
+        for (int i = 0; i < bones.Count; i++)
+            bones[i].Local = bones[i].ParentIndex < 0
+                ? worldTR[i]
+                : TrOnly(worldTR[i] * Invert(worldTR[bones[i].ParentIndex]));
 
         // ---- 4. dominant bone per source mesh --------------------------
         // Each source mesh → the bone with the most skin weight (or, if the
@@ -220,6 +230,10 @@ internal static class AnimatedPropBuilder
             byte boneIdx = (byte)Math.Clamp(meshBone[nearestMesh], 0, 255);
             model.BoneIndex = boneIdx;
             model.HasSkin = 0;
+            // Rigidly bound geometry is rendered as vertex × boneWorld, so the
+            // vertices move into the bone's own space (vanilla props keep them
+            // centred on zero however far out the bone sits).
+            if (RebaseVerticesToBoneSpace) RebaseModel(model, worldTR[boneIdx]);
             bound++;
         }
 
@@ -310,8 +324,13 @@ internal static class AnimatedPropBuilder
         skel.BuildBonesMap();
         drawable.Skeleton = skel;
 
-        // Every model rides the rotation bone (index 1) rigidly.
-        foreach (var m in models) { m.BoneIndex = 1; m.HasSkin = 0; }
+        // Every model rides the rotation bone (index 1) rigidly — and in
+        // that bone's space, i.e. re-centred on the pivot.
+        foreach (var m in models)
+        {
+            m.BoneIndex = 1; m.HasSkin = 0;
+            if (RebaseVerticesToBoneSpace) RebaseModel(m, Matrix4x4.CreateTranslation(centroid));
+        }
 
         // Synthesize the 0→360° spin track at 30 fps. The last sampled frame
         // stops just short of 360° so a looped clip wraps seamlessly.
@@ -373,6 +392,11 @@ internal static class AnimatedPropBuilder
             return new Result(false, null, 0, 0, 0, 0, 0, "anim-keys read failed: " + ex.Message);
         }
 
+        // v2 = per-bone keys from the app's Animate mode (skeleton + tracks);
+        // v1 = the old single-bone euler timeline. Same CLI flag for both.
+        if (IsBoneKeysJson(json))
+            return BuildFromBoneKeys(ydr, opts, streamDir, json);
+
         if (!TryParseAnimKeys(json, out var fps, out var duration, out var keys) || keys.Count < 2)
             return new Result(false, null, 0, 0, 0, 0, 0, "anim-keys need at least 2 entries");
 
@@ -392,7 +416,11 @@ internal static class AnimatedPropBuilder
         skel.ReadXml(LoadXml(BuildSpinSkeletonXml(centroid, rotTag)).DocumentElement!);
         skel.BuildBonesMap();
         drawable.Skeleton = skel;
-        foreach (var m in models) { m.BoneIndex = 1; m.HasSkin = 0; }
+        foreach (var m in models)
+        {
+            m.BoneIndex = 1; m.HasSkin = 0;
+            if (RebaseVerticesToBoneSpace) RebaseModel(m, Matrix4x4.CreateTranslation(centroid));
+        }
 
         fps = Math.Clamp(fps, 1, 120);
         duration = Math.Max(0.1, duration);
@@ -509,11 +537,11 @@ internal static class AnimatedPropBuilder
         sb.AppendLine("      <Index value=\"0\" />");
         sb.AppendLine("      <ParentIndex value=\"-1\" />");
         sb.AppendLine("      <SiblingIndex value=\"-1\" />");
-        sb.AppendLine("      <Flags />");
+        sb.AppendLine("      <Flags>RotX, RotY, RotZ, TransX, TransY, TransZ, Unk0</Flags>");
         sb.AppendLine("      <Translation x=\"0\" y=\"0\" z=\"0\" />");
         sb.AppendLine("      <Rotation x=\"0\" y=\"0\" z=\"0\" w=\"1\" />");
         sb.AppendLine("      <Scale x=\"1\" y=\"1\" z=\"1\" />");
-        sb.AppendLine("      <TransformUnk x=\"0\" y=\"0\" z=\"0\" w=\"0\" />");
+        sb.AppendLine("      <TransformUnk x=\"0\" y=\"4\" z=\"-3\" w=\"0\" />");
         sb.AppendLine("    </Item>");
         sb.AppendLine("    <Item>");
         sb.AppendLine("      <Name>spin</Name>");
@@ -521,11 +549,11 @@ internal static class AnimatedPropBuilder
         sb.AppendLine("      <Index value=\"1\" />");
         sb.AppendLine("      <ParentIndex value=\"0\" />");
         sb.AppendLine("      <SiblingIndex value=\"-1\" />");
-        sb.AppendLine("      <Flags />");
+        sb.AppendLine("      <Flags>RotX, RotY, RotZ, TransX, TransY, TransZ, ScaleX, ScaleY, ScaleZ</Flags>");
         sb.AppendLine($"      <Translation x=\"{F3(centroid.X)}\" y=\"{F3(centroid.Y)}\" z=\"{F3(centroid.Z)}\" />");
         sb.AppendLine("      <Rotation x=\"0\" y=\"0\" z=\"0\" w=\"1\" />");
         sb.AppendLine("      <Scale x=\"1\" y=\"1\" z=\"1\" />");
-        sb.AppendLine("      <TransformUnk x=\"0\" y=\"0\" z=\"0\" w=\"0\" />");
+        sb.AppendLine("      <TransformUnk x=\"0\" y=\"4\" z=\"-3\" w=\"0\" />");
         sb.AppendLine("    </Item>");
         sb.AppendLine("  </Bones>");
         sb.AppendLine("</Skeleton>");
@@ -616,7 +644,7 @@ internal static class AnimatedPropBuilder
     /// <summary>G = R(Y→Z) · M(user gizmo), in row-vector form, matching the
     /// order the static pipeline bakes into vertices (user TRS first, then
     /// Y-up→Z-up). Identity user transform collapses to just the axis swap.</summary>
-    private static Matrix4x4 BuildGlobalTransform(ConvertOptions opts, Scene scene)
+    private static Matrix4x4 BuildGlobalTransform(ConvertOptions opts, Scene? scene)
     {
         // User gizmo (three.js Y-up): M = T · R · S applied as v*S*R*T for
         // row vectors.
@@ -647,14 +675,14 @@ internal static class AnimatedPropBuilder
         return yUp ? mUser * yz : mUser;
     }
 
-    private static bool ResolveYUp(ConvertOptions opts, Scene scene)
+    private static bool ResolveYUp(ConvertOptions opts, Scene? scene)
     {
         var up = (opts.Up ?? "auto").ToLowerInvariant();
         if (up == "y_up") return true;
         if (up == "z_up") return false;
         // auto: only FBX is ambiguous; glTF/OBJ/etc. are Y-up.
         var ext = System.IO.Path.GetExtension(opts.InputPath).ToLowerInvariant();
-        if (ext == ".fbx" && scene.RootNode?.Metadata != null
+        if (ext == ".fbx" && scene?.RootNode?.Metadata != null
             && scene.RootNode.Metadata.TryGetValue("UpAxis", out var entry)
             && entry.Data is int axis)
             return axis == 1;
@@ -710,11 +738,15 @@ internal static class AnimatedPropBuilder
             sb.AppendLine($"      <Index value=\"{b.Index}\" />");
             sb.AppendLine($"      <ParentIndex value=\"{b.ParentIndex}\" />");
             sb.AppendLine($"      <SiblingIndex value=\"{nextSibling[b.Index]}\" />");
-            sb.AppendLine("      <Flags />");
+            // Vanilla animated props: the root carries Unk0, every child the
+            // scale flags too (probed on plg_01_animlight_* / plg_03_railembox).
+            sb.AppendLine(b.ParentIndex < 0
+                ? "      <Flags>RotX, RotY, RotZ, TransX, TransY, TransZ, Unk0</Flags>"
+                : "      <Flags>RotX, RotY, RotZ, TransX, TransY, TransZ, ScaleX, ScaleY, ScaleZ</Flags>");
             sb.AppendLine($"      <Translation x=\"{F(trans.X)}\" y=\"{F(trans.Y)}\" z=\"{F(trans.Z)}\" />");
             sb.AppendLine($"      <Rotation x=\"{F(rot.X)}\" y=\"{F(rot.Y)}\" z=\"{F(rot.Z)}\" w=\"{F(rot.W)}\" />");
             sb.AppendLine($"      <Scale x=\"{F(scale.X)}\" y=\"{F(scale.Y)}\" z=\"{F(scale.Z)}\" />");
-            sb.AppendLine("      <TransformUnk x=\"0\" y=\"0\" z=\"0\" w=\"0\" />");
+            sb.AppendLine("      <TransformUnk x=\"0\" y=\"4\" z=\"-3\" w=\"0\" />");
             sb.AppendLine("    </Item>");
         }
         sb.AppendLine("  </Bones>");
