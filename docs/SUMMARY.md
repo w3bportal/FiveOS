@@ -8,6 +8,7 @@
 * [Vehicle Anim → .ycd](VEHICLE_ANIM.md)
 * [Animated props](PROP_ANIM.md)
 * [3D Model → FiveM](3D_MODEL.md)
+* [Clothing](CLOTHING.md)
 * [Optimize](OPTIMIZE.md)
 * [Mods → RPF](RPF.md)
 * [Pose → Emote](POSE_TO_EMOTE.md)

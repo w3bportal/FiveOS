@@ -37,6 +37,23 @@ Pose the character and click the key button to capture a key at the playhead. Us
 
 Animation imports remain visible while processing: the editor stays usable and reports progress in a small non-blocking HUD.
 
+## Put a prop in their hand
+
+A phone, a bottle, a mic, a clipboard — click **Prop** in the toolbar and one appears in the ped's hand, already gripped. It opens with a demo phone so there's something to look at straight away.
+
+1. **GTA prop model** is what the emote actually spawns in game. The list is common base-game hand props, but any model your server streams works — type its name.
+2. **Attach to** picks the bone it hangs off. Hands use the game's `PH_` prop-handle bones, so a zero offset is already a natural grip.
+3. Play the animation back — the prop rides the bone, so it follows the hand instead of floating where you left it.
+4. **Mesh…** loads your own `.glb` / `.fbx` / `.obj` as the preview shape, for when the prop is custom and you want to see the real thing while you pose. The in-game prop is still the model name above.
+
+Click the prop to grab it and the **TRANSFORM** bar switches over to it.
+
+- Only **Move** (**W**) and **Rotate** (**E**) are offered, and that's deliberate: an emote stores the prop's *grip* — an offset and a rotation against its bone — not its size. Scale, Pivot, Match and Ground disappear while the prop has the bar, because none of them mean anything for a prop and they measure the ped, not the object in its hand.
+- **Reset** re-snaps the prop to its bone's origin, back to the natural grip. It does not touch the ped.
+- Picking the prop clears any bone or IK selection, so **W** / **E** move the prop and not the body.
+
+On export the prop goes out with the emote as its model, bone and placement — works for rpemotes, dpemotes and standalone packs.
+
 ## Build an emote pack
 
 Making more than one emote? Instead of exporting each as its own resource, queue them into a **pack** — one folder, one `ensure` line, every emote inside.
@@ -54,6 +71,26 @@ Two things worth knowing:
 
 - **Adding bakes immediately.** What's on screen when you click Add to Pack is what gets packed — carry on editing afterwards and the queued copy won't change. To update one, remove the row and add it again.
 - **The queue is for one sitting.** It lives in memory, so closing FiveOS empties it. Export before you quit.
+
+## Synced emotes — two players or a whole group
+
+Handshakes, hugs, carrying someone, a five-person group pose. Click **Sync Pair** in the toolbar and a teal ghost appears next to your ped. Every ghost is another player, and where it stands is exactly where that player gets placed in game.
+
+1. Drag **Front**, **Side** and **Height** to position the partner, and **Heading** to turn them — **180°** means the two players face each other. A handshake sits around **0.9–1.2 m** front.
+2. **+ Add** puts another player in the formation, up to five partners. **Remove** takes the selected one out.
+3. Keep using the viewport while the window is open — orbit the camera, press **Space** to play, scrub the timeline. Everyone animates together, so you can see the whole formation move before you commit to it.
+4. Give it an **emote name** and a **menu label**, then pick where it goes.
+
+Partner bodies match whatever ped is in your preview automatically. That is preview only — any ped can accept in game.
+
+### Where it installs
+
+- **RPEmotes** drops it straight into your `rpemotes-reborn` resource. Two players only — that is a limit of the shared format, not of FiveOS.
+- **Standalone FiveM resource** is self-contained: its own command, its own accept prompt, its own sync logic, no rpemotes needed. **Any formation with more than one partner has to use this option.**
+
+### How the standalone one behaves in game
+
+The initiator runs `/<name>` near the others. Everyone else gets a chat prompt and answers `/<name> accept`. Nothing happens until **every** slot is filled — then the server fires one start event, each accepted player is teleported to the offset you authored, and the whole formation plays at the same instant. That wait is the point: it is what stops a two-person emote playing half-finished because someone was slow.
 
 ## Import an animation
 
@@ -78,5 +115,5 @@ If a pose reads slightly wrong on the ped — arms clipping the body, a stance t
 
 ## Tips
 - The dots are color-coded by body part (green = left arm, orange = right arm, and so on).
-- Hotkeys: **R** rotate, **W** move, **E** scale.
+- Hotkeys: **W** move, **E** rotate, **R** scale. **F** frames the selected bone, **K** sets a keyframe, **M** mirrors the pose.
 - Saved poses live in the sidebar — pose the ped, hit **Save Pose**, and re-apply it any time with one click.

@@ -10,6 +10,7 @@ New here? Just find what you want to do below and click it.
 
 - Turn a singleplayer car into a FiveM car → [Vehicles](VEHICLES.md)
 - Turn a 3D model into a FiveM prop → [3D Model](3D_MODEL.md)
+- Turn a garment into wearable clothing → [Clothing](CLOTHING.md)
 - Make a big/laggy mod file smaller → [Optimize](OPTIMIZE.md)
 - Package a mod into a ready-to-use file → [Mods → RPF](RPF.md)
 - Make a custom emote (dance, pose, action) → [Pose → Emote](POSE_TO_EMOTE.md)
