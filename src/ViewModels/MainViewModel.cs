@@ -1102,7 +1102,37 @@ public partial class MainViewModel : ObservableObject
         return "Untitled";
     }
 
-    partial void OnPropNameChanged(string value) => UpdateOutlinerPropRootName();
+    partial void OnPropNameChanged(string value)
+    {
+        UpdateOutlinerPropRootName();
+        UpdateAssetsTabTitle();
+    }
+
+    partial void OnSourcePathChanged(string? value) => UpdateAssetsTabTitle();
+
+    /// <summary>Name the Assets tab after the model open in it, so the tab and
+    /// the window title say what you are working on instead of "Assets".</summary>
+    private void UpdateAssetsTabTitle()
+    {
+        var tab = WorkspaceDocs.ActiveDocument;
+        if (tab is null || tab.Kind != WorkspaceKind.Assets) return;
+        if (!tab.TitleIsAuto && !string.IsNullOrWhiteSpace(tab.Title)) return;   // the user named it
+
+        var name = !string.IsNullOrWhiteSpace(PropName)
+            ? PropName.Trim()
+            : (!string.IsNullOrEmpty(SourcePath) ? Path.GetFileNameWithoutExtension(SourcePath) : null);
+
+        if (string.IsNullOrWhiteSpace(name))
+        {
+            // Nothing open — back to the plain section name.
+            if (tab.TitleIsAuto) { tab.Title = ""; tab.TitleIsAuto = false; }
+            return;
+        }
+        if (name.Length > 40) name = name[..40].TrimEnd();
+        if (string.Equals(tab.Title, name, StringComparison.Ordinal)) return;
+        tab.Title = name;
+        tab.TitleIsAuto = true;
+    }
 
     private void UpdateOutlinerPropRootName()
     {

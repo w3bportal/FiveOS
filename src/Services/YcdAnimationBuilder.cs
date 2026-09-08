@@ -117,6 +117,37 @@ public static class YcdAnimationBuilder
         int sequenceFrameLimit = frames + 30;
         var sorted = bones.OrderBy(b => b.BoneTag).ToList();
 
+        // The root bone's OWN tracks (BoneId 0, Track 0 + Track 1). The mover
+        // above says how the clip TRAVELS; these say where the root SITS while
+        // it plays, and they are a separate piece of authority. Vanilla ped
+        // clips carry both: the corona team idle this was traced from is an
+        // animation LIST whose second animation puts an animated Track 0 and
+        // Track 1 on bone 0 alongside a constant mover.
+        //
+        // Authoring only the mover leaves the root pose unauthored. That is
+        // invisible on foot — the motion state under the clip is static, so
+        // whatever the game solves for the root comes out near zero. On a
+        // moving attached entity (hoverboard, train deck, boat) that state has
+        // velocity, so the game keeps solving root heading and lean with
+        // nothing opposing it and the whole posed body swings around as a
+        // rigid unit while the bone pose itself stays frozen. A neutral root
+        // is still an answer; no root at all is an open question.
+        //
+        // A caller that supplies its own bone 0 tracks keeps them. Vehicle and
+        // prop clips (emitMover:false) are untouched — their bone 0 is a real
+        // chassis bone that already authors itself.
+        if (emitMover)
+        {
+            if (!posTracks.Any(p => p.BoneTag == 0))
+                posTracks.Insert(0, new PosedPositionTrack(0, new Vector3[frames]));
+            if (!sorted.Any(b => b.BoneTag == 0))
+            {
+                var rootRest = new Quaternion[frames];
+                Array.Fill(rootRest, Quaternion.Identity);
+                sorted.Insert(0, new PosedBoneTrack(0, rootRest));
+            }
+        }
+
         var sb = new StringBuilder(64 * 1024);
         sb.AppendLine("<?xml version=\"1.0\" encoding=\"UTF-8\"?>");
         sb.AppendLine("<ClipDictionary>");

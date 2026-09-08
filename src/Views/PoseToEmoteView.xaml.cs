@@ -6768,6 +6768,9 @@ public partial class PoseToEmoteView : UserControl
                 // Refresh the per-bone lanes of the unified layers timeline —
                 // the snapshot otherwise only arrives at rig load.
                 _ = SendTimelineCommandAsync("requestSnapshot");
+                // An import is the first thing that gives a blank tab an
+                // identity — .ycd, a file, or a library clip all land here.
+                TitleActiveEmoteTabFrom(clipName);
                 return true;
             }
             var reason = doc.RootElement.TryGetProperty("reason", out var rEl) ? rEl.GetString() : raw;
@@ -9111,7 +9114,12 @@ public partial class PoseToEmoteView : UserControl
             return;
         }
         await Task.Delay(4000);
-        await ImportAnimationFileAsync(path);
+        // Route by extension like the real Import menu does — a .ycd goes
+        // through the clip-dictionary reader, not the mesh importer.
+        if (path.EndsWith(".ycd", StringComparison.OrdinalIgnoreCase))
+            await ImportYcdFileAsync(path);
+        else
+            await ImportAnimationFileAsync(path);
     }
 
     public void DevSetMovement(int index)
@@ -9260,6 +9268,12 @@ public partial class PoseToEmoteView : UserControl
         if (doc == null || !_vm.HasRig) return;
         if (!doc.IsDirty) doc.IsDirty = true;
     }
+
+    /// <summary>Give the active tab the name of what was just imported, if the
+    /// user hasn't named it themselves. Setting Title is enough — MainWindow
+    /// watches it and mirrors the chrome strip and the window title.</summary>
+    private void TitleActiveEmoteTabFrom(string? name)
+        => _vm.EmoteDocs.ActiveDocument?.TryTitleFrom(name);
 
     private void SyncActiveEmoteTitleFromModel()
     {

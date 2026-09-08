@@ -757,31 +757,31 @@
       <span>Rotate</span>
       <span class="key">E</span>
     </button>
-    <button class="gizmo-btn" data-mode="scale" title="Drag the colored cubes to grow or shrink along an axis. Scale IS baked into the exported prop.">
+    <button class="gizmo-btn" data-propbar="hide" data-mode="scale" title="Drag the colored cubes to grow or shrink along an axis. Scale IS baked into the exported prop.">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 3 21 3 21 9"/><polyline points="9 21 3 21 3 15"/><line x1="21" y1="3" x2="14" y2="10"/><line x1="3" y1="21" x2="10" y2="14"/></svg>
       <span>Scale</span>
       <span class="key">R</span>
     </button>
-    <button class="gizmo-btn" data-mode="pivot" title="Move the pivot — the point the model rotates and scales around, and the point the prop is placed by in-game. Drag the arrows to put it on a hinge, a base corner, wherever you need. The model itself does not move. Click again to reset it to the model's centre. Baked into the export once you move it.">
+    <button class="gizmo-btn" data-propbar="hide" data-mode="pivot" title="Move the pivot — the point the model rotates and scales around, and the point the prop is placed by in-game. Drag the arrows to put it on a hinge, a base corner, wherever you need. The model itself does not move. Click again to reset it to the model's centre. Baked into the export once you move it.">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="2.5"/><path d="M12 2v5"/><path d="M12 17v5"/><path d="M2 12h5"/><path d="M17 12h5"/></svg>
       <span>Pivot</span>
       <span class="key">P</span>
     </button>
-    <div class="gizmo-divider"></div>
-    <div class="gizmo-toggle" title="Force uniform scale on all three axes when dragging the scale handles.">
+    <div class="gizmo-divider" data-propbar="hide"></div>
+    <div class="gizmo-toggle" data-propbar="hide" title="Force uniform scale on all three axes when dragging the scale handles.">
       <input type="checkbox" id="lock-toggle" checked />
       <label for="lock-toggle"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="11" width="16" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></svg>Uniform scale</label>
     </div>
-    <div class="gizmo-divider"></div>
+    <div class="gizmo-divider" data-propbar="hide"></div>
     <!-- Match height: scale uniformly so the user's model is exactly N
          meters tall in world space. Default tracks the reference's height
          (1.75m for the bundled ped) so one click scales to "ped height". -->
-    <div class="gizmo-toggle gizmo-match" title="Scale uniformly so the model matches this height in metres.">
+    <div class="gizmo-toggle gizmo-match" data-propbar="hide" title="Scale uniformly so the model matches this height in metres.">
       <input type="number" id="match-height" step="0.05" min="0.05" max="500" value="1.75" />
       <button id="match-btn" class="gizmo-btn" style="padding: 2px 6px; min-width: 0;">Match</button>
     </div>
     <div class="gizmo-divider"></div>
-    <button class="gizmo-btn" id="snap-to-ground" style="justify-content: center; min-width: 78px;" title="Drop the model so its bounding-box bottom sits flush with the ground plane (Y=0 = Z=0 after the Y-up→Z-up export swap). Honors current rotation and scale.">
+    <button class="gizmo-btn" id="snap-to-ground" data-propbar="hide" style="justify-content: center; min-width: 78px;" title="Drop the model so its bounding-box bottom sits flush with the ground plane (Y=0 = Z=0 after the Y-up→Z-up export swap). Honors current rotation and scale.">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12"/><polyline points="6 11 12 17 18 11"/><line x1="3" y1="21" x2="21" y2="21"/></svg>
       <span>Ground</span>
     </button>
@@ -790,7 +790,7 @@
       <span>Reset</span>
     </button>
     <div class="gizmo-divider"></div>
-    <div class="gizmo-hint" title="Click the model to attach handles. Rotate: drag inside the sphere (free) or a colored ring (axis). Scale + Rotate bake into the export; Move is preview-only.">
+    <div class="gizmo-hint" id="gizmo-hint" title="Click the model to attach handles. Rotate: drag inside the sphere (free) or a colored ring (axis). Scale + Rotate bake into the export; Move is preview-only.">
       Drag free / axis. <b>Scale/Rotate</b> bake; <b>Move</b> previews.
     </div>
   </div>
@@ -2404,7 +2404,30 @@ transformControls.addEventListener('objectChange', () => {
 
 // Mode buttons (Move / Rotate / Scale / Pivot).
 let gizmoMode = 'translate';
+
+/// What the TRANSFORM bar is actually driving right now.
+///
+/// It is the loaded model in the prop / scale workspace, but the emote page
+/// points the same bar at two other things: the hand-attached prop
+/// (window.selectProp) and a rig root picked in the outliner
+/// (window.selectRigForTransform). Re-attaching currentModel unconditionally
+/// meant every mode switch there yanked the gizmo off what the user had
+/// selected and onto the primary ped — pressing W/E/R with a prop selected
+/// grabbed the body instead of the prop. Switching modes must never switch
+/// targets.
+function gizmoBarTarget() {
+  if (propGizmoShown && propModel) return propModel;
+  const obj = transformControls.object;
+  if (poseMode && obj && obj !== pivotHandle && !obj.isBone) return obj;
+  return currentModel;
+}
+
 function setGizmoMode(mode) {
+  const target = gizmoBarTarget();
+  // Pivot only means anything for the loaded model: it rides the pivot wrap
+  // the loader builds and bakes into the converter's --pos. A prop or a rig
+  // root has no such wrap, so refuse instead of silently grabbing the ped.
+  if (mode === 'pivot' && target !== currentModel) return;
   let matched = false;
   document.querySelectorAll('.gizmo-btn[data-mode]').forEach(b => {
     const isMatch = b.dataset.mode === mode;
@@ -2421,7 +2444,7 @@ function setGizmoMode(mode) {
     transformControls.attach(pivotHandle);
     transformControls.setMode('translate');
   } else {
-    if (currentModel && transformControls.object !== currentModel) transformControls.attach(currentModel);
+    if (target && transformControls.object !== target) transformControls.attach(target);
     transformControls.setMode(mode);
   }
   requestRender();
@@ -2653,6 +2676,8 @@ function focusOnPoseSelection() {
 }
 
 document.getElementById('reset-transform').addEventListener('click', () => {
+  // Prop owns the bar → reset the prop's grip, not the ped's transform.
+  if (propIsSelected()) { window.resetPropPlacement(); return; }
   if (!currentModel) return;
   currentModel.position.set(0, 0, 0);
   currentModel.rotation.set(0, 0, 0);
@@ -6621,11 +6646,30 @@ function propApplySnapshot(st) {
   propPostState();
 }
 
+// The TRANSFORM bar serves two very different objects on the emote page, and
+// most of it is meaningless for a hand-attached prop: the emote stores the
+// prop as PropBone + PropPlacement (bone-local metres + degrees), so there is
+// no scale and no pivot to author, and Match / Ground measure the ped, not the
+// prop. Everything tagged data-propbar="hide" in the markup drops out while
+// the prop owns the bar, leaving Move / Rotate / Reset — the three that are
+// real. Reset re-snaps the prop (see the reset-transform handler).
+const gizmoHint = document.getElementById('gizmo-hint');
+const GIZMO_HINT_MODEL = 'Drag free / axis. <b>Scale/Rotate</b> bake; <b>Move</b> previews.';
+const GIZMO_HINT_PROP = "Drag free / axis. <b>Move/Rotate</b> only — the emote stores the prop’s grip, not its size.";
+function syncGizmoBarForProp() {
+  const forProp = !!(propGizmoShown && propModel);
+  document.querySelectorAll('#gizmo-bar [data-propbar="hide"]').forEach(el => {
+    el.style.display = forProp ? 'none' : '';
+  });
+  if (gizmoHint) gizmoHint.innerHTML = forProp ? GIZMO_HINT_PROP : GIZMO_HINT_MODEL;
+}
+
 // Gizmo leaves the prop (bone picked, prop removed). In pose mode the mode
 // bar is normally hidden and the gizmo is rotate-only — put that back.
 function propOnDeselect() {
   if (!propGizmoShown) return;
   propGizmoShown = false;
+  syncGizmoBarForProp();
   if (poseMode) {
     gizmoBar.style.display = 'none';
     transformControls.setMode('rotate');
@@ -6635,10 +6679,52 @@ function propOnDeselect() {
 window.selectProp = function () {
   if (!propModel) return false;
   if (currentModel) currentModel.updateMatrixWorld(true);
-  transformControls.attach(propModel);
-  transformControls.setMode('translate');
-  gizmoBar.style.display = 'flex';
+  // Order matters: the flag is what gizmoBarTarget() reads, so it has to be
+  // true before setGizmoMode picks a target — otherwise the first mode
+  // switch attaches the ped.
   propGizmoShown = true;
+  gizmoBar.style.display = 'flex';
+  syncGizmoBarForProp();
+  // Drop any bone / IK selection left over from posing the ped. It is not
+  // the gizmo target any more, and poseSetTransformMode used to prefer it
+  // over the prop on the very next W/E press.
+  const hadPoseSelection = poseSelection.length > 0 || !!poseIkActiveHandle;
+  poseSelection = [];
+  posePickedBone = null;
+  poseIkActiveHandle = null;
+  if (poseFabrik) poseFabrik.setChainEnablerAll(false);
+  try { refreshIkHandleVisuals(); refreshPoseJointDots(); } catch (e) {}
+  // Mirror the cleared selection so the outliner drops its bone highlight.
+  if (hadPoseSelection) {
+    postToHost({ kind: 'pose-bone-selected', name: '', index: -1, selection: 0, indices: [] });
+    try { updatePoseHud(); } catch (e) {}
+  }
+  transformControls.attach(propModel);
+  // Move by default, and repaint the bar so the highlighted button matches
+  // the mode the gizmo is actually in.
+  setGizmoMode('translate');
+  requestRender();
+  return true;
+};
+
+/// Reset for the prop: put it back on its attach bone's origin — the natural
+/// grip a zero PropPlacement produces in game. The model-wide Reset button
+/// would have zeroed the PED's transform instead.
+window.resetPropPlacement = function () {
+  if (!propModel) return false;
+  const before = propSnapshot();
+  if (propAttachedBone) {
+    propModel.position.set(0, 0, 0);
+    propModel.quaternion.identity();
+    propModel.scale.set(1, 1, 1);
+    propModel.updateMatrixWorld(true);
+  } else {
+    const r = propResolveBone(propAttachCandidates);
+    if (!r) return false;
+    propAttachTo(r.bone, 'snap');
+  }
+  propCommitHistory('reset', before);
+  propPostState();
   requestRender();
   return true;
 };
@@ -7848,6 +7934,18 @@ window.poseSetTransformMode = function (mode) {
   const m = String(mode || '').toLowerCase();
   if (m !== 'translate' && m !== 'rotate' && m !== 'scale') return false;
 
+  // The hand-attached prop owns the gizmo → W/E drive the PROP. This has to
+  // outrank everything below it: a bone or an IK handle left selected from
+  // posing the ped used to win the moment the user pressed a mode key, so
+  // the gizmo jumped off the prop and onto the body. Scale is refused
+  // outright — an emote's PropPlacement is position + rotation only, so
+  // scaling here would preview a size the game never applies.
+  if (propIsSelected()) {
+    if (m === 'scale') return false;
+    setGizmoMode(m);
+    return true;
+  }
+
   // IK hand/foot: re-attach target (move) vs effector bone (rotate).
   if (poseIkActiveHandle) {
     attachIkGizmoForMode(m === 'rotate' ? 'rotate' : 'translate');
@@ -8301,6 +8399,8 @@ window.enterPoseMode = function () {
 
 window.exitPoseMode = function () {
   if (!poseMode) return;
+  // Hand the TRANSFORM bar back to its model layout if the emote prop had it.
+  if (propIsSelected()) propOnDeselect();
   poseMode = false;
   enableHdriLighting();
 

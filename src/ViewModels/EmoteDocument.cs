@@ -71,6 +71,26 @@ public sealed partial class EmoteDocument : ObservableObject
         if (string.IsNullOrWhiteSpace(Title))
             Title = "Untitled";
     }
+
+    /// <summary>Name the tab after what the user just opened, unless they have
+    /// already named it themselves. Every Emotes tab loads the synthetic GTA
+    /// skeleton, so the model can't name it — the clip has to.</summary>
+    public bool TryTitleFrom(string? name)
+    {
+        if (!HasDefaultTitle) return false;
+        var clean = (name ?? "").Trim();
+        if (clean.Length == 0) return false;
+        // Library clips arrive as a dictionary path; the clip itself is the
+        // useful half.
+        int slash = clean.LastIndexOfAny(new[] { '/', '\\' });
+        if (slash >= 0 && slash < clean.Length - 1) clean = clean[(slash + 1)..];
+        if (clean.Contains('.')) clean = System.IO.Path.GetFileNameWithoutExtension(clean);
+        clean = clean.Trim();
+        if (clean.Length == 0 || string.Equals(clean, "Untitled", StringComparison.OrdinalIgnoreCase))
+            return false;
+        Title = clean.Length > 40 ? clean[..40].TrimEnd() : clean;
+        return true;
+    }
 }
 
 /// <summary>Open emote documents + the active tab for the Emotes workspace.</summary>

@@ -33,7 +33,7 @@ internal static class YcdBoneSpaceConverter
     /// <summary>
     /// True when the clip's SKEL_ROOT track looks like raw RAGE (near
     /// identity at frame 0) rather than already-glb (near the −90° X bind).
-    /// FiveOS exports skip ROOT entirely — those return false (treat as glb).
+    /// A clip with no usable ROOT evidence returns false (treat as glb).
     /// </summary>
     public static bool LooksLikeNativeRage(IReadOnlyDictionary<ushort, Q[]> rotationTracksByTag)
     {
@@ -43,12 +43,30 @@ internal static class YcdBoneSpaceConverter
             || rootFrames.Length == 0)
             return false;
 
+        // A root pinned at identity for the whole clip says nothing about the
+        // space it was authored in — it is the ABSENCE of root authoring. That
+        // is what FiveOS writes on every ped export so the game has something
+        // to hold the root against (see YcdAnimationBuilder); reading it as
+        // "native" would compose the glb bind onto our own clip twice on
+        // re-import. A clip that genuinely carries root motion still decides
+        // this the usual way, and so does one whose root rests AT the bind.
+        if (IsConstantIdentity(rootFrames)) return false;
+
         var q0 = Q.Normalize(rootFrames[0]);
         if (!GlbBindByTag().TryGetValue(0, out var qBind))
             return QuatDistSq(q0, Q.Identity) < 0.15f;
 
         // Native rest ≈ I; glb rest ≈ qBind (−90° X). Whichever is closer wins.
         return QuatDistSq(q0, Q.Identity) + 0.02f < QuatDistSq(q0, qBind);
+    }
+
+    /// <summary>Every frame within a hair of identity — a root that is
+    /// authored but deliberately neutral.</summary>
+    private static bool IsConstantIdentity(Q[] frames)
+    {
+        foreach (var f in frames)
+            if (QuatDistSq(Q.Normalize(f), Q.Identity) > 1e-6f) return false;
+        return true;
     }
 
     public static Q? TryGetGlbBind(ushort tag)

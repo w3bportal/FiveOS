@@ -43,6 +43,11 @@ public sealed partial class WorkspaceDocument : ObservableObject
 
     public string? EmoteDocumentId { get; set; }
 
+    /// <summary>This tab's name came from whatever was opened in it, not from
+    /// the user. Opening something else may replace it; a name the user typed
+    /// never gets overwritten.</summary>
+    public bool TitleIsAuto { get; set; }
+
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(DisplayTitle))]
     private string _title = "";
