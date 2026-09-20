@@ -46,11 +46,14 @@ A phone, a bottle, a mic, a clipboard — click **Prop** in the toolbar and one 
 3. Play the animation back — the prop rides the bone, so it follows the hand instead of floating where you left it.
 4. **Mesh…** loads your own `.glb` / `.fbx` / `.obj` as the preview shape, for when the prop is custom and you want to see the real thing while you pose. The in-game prop is still the model name above.
 
-Click the prop to grab it and the **TRANSFORM** bar switches over to it.
+Click the prop to grab it and the **TRANSFORM** bar switches over to it. The Prop flyout carries **Move** / **Rotate** / **Size** buttons that do the same thing, so the gizmo isn't something you have to already know about.
 
-- Only **Move** (**W**) and **Rotate** (**E**) are offered, and that's deliberate: an emote stores the prop's *grip* — an offset and a rotation against its bone — not its size. Scale, Pivot, Match and Ground disappear while the prop has the bar, because none of them mean anything for a prop and they measure the ped, not the object in its hand.
-- **Reset** re-snaps the prop to its bone's origin, back to the natural grip. It does not touch the ped.
-- Picking the prop clears any bone or IK selection, so **W** / **E** move the prop and not the body.
+- **Move** (**W**) and **Rotate** (**E**) author the prop's *grip* — an offset and a rotation against its bone. That pair is exactly what the emote stores, and you can type it as well as drag it: the **Placement** fields are the six floats the export writes, in metres and degrees, live against the gizmo in both directions.
+- **Size** (**R**) resizes the *preview only*. A prop's real size is a property of its model: `PropPlacement` is six floats and nothing else, and the game has no entity-scale native, so there is nowhere for a size to ship. It still matters that you get it right — a grip authored against a mesh twice the size it will be in-game is itself wrong.
+- **Preview mesh** holds the other correction that never ships: **Orient**, for an import that landed at an angle. Straighten the mesh *there*, not with Rotate — rotating the grip would send your correction out to the game and point the prop the wrong way in someone's hand. **Y-up** is the one-click preset for a Blender / glTF export (+90° about X), and the reset button puts the mesh back without touching the grip.
+- Pivot, Match and Ground disappear while the prop has the bar — they measure the ped, not the object in its hand.
+- **Reset** re-snaps the prop to its bone's origin, back to the natural grip. It touches neither the ped nor the preview size.
+- Picking the prop clears any bone or IK selection, so **W** / **E** / **R** drive the prop and not the body.
 
 On export the prop goes out with the emote as its model, bone and placement — works for rpemotes, dpemotes and standalone packs.
 

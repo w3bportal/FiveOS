@@ -757,7 +757,7 @@
       <span>Rotate</span>
       <span class="key">E</span>
     </button>
-    <button class="gizmo-btn" data-propbar="hide" data-mode="scale" title="Drag the colored cubes to grow or shrink along an axis. Scale IS baked into the exported prop.">
+    <button class="gizmo-btn" data-mode="scale" title="Drag the colored cubes to grow or shrink along an axis. Scale IS baked into the exported prop.">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 3 21 3 21 9"/><polyline points="9 21 3 21 3 15"/><line x1="21" y1="3" x2="14" y2="10"/><line x1="3" y1="21" x2="10" y2="14"/></svg>
       <span>Scale</span>
       <span class="key">R</span>
@@ -767,8 +767,8 @@
       <span>Pivot</span>
       <span class="key">P</span>
     </button>
-    <div class="gizmo-divider" data-propbar="hide"></div>
-    <div class="gizmo-toggle" data-propbar="hide" title="Force uniform scale on all three axes when dragging the scale handles.">
+    <div class="gizmo-divider"></div>
+    <div class="gizmo-toggle" title="Force uniform scale on all three axes when dragging the scale handles.">
       <input type="checkbox" id="lock-toggle" checked />
       <label for="lock-toggle"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="11" width="16" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></svg>Uniform scale</label>
     </div>
@@ -2391,7 +2391,15 @@ lockToggle.addEventListener('change', () => {
   scaleLocked = lockToggle.checked;
 });
 transformControls.addEventListener('objectChange', () => {
-  if (currentModel && scaleLocked && transformControls.mode === 'scale') {
+  // When the prop owns the gizmo the lock has to clamp the CARRIER, not the
+  // ped. Non-uniform carrier scale shears any mesh carrying an orientation fix
+  // on propInner, so uniform is the sane default for a prop.
+  if (propIsSelected() && transformControls.mode === 'scale') {
+    if (scaleLocked) {
+      const s = propModel.scale.x;
+      propModel.scale.set(s, s, s);
+    }
+  } else if (currentModel && scaleLocked && transformControls.mode === 'scale') {
     const s = currentModel.scale.x;
     currentModel.scale.set(s, s, s);
   }
@@ -5306,7 +5314,19 @@ let propSavedLocal = null;              // { p, q } kept across rig reloads
 let propPendingReattach = false;
 let propLabel = '';
 let propSource = '';                    // 'file' | 'game' | 'placeholder'
-let propYUpFix = true;                  // treat a user file as a Y-up (Blender/glTF) export
+let propYUpFix = true;                  // the Y-up preset's current state (seeds propMeshRot.x)
+// PREVIEW-ONLY mesh corrections. They ride propInner, BELOW the carrier, so
+// nothing here can reach the placement the export writes:
+//   propMeshRot   - the import orientation fix, in degrees. Y-up is just the
+//                   x=90 preset; a mesh that came in at any other angle is
+//                   straightened here instead of by moving the grip.
+//   propUnitScale - the centimetre-units guess propInstall makes.
+// SIZE is the one preview correction that does NOT live here: it sits on
+// propModel.scale, because that is what the gizmo's scale handles drive.
+// propLocalPlacement decomposes the carrier for position + rotation only, so
+// a scaled carrier still cannot leak into PropPlacement.
+let propMeshRot = { x: 0, y: 0, z: 0 };
+let propUnitScale = 1;
 let propGizmoShown = false;
 // GTA applies PropPlacement rotations with rotationOrder 1 — every emote
 // script (rpemotes, dpemotes and our packs) passes 1 to AttachEntityToEntity.
@@ -6349,11 +6369,14 @@ function propAttachTo(bone, mode) {
     if (mode === 'restore' && propSavedLocal) {
       propModel.position.copy(propSavedLocal.p);
       propModel.quaternion.copy(propSavedLocal.q);
+      if (propSavedLocal.s) propModel.scale.copy(propSavedLocal.s);
     } else {
       propModel.position.set(0, 0, 0);
       propModel.quaternion.identity();
     }
-    propModel.scale.set(1, 1, 1);
+    // Size is deliberately NOT reset here. Snapping re-zeroes the GRIP; it has
+    // no business undoing a preview size the user dialled in, which the export
+    // never sees anyway.
   }
   propAttachedBone = bone;
   propPendingReattach = false;
@@ -6367,7 +6390,11 @@ function propAttachTo(bone, mode) {
 function propDetachToScene(remember) {
   if (!propModel || !propAttachedBone) return;
   if (remember) {
-    propSavedLocal = { p: propModel.position.clone(), q: propModel.quaternion.clone() };
+    propSavedLocal = {
+      p: propModel.position.clone(),
+      q: propModel.quaternion.clone(),
+      s: propModel.scale.clone(),
+    };
     propPendingReattach = true;
   }
   propModel.updateWorldMatrix(true, false);
@@ -6430,15 +6457,28 @@ function propPostState(extra) {
     label: propLabel,
     source: propSource,
     yUpFix: propYUpFix,
+    // Preview-only, echoed so the host's Size / Orientation fields track a
+    // gizmo drag. Neither one reaches PropPlacement.
+    scale: propModel.scale.x,
+    scale_xyz: [propModel.scale.x, propModel.scale.y, propModel.scale.z],
+    mesh_rot_deg: [propMeshRot.x, propMeshRot.y, propMeshRot.z],
   }, extra || {}));
 }
 
-// Blender/glTF exports are Y-up; RAGE models are Z-up. +90° about X puts a
-// Y-up export back in the game's model space, so a zero placement here means
-// the same thing it does in-game. Game extracts are already RAGE space.
+// The preview mesh's own orientation + unit fix. Blender/glTF exports are
+// Y-up and RAGE models are Z-up, so the Y-up preset is +90° about X and a zero
+// placement then means the same thing it does in-game (game extracts are
+// already RAGE space). But it is only a PRESET: propMeshRot is free, so an
+// import that landed at some other angle gets straightened HERE rather than
+// by rotating the grip — which would have shipped the correction into
+// PropPlacement and pointed the prop the wrong way in-game.
 function propApplyInnerFix() {
   if (!propInner) return;
-  propInner.rotation.set(propYUpFix && propSource !== 'game' ? Math.PI / 2 : 0, 0, 0);
+  propInner.rotation.set(
+    THREE.MathUtils.degToRad(propMeshRot.x),
+    THREE.MathUtils.degToRad(propMeshRot.y),
+    THREE.MathUtils.degToRad(propMeshRot.z));
+  propInner.scale.setScalar(propUnitScale);
 }
 
 // Built-in demo prop: a smartphone in RAGE model space (X width, Y height,
@@ -6504,9 +6544,13 @@ function propInstall(obj, opts) {
   propInner.add(obj);
   // Centimetre-units heuristic: FBX props commonly import 100x too big. A
   // bbox over 5 m is not a hand prop; real GTA props are well under that.
+  // It is a guess, and it only catches the 100x case — which is why the host
+  // exposes Size on top of it for every other way an import lands wrong.
   const box = new THREE.Box3().setFromObject(obj);
   const size = box.getSize(new THREE.Vector3()).length();
-  if (size > 5) propInner.scale.setScalar(0.01);
+  propUnitScale = size > 5 ? 0.01 : 1;
+  // Y-up seeds the orientation fix rather than being a switch of its own.
+  propMeshRot = { x: (propYUpFix && propSource !== 'game') ? 90 : 0, y: 0, z: 0 };
   propApplyInnerFix();
 
   propModel = new THREE.Group();
@@ -6610,13 +6654,17 @@ function propSnapshot() {
     p: [propModel.position.x, propModel.position.y, propModel.position.z],
     q: [propModel.quaternion.x, propModel.quaternion.y, propModel.quaternion.z, propModel.quaternion.w],
     s: [propModel.scale.x, propModel.scale.y, propModel.scale.z],
+    // The preview corrections ride the same history, so Ctrl+Z walks back an
+    // orientation fix the way it walks back a grip nudge.
+    mr: [propMeshRot.x, propMeshRot.y, propMeshRot.z],
+    yUp: propYUpFix,
   };
 }
 function propStateDiffers(a, b) {
   if (!a || !b) return false;
   if (a.attached !== b.attached || a.bone.name !== b.bone.name) return true;
   const eq = (x, y) => x.length === y.length && x.every((v, i) => Math.abs(v - y[i]) <= 1e-7);
-  return !(eq(a.p, b.p) && eq(a.q, b.q) && eq(a.s, b.s));
+  return !(eq(a.p, b.p) && eq(a.q, b.q) && eq(a.s, b.s) && eq(a.mr || [], b.mr || []));
 }
 function propCommitHistory(op, before) {
   const b = before || propDragCapture;
@@ -6642,6 +6690,11 @@ function propApplySnapshot(st) {
   propModel.position.set(st.p[0], st.p[1], st.p[2]);
   propModel.quaternion.set(st.q[0], st.q[1], st.q[2], st.q[3]);
   propModel.scale.set(st.s[0], st.s[1], st.s[2]);
+  if (Array.isArray(st.mr)) {
+    propMeshRot = { x: st.mr[0], y: st.mr[1], z: st.mr[2] };
+    if (typeof st.yUp === 'boolean') propYUpFix = st.yUp;
+    propApplyInnerFix();
+  }
   propModel.updateMatrixWorld(true);
   propPostState();
 }
@@ -6655,12 +6708,18 @@ function propApplySnapshot(st) {
 // real. Reset re-snaps the prop (see the reset-transform handler).
 const gizmoHint = document.getElementById('gizmo-hint');
 const GIZMO_HINT_MODEL = 'Drag free / axis. <b>Scale/Rotate</b> bake; <b>Move</b> previews.';
-const GIZMO_HINT_PROP = "Drag free / axis. <b>Move/Rotate</b> only — the emote stores the prop’s grip, not its size.";
+const GIZMO_HINT_PROP = "<b>W</b> move · <b>E</b> rotate — both ship as PropPlacement. <b>R</b> resizes the preview only.";
+// Scale is on the bar for a prop now, but it means something completely
+// different there, so swap the tooltip rather than leave it lying.
+const GIZMO_SCALE_TITLE_MODEL = 'Drag the colored cubes to grow or shrink along an axis. Scale IS baked into the exported prop.';
+const GIZMO_SCALE_TITLE_PROP = "Resize the PREVIEW mesh so it matches the model you named — a grip authored against a mesh that is the wrong size is itself wrong. Not exported: PropPlacement is six floats (metres + degrees) and the game has no entity-scale native, so a prop's size is a property of its model.";
 function syncGizmoBarForProp() {
   const forProp = !!(propGizmoShown && propModel);
   document.querySelectorAll('#gizmo-bar [data-propbar="hide"]').forEach(el => {
     el.style.display = forProp ? 'none' : '';
   });
+  const scaleBtn = document.querySelector('#gizmo-bar .gizmo-btn[data-mode="scale"]');
+  if (scaleBtn) scaleBtn.title = forProp ? GIZMO_SCALE_TITLE_PROP : GIZMO_SCALE_TITLE_MODEL;
   if (gizmoHint) gizmoHint.innerHTML = forProp ? GIZMO_HINT_PROP : GIZMO_HINT_MODEL;
 }
 
@@ -6716,7 +6775,8 @@ window.resetPropPlacement = function () {
   if (propAttachedBone) {
     propModel.position.set(0, 0, 0);
     propModel.quaternion.identity();
-    propModel.scale.set(1, 1, 1);
+    // Size stays: this resets the GRIP. resetPropMesh is the one that puts the
+    // preview mesh itself back.
     propModel.updateMatrixWorld(true);
   } else {
     const r = propResolveBone(propAttachCandidates);
@@ -6781,10 +6841,68 @@ window.setPropPlacement = function (x, y, z, rx, ry, rz) {
 };
 
 window.setPropYUpFix = function (on) {
+  const before = propSnapshot();
   propYUpFix = !!on;
+  // A preset, not a switch of its own: it drives the X of the orientation fix
+  // and leaves whatever the user dialled into Y / Z alone.
+  propMeshRot.x = propYUpFix && propSource !== 'game' ? 90 : 0;
   propApplyInnerFix();
+  propCommitHistory('mesh', before);
   propPostState();
   requestRender();
+};
+
+/// Preview-only orientation fix for the mesh, in degrees — for an import that
+/// landed at an angle the Y-up preset does not cover. It rides propInner,
+/// BELOW the carrier, so the grip the export writes is untouched: straighten
+/// the mesh here and the offsets you then author against it are real ones.
+window.setPropMeshRotation = function (rx, ry, rz) {
+  if (!propModel) return false;
+  const before = propSnapshot();
+  propMeshRot = { x: +rx || 0, y: +ry || 0, z: +rz || 0 };
+  propYUpFix = Math.abs(propMeshRot.x - 90) < 1e-6;
+  propApplyInnerFix();
+  propCommitHistory('mesh', before);
+  propPostState();
+  requestRender();
+  return true;
+};
+
+/// Preview-only size. A prop's real size is a property of its MODEL: the game
+/// has no entity-scale native and PropPlacement is six floats (metres +
+/// degrees), so there is nowhere for a size to ship. What this buys is a
+/// preview that matches the model you named — author a grip against a mesh
+/// twice the real size and every offset in it is wrong. One argument scales
+/// uniformly; three allow a non-uniform preview squash.
+window.setPropScale = function (sx, sy, sz) {
+  if (!propModel) return false;
+  const x = Math.abs(+sx) > 1e-6 ? +sx : 1;
+  const before = propSnapshot();
+  propModel.scale.set(
+    x,
+    (sy === undefined || Math.abs(+sy) < 1e-6) ? x : +sy,
+    (sz === undefined || Math.abs(+sz) < 1e-6) ? x : +sz);
+  propModel.updateMatrixWorld(true);
+  propCommitHistory('size', before);
+  propPostState();
+  requestRender();
+  return true;
+};
+
+/// Put the PREVIEW MESH back to how it imported — preset orientation, unit
+/// size. The grip is left where it is (resetPropPlacement owns that).
+window.resetPropMesh = function () {
+  if (!propModel) return false;
+  const before = propSnapshot();
+  propYUpFix = propSource !== 'game';
+  propMeshRot = { x: propYUpFix ? 90 : 0, y: 0, z: 0 };
+  propModel.scale.set(1, 1, 1);
+  propApplyInnerFix();
+  propModel.updateMatrixWorld(true);
+  propCommitHistory('mesh', before);
+  propPostState();
+  requestRender();
+  return true;
 };
 
 window.getPropTransform = function () {
@@ -7934,14 +8052,14 @@ window.poseSetTransformMode = function (mode) {
   const m = String(mode || '').toLowerCase();
   if (m !== 'translate' && m !== 'rotate' && m !== 'scale') return false;
 
-  // The hand-attached prop owns the gizmo → W/E drive the PROP. This has to
+  // The hand-attached prop owns the gizmo → W/E/R drive the PROP. This has to
   // outrank everything below it: a bone or an IK handle left selected from
   // posing the ped used to win the moment the user pressed a mode key, so
-  // the gizmo jumped off the prop and onto the body. Scale is refused
-  // outright — an emote's PropPlacement is position + rotation only, so
-  // scaling here would preview a size the game never applies.
+  // the gizmo jumped off the prop and onto the body. R is allowed, but it
+  // resizes the PREVIEW only (see setPropScale) — propLocalPlacement
+  // decomposes the carrier for position + rotation, so a scaled carrier
+  // cannot leak into the placement the export writes.
   if (propIsSelected()) {
-    if (m === 'scale') return false;
     setGizmoMode(m);
     return true;
   }

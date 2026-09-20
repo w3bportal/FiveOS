@@ -885,7 +885,7 @@
                             BorderThickness="1"
                             CornerRadius="8"
                             Padding="14,12"
-                            Width="300"
+                            Width="340"
                             Margin="0,4,0,0">
                         <StackPanel>
                             <TextBlock Text="GTA prop model"
@@ -937,25 +937,54 @@
                                 </ui:Button>
                             </Grid>
                             <StackPanel Visibility="{Binding HasProp, Converter={StaticResource BooleanToVisibility}}">
-                                <Grid Margin="0,6,0,0">
+                                <!-- The gizmo has always driven the prop, but
+                                     nothing in here said so: the old single
+                                     "Adjust" button left W/E to be guessed at,
+                                     and a prop that imported at a bad angle
+                                     read as welded to the bone. One button per
+                                     mode — the control you click is the
+                                     control you get. -->
+                                <Grid Margin="0,8,0,0">
                                     <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="*" />
                                         <ColumnDefinition Width="*" />
                                         <ColumnDefinition Width="Auto" />
                                     </Grid.ColumnDefinitions>
                                     <ui:Button Grid.Column="0"
-                                               Click="OnPropAdjust"
+                                               Tag="translate"
+                                               Click="OnPropGizmoMode"
                                                Appearance="Secondary"
                                                HorizontalAlignment="Stretch"
                                                HorizontalContentAlignment="Center"
                                                Padding="0,6"
                                                Margin="0,0,4,0"
-                                               ToolTip="Gizmo on the prop — nudge it into the palm. W move · E rotate (or click the prop in the viewport). Scale only affects the preview.">
-                                        <StackPanel Orientation="Horizontal">
-                                            <ui:SymbolIcon Symbol="ArrowMove24" FontSize="13" Margin="0,0,6,0" />
-                                            <TextBlock Text="Adjust" FontSize="11" />
-                                        </StackPanel>
+                                               ToolTip="Move the prop into the palm (gizmo, or W in the viewport). Ships as the first three floats of PropPlacement.">
+                                        <TextBlock Text="Move" FontSize="11" />
                                     </ui:Button>
                                     <ui:Button Grid.Column="1"
+                                               Tag="rotate"
+                                               Click="OnPropGizmoMode"
+                                               Appearance="Secondary"
+                                               HorizontalAlignment="Stretch"
+                                               HorizontalContentAlignment="Center"
+                                               Padding="0,6"
+                                               Margin="0,0,4,0"
+                                               ToolTip="Turn the prop in the hand (gizmo, or E in the viewport). Ships as the last three floats of PropPlacement.">
+                                        <TextBlock Text="Rotate" FontSize="11" />
+                                    </ui:Button>
+                                    <ui:Button Grid.Column="2"
+                                               Tag="scale"
+                                               Click="OnPropGizmoMode"
+                                               Appearance="Secondary"
+                                               HorizontalAlignment="Stretch"
+                                               HorizontalContentAlignment="Center"
+                                               Padding="0,6"
+                                               Margin="0,0,4,0"
+                                               ToolTip="Resize the PREVIEW mesh (gizmo, or R in the viewport). Not exported — see the Preview mesh section below.">
+                                        <TextBlock Text="Size" FontSize="11" />
+                                    </ui:Button>
+                                    <ui:Button Grid.Column="3"
                                                Click="OnPropRemove"
                                                Appearance="Secondary"
                                                Padding="10,6"
@@ -963,19 +992,102 @@
                                         <ui:SymbolIcon Symbol="Delete24" FontSize="13" />
                                     </ui:Button>
                                 </Grid>
-                                <CheckBox IsChecked="{Binding PropYUpFix, Mode=TwoWay}"
-                                          Checked="OnPropYUpChanged"
-                                          Unchecked="OnPropYUpChanged"
-                                          Margin="0,6,0,0"
-                                          Visibility="{Binding PropShowYUpFix, Converter={StaticResource BooleanToVisibility}}"
-                                          ToolTip="Blender / glTF exports are Y-up; the game's models are Z-up. Leave on for a mesh exported from Blender, turn off if the preview lies sideways.">
-                                    <TextBlock Text="Y-up mesh (Blender / glTF export)" FontSize="11" />
-                                </CheckBox>
+
+                                <!-- Placement: the six floats that ship. Typed
+                                     values and the gizmo drive the same
+                                     carrier, so the two stay in step. -->
+                                <TextBlock Text="Placement — exported as PropPlacement"
+                                           FontSize="10"
+                                           Foreground="{DynamicResource TextFillColorSecondaryBrush}"
+                                           Margin="0,12,0,4" />
+                                <Grid Margin="0,0,0,4">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="54" />
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="4" />
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="4" />
+                                        <ColumnDefinition Width="*" />
+                                    </Grid.ColumnDefinitions>
+                                    <TextBlock Grid.Column="0" Text="Offset m" FontSize="10" VerticalAlignment="Center" Opacity="0.75" />
+                                    <ui:NumberBox Grid.Column="1" Value="{Binding PropPosX, Mode=TwoWay}" SmallChange="0.005" LargeChange="0.05" MaxDecimalPlaces="4" SpinButtonPlacementMode="Hidden" PreviewMouseWheel="OnPropNumberWheel" ToolTip="Bone-local offset X, in metres. Scroll to nudge, Shift+scroll for coarser steps." />
+                                    <ui:NumberBox Grid.Column="3" Value="{Binding PropPosY, Mode=TwoWay}" SmallChange="0.005" LargeChange="0.05" MaxDecimalPlaces="4" SpinButtonPlacementMode="Hidden" PreviewMouseWheel="OnPropNumberWheel" ToolTip="Bone-local offset Y, in metres." />
+                                    <ui:NumberBox Grid.Column="5" Value="{Binding PropPosZ, Mode=TwoWay}" SmallChange="0.005" LargeChange="0.05" MaxDecimalPlaces="4" SpinButtonPlacementMode="Hidden" PreviewMouseWheel="OnPropNumberWheel" ToolTip="Bone-local offset Z, in metres." />
+                                </Grid>
+                                <Grid Margin="0,0,0,2">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="54" />
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="4" />
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="4" />
+                                        <ColumnDefinition Width="*" />
+                                    </Grid.ColumnDefinitions>
+                                    <TextBlock Grid.Column="0" Text="Rotate °" FontSize="10" VerticalAlignment="Center" Opacity="0.75" />
+                                    <ui:NumberBox Grid.Column="1" Value="{Binding PropRotX, Mode=TwoWay}" SmallChange="1" LargeChange="15" MaxDecimalPlaces="2" SpinButtonPlacementMode="Hidden" PreviewMouseWheel="OnPropNumberWheel" ToolTip="Bone-local rotation X, in degrees — the grip the emote ships. Scroll to nudge, Shift+scroll for 15° steps." />
+                                    <ui:NumberBox Grid.Column="3" Value="{Binding PropRotY, Mode=TwoWay}" SmallChange="1" LargeChange="15" MaxDecimalPlaces="2" SpinButtonPlacementMode="Hidden" PreviewMouseWheel="OnPropNumberWheel" ToolTip="Bone-local rotation Y, in degrees." />
+                                    <ui:NumberBox Grid.Column="5" Value="{Binding PropRotZ, Mode=TwoWay}" SmallChange="1" LargeChange="15" MaxDecimalPlaces="2" SpinButtonPlacementMode="Hidden" PreviewMouseWheel="OnPropNumberWheel" ToolTip="Bone-local rotation Z, in degrees." />
+                                </Grid>
+
+                                <!-- Preview mesh: corrections for a stand-in
+                                     that doesn't match the model it stands in
+                                     for. Kept visually separate from the
+                                     placement above because none of it ships —
+                                     a prop's real size and orientation belong
+                                     to its MODEL. -->
+                                <TextBlock Text="Preview mesh — not exported"
+                                           FontSize="10"
+                                           Foreground="{DynamicResource TextFillColorSecondaryBrush}"
+                                           Margin="0,12,0,4"
+                                           Visibility="{Binding PropShowMeshFix, Converter={StaticResource BooleanToVisibility}}" />
+                                <StackPanel Visibility="{Binding PropShowMeshFix, Converter={StaticResource BooleanToVisibility}}">
+                                    <Grid Margin="0,0,0,4">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="54" />
+                                            <ColumnDefinition Width="*" />
+                                            <ColumnDefinition Width="4" />
+                                            <ColumnDefinition Width="*" />
+                                            <ColumnDefinition Width="4" />
+                                            <ColumnDefinition Width="*" />
+                                        </Grid.ColumnDefinitions>
+                                        <TextBlock Grid.Column="0" Text="Orient °" FontSize="10" VerticalAlignment="Center" Opacity="0.75" />
+                                        <ui:NumberBox Grid.Column="1" Value="{Binding PropMeshRotX, Mode=TwoWay}" SmallChange="1" LargeChange="15" MaxDecimalPlaces="2" SpinButtonPlacementMode="Hidden" PreviewMouseWheel="OnPropNumberWheel" ToolTip="Straighten the preview mesh itself, degrees about X. This is where an import that landed at an odd angle gets fixed — rotating the GRIP instead would ship the correction to the game and point the prop the wrong way. Y-up (Blender / glTF) is 90 here." />
+                                        <ui:NumberBox Grid.Column="3" Value="{Binding PropMeshRotY, Mode=TwoWay}" SmallChange="1" LargeChange="15" MaxDecimalPlaces="2" SpinButtonPlacementMode="Hidden" PreviewMouseWheel="OnPropNumberWheel" ToolTip="Straighten the preview mesh itself, degrees about Y." />
+                                        <ui:NumberBox Grid.Column="5" Value="{Binding PropMeshRotZ, Mode=TwoWay}" SmallChange="1" LargeChange="15" MaxDecimalPlaces="2" SpinButtonPlacementMode="Hidden" PreviewMouseWheel="OnPropNumberWheel" ToolTip="Straighten the preview mesh itself, degrees about Z." />
+                                    </Grid>
+                                    <Grid Margin="0,0,0,2">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="54" />
+                                            <ColumnDefinition Width="*" />
+                                            <ColumnDefinition Width="6" />
+                                            <ColumnDefinition Width="Auto" />
+                                            <ColumnDefinition Width="4" />
+                                            <ColumnDefinition Width="Auto" />
+                                        </Grid.ColumnDefinitions>
+                                        <TextBlock Grid.Column="0" Text="Size ×" FontSize="10" VerticalAlignment="Center" Opacity="0.75" />
+                                        <ui:NumberBox Grid.Column="1" Value="{Binding PropScale, Mode=TwoWay}" SmallChange="0.05" LargeChange="0.5" Minimum="0.001" MaxDecimalPlaces="4" SpinButtonPlacementMode="Hidden" PreviewMouseWheel="OnPropNumberWheel" ToolTip="Resize the preview so it matches the model you named above. It is NOT exported and that is not an omission: PropPlacement is six floats (metres + degrees) and the game has no entity-scale native, so a prop's real size is a property of its model. Get the preview size right and the offsets you author against it are right too." />
+                                        <ui:Button Grid.Column="3"
+                                                   Click="OnPropMeshYUp"
+                                                   Appearance="Secondary"
+                                                   Padding="8,4"
+                                                   ToolTip="Y-up preset: +90° about X. Blender / glTF exports are Y-up, the game's models are Z-up. Start here if the preview is lying on its side.">
+                                            <TextBlock Text="Y-up" FontSize="10" />
+                                        </ui:Button>
+                                        <ui:Button Grid.Column="5"
+                                                   Click="OnPropMeshReset"
+                                                   Appearance="Secondary"
+                                                   Padding="8,4"
+                                                   ToolTip="Put the preview mesh back the way it imported — preset orientation, size 1. The grip above is left alone.">
+                                            <ui:SymbolIcon Symbol="ArrowReset24" FontSize="12" />
+                                        </ui:Button>
+                                    </Grid>
+                                </StackPanel>
+
                                 <TextBlock Text="{Binding PropPreviewLabel}"
                                            FontSize="10"
                                            Foreground="{DynamicResource TextFillColorSecondaryBrush}"
                                            TextTrimming="CharacterEllipsis"
-                                           Margin="0,8,0,0" />
+                                           Margin="0,10,0,0" />
                                 <TextBlock Text="{Binding PropAttachedLabel}"
                                            FontSize="10"
                                            FontFamily="Consolas"

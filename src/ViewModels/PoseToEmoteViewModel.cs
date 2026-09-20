@@ -1060,7 +1060,7 @@ public partial class PoseToEmoteViewModel : ObservableObject
     /// <summary>True once a preview prop is in the viewport. Drives the
     /// Prop popup's attached-state rows and every export's prop branch.</summary>
     [ObservableProperty]
-    [NotifyPropertyChangedFor(nameof(PropShowYUpFix))]
+    [NotifyPropertyChangedFor(nameof(PropShowMeshFix))]
     [NotifyPropertyChangedFor(nameof(PropAttachButtonText))]
     private bool _hasProp;
 
@@ -1100,15 +1100,72 @@ public partial class PoseToEmoteViewModel : ObservableObject
 
     /// <summary>Where the preview mesh came from: "file" | "game" | "placeholder".</summary>
     [ObservableProperty]
-    [NotifyPropertyChangedFor(nameof(PropShowYUpFix))]
+    [NotifyPropertyChangedFor(nameof(PropShowMeshFix))]
     private string _propSource = "";
 
     /// <summary>Treat a user-supplied mesh as a Y-up (Blender / glTF) export
-    /// and turn it back into RAGE model space. Game extracts never need it.</summary>
+    /// and turn it back into RAGE model space. Game extracts never need it.
+    /// It is a PRESET for <see cref="PropMeshRotX"/> rather than a switch of
+    /// its own: the viewer seeds the orientation fix from it at load, and the
+    /// user is free to take it anywhere from there.</summary>
     [ObservableProperty]
     private bool _propYUpFix = true;
 
-    public bool PropShowYUpFix => HasProp && PropSource == "file";
+    // ── Placement — EXPORTED ───────────────────────────────────────────
+    //
+    // The six floats every export writes as PropPlacement: bone-local metres,
+    // then degrees in the game's rotation order. Two-way with the gizmo — a
+    // drag echoes back through `prop-state` and typing here calls
+    // setPropPlacement. The view guards the round trip so an echo of a value
+    // it just pushed doesn't bounce straight back out.
+
+    /// <summary>Bone-local offset in metres, X.</summary>
+    [ObservableProperty] private double _propPosX;
+
+    /// <summary>Bone-local offset in metres, Y.</summary>
+    [ObservableProperty] private double _propPosY;
+
+    /// <summary>Bone-local offset in metres, Z.</summary>
+    [ObservableProperty] private double _propPosZ;
+
+    /// <summary>Bone-local rotation in degrees about X, in the game's
+    /// rotation order (the one AttachEntityToEntity is passed).</summary>
+    [ObservableProperty] private double _propRotX;
+
+    /// <summary>Bone-local rotation in degrees about Y.</summary>
+    [ObservableProperty] private double _propRotY;
+
+    /// <summary>Bone-local rotation in degrees about Z.</summary>
+    [ObservableProperty] private double _propRotZ;
+
+    // ── Preview mesh — NOT exported ────────────────────────────────────
+    //
+    // Corrections for a preview that doesn't match the model it stands in for.
+    // Neither one can reach PropPlacement, and neither one is a gap in the
+    // export: a prop's real size and orientation are properties of its MODEL.
+    // The game has no entity-scale native and PropPlacement is those six
+    // floats and nothing else. What these buy is a preview worth authoring a
+    // grip against — offsets measured against a mesh that is sideways, or
+    // twice the size it will be in-game, are themselves wrong.
+
+    /// <summary>Orientation fix for the preview mesh, degrees about X. The
+    /// Y-up preset is simply 90 here.</summary>
+    [ObservableProperty] private double _propMeshRotX;
+
+    /// <summary>Orientation fix for the preview mesh, degrees about Y.</summary>
+    [ObservableProperty] private double _propMeshRotY;
+
+    /// <summary>Orientation fix for the preview mesh, degrees about Z.</summary>
+    [ObservableProperty] private double _propMeshRotZ;
+
+    /// <summary>Preview size multiplier, applied on top of the viewer's
+    /// centimetre-units guess.</summary>
+    [ObservableProperty] private double _propScale = 1.0;
+
+    /// <summary>Placement + preview-mesh rows: everything worth showing once a
+    /// prop is in the viewport, whatever it came from. A game extract can sit
+    /// wrong against the ped just as easily as a user's own mesh.</summary>
+    public bool PropShowMeshFix => HasProp;
     public string PropAttachButtonText => HasProp ? "Snap to bone" : "Attach prop";
     public string PropAttachedLabel => $"{PropAttachBoneName} · tag {PropBoneId}";
 

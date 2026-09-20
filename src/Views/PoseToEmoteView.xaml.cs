@@ -161,6 +161,33 @@ public partial class PoseToEmoteView : UserControl
                 HistoryChanged?.Invoke(this, EventArgs.Empty);
             }
 
+            // Prop fields → viewer. Placement is the exported grip; the mesh
+            // orientation and size are preview-only corrections. The guard is
+            // up while a `prop-state` echo is being written in, so a gizmo drag
+            // never has its own reported values pushed back at it mid-drag.
+            if (!_propSyncingFromViewer && _vm.HasProp)
+            {
+                switch (ev.PropertyName)
+                {
+                    case nameof(PoseToEmoteViewModel.PropPosX):
+                    case nameof(PoseToEmoteViewModel.PropPosY):
+                    case nameof(PoseToEmoteViewModel.PropPosZ):
+                    case nameof(PoseToEmoteViewModel.PropRotX):
+                    case nameof(PoseToEmoteViewModel.PropRotY):
+                    case nameof(PoseToEmoteViewModel.PropRotZ):
+                        PushPropPlacement();
+                        return;
+                    case nameof(PoseToEmoteViewModel.PropMeshRotX):
+                    case nameof(PoseToEmoteViewModel.PropMeshRotY):
+                    case nameof(PoseToEmoteViewModel.PropMeshRotZ):
+                        PushPropMeshRotation();
+                        return;
+                    case nameof(PoseToEmoteViewModel.PropScale):
+                        PushPropScale();
+                        return;
+                }
+            }
+
             // Body-calibration sliders re-solve the cached retarget live.
             if (ev.PropertyName is nameof(PoseToEmoteViewModel.CalibrationEnabled)
                                 or nameof(PoseToEmoteViewModel.CalibrationClearance)
@@ -1427,16 +1454,48 @@ public partial class PoseToEmoteView : UserControl
                         if (r.TryGetProperty("source", out var src) && src.ValueKind == JsonValueKind.String)
                             _vm.PropSource = src.GetString() ?? "";
                         bool attached = r.TryGetProperty("attached", out var at) && at.ValueKind == JsonValueKind.True;
-                        if (r.TryGetProperty("pos", out var pEl) && r.TryGetProperty("rot_deg", out var qEl)
-                            && pEl.ValueKind == JsonValueKind.Array && qEl.ValueKind == JsonValueKind.Array
-                            && pEl.GetArrayLength() >= 3 && qEl.GetArrayLength() >= 3)
+                        // Writing these raises PropertyChanged, which is what
+                        // pushes values back down to the viewer — so hold the
+                        // guard across the whole block or a gizmo drag echoes
+                        // into a push that fights the drag it came from.
+                        _propSyncingFromViewer = true;
+                        try
                         {
-                            _vm.PropPlacementText = string.Format(System.Globalization.CultureInfo.InvariantCulture,
-                                "{0:0.000} {1:0.000} {2:0.000} m  ·  {3:0.#} {4:0.#} {5:0.#} °{6}",
-                                pEl[0].GetDouble(), pEl[1].GetDouble(), pEl[2].GetDouble(),
-                                qEl[0].GetDouble(), qEl[1].GetDouble(), qEl[2].GetDouble(),
-                                attached ? "" : "  (not on a bone yet)");
+                            if (r.TryGetProperty("pos", out var pEl) && r.TryGetProperty("rot_deg", out var qEl)
+                                && pEl.ValueKind == JsonValueKind.Array && qEl.ValueKind == JsonValueKind.Array
+                                && pEl.GetArrayLength() >= 3 && qEl.GetArrayLength() >= 3)
+                            {
+                                // Rounded to what the fields display: 0.1 mm and
+                                // a hundredth of a degree. Without it a drag
+                                // leaves 1e-17 tails in the boxes.
+                                _vm.PropPosX = Math.Round(pEl[0].GetDouble(), 4);
+                                _vm.PropPosY = Math.Round(pEl[1].GetDouble(), 4);
+                                _vm.PropPosZ = Math.Round(pEl[2].GetDouble(), 4);
+                                _vm.PropRotX = Math.Round(qEl[0].GetDouble(), 2);
+                                _vm.PropRotY = Math.Round(qEl[1].GetDouble(), 2);
+                                _vm.PropRotZ = Math.Round(qEl[2].GetDouble(), 2);
+                                _vm.PropPlacementText = string.Format(System.Globalization.CultureInfo.InvariantCulture,
+                                    "{0:0.000} {1:0.000} {2:0.000} m  ·  {3:0.#} {4:0.#} {5:0.#} °{6}",
+                                    pEl[0].GetDouble(), pEl[1].GetDouble(), pEl[2].GetDouble(),
+                                    qEl[0].GetDouble(), qEl[1].GetDouble(), qEl[2].GetDouble(),
+                                    attached ? "" : "  (not on a bone yet)");
+                            }
+                            // Preview-only corrections, so the fields track a
+                            // gizmo Size drag and the Y-up preset alike.
+                            if (r.TryGetProperty("mesh_rot_deg", out var mEl)
+                                && mEl.ValueKind == JsonValueKind.Array && mEl.GetArrayLength() >= 3)
+                            {
+                                _vm.PropMeshRotX = Math.Round(mEl[0].GetDouble(), 2);
+                                _vm.PropMeshRotY = Math.Round(mEl[1].GetDouble(), 2);
+                                _vm.PropMeshRotZ = Math.Round(mEl[2].GetDouble(), 2);
+                            }
+                            if (r.TryGetProperty("scale", out var scEl) && scEl.ValueKind == JsonValueKind.Number)
+                                _vm.PropScale = Math.Round(scEl.GetDouble(), 4);
+                            if (r.TryGetProperty("yUpFix", out var yEl)
+                                && (yEl.ValueKind == JsonValueKind.True || yEl.ValueKind == JsonValueKind.False))
+                                _vm.PropYUpFix = yEl.ValueKind == JsonValueKind.True;
                         }
+                        finally { _propSyncingFromViewer = false; }
                     });
                     break;
 
@@ -2200,11 +2259,50 @@ public partial class PoseToEmoteView : UserControl
         await PushPropAttachAsync(snap: true);
     }
 
-    private async void OnPropAdjust(object sender, RoutedEventArgs e)
+    /// <summary>Up while a `prop-state` echo is being written into the VM, so
+    /// the PropertyChanged pump doesn't hand the viewer back the values it
+    /// just reported — which would fight a gizmo drag frame by frame.</summary>
+    private bool _propSyncingFromViewer;
+
+    /// <summary>Invariant, non-scientific formatting — JS parses the literal,
+    /// and a "1E-05" would be a syntax error there.</summary>
+    private static string PropNum(double v)
+        => v.ToString("0.######", System.Globalization.CultureInfo.InvariantCulture);
+
+    /// <summary>The six exported floats, onto the viewer's carrier.</summary>
+    private void PushPropPlacement()
+        => _ = PropJsAsync("window.setPropPlacement && window.setPropPlacement("
+            + $"{PropNum(_vm.PropPosX)},{PropNum(_vm.PropPosY)},{PropNum(_vm.PropPosZ)},"
+            + $"{PropNum(_vm.PropRotX)},{PropNum(_vm.PropRotY)},{PropNum(_vm.PropRotZ)})");
+
+    /// <summary>Preview-only: straightens the mesh inside the carrier, so the
+    /// correction never reaches PropPlacement.</summary>
+    private void PushPropMeshRotation()
+        => _ = PropJsAsync("window.setPropMeshRotation && window.setPropMeshRotation("
+            + $"{PropNum(_vm.PropMeshRotX)},{PropNum(_vm.PropMeshRotY)},{PropNum(_vm.PropMeshRotZ)})");
+
+    /// <summary>Preview-only: the game has no entity-scale native, so this only
+    /// makes the stand-in match the model it stands in for.</summary>
+    private void PushPropScale()
+        => _ = PropJsAsync($"window.setPropScale && window.setPropScale({PropNum(_vm.PropScale)})");
+
+    /// <summary>Move / Rotate / Size. The gizmo has always driven the prop, but
+    /// the old single "Adjust" button left the mode to be guessed at — so a
+    /// prop that imported at a bad angle read as welded to the bone. Each
+    /// button now selects the prop AND picks the mode.</summary>
+    private async void OnPropGizmoMode(object sender, RoutedEventArgs e)
     {
+        var mode = (sender as FrameworkElement)?.Tag as string ?? "translate";
         PropFlyout.IsOpen = false;
         await PropJsAsync("window.selectProp && window.selectProp()");
-        _vm.StatusText = "Gizmo on the prop — W move, E rotate. Click a joint to go back to posing.";
+        await PropJsAsync($"window.poseSetTransformMode && window.poseSetTransformMode('{mode}')");
+        try { Viewport.Focus(); } catch { }
+        _vm.StatusText = mode switch
+        {
+            "rotate" => "Rotating the prop (E) — this is the grip the emote ships. W moves it, R resizes the preview.",
+            "scale" => "Resizing the PREVIEW only (R) — the game has no entity scale, so a prop's real size comes from its model.",
+            _ => "Moving the prop (W) — this is the grip the emote ships. E rotates it, R resizes the preview.",
+        };
     }
 
     private async void OnPropRemove(object sender, RoutedEventArgs e)
@@ -2213,10 +2311,42 @@ public partial class PoseToEmoteView : UserControl
         await PropJsAsync("window.removeProp && window.removeProp()");
     }
 
-    private async void OnPropYUpChanged(object sender, RoutedEventArgs e)
+    /// <summary>Y-up preset for the preview mesh's orientation fix (+90° about
+    /// X). The fields are free after that — the preset is just the common
+    /// starting point for a Blender / glTF export.</summary>
+    private async void OnPropMeshYUp(object sender, RoutedEventArgs e)
     {
         if (!IsLoaded) return;
-        await PropJsAsync($"window.setPropYUpFix && window.setPropYUpFix({(_vm.PropYUpFix ? "true" : "false")})");
+        await PropJsAsync("window.setPropYUpFix && window.setPropYUpFix(true)");
+        _vm.StatusText = "Preview mesh back to the Y-up (Blender / glTF) orientation.";
+    }
+
+    /// <summary>Put the preview mesh back the way it imported. The grip is left
+    /// alone — "Snap to bone" is what re-zeroes that.</summary>
+    private async void OnPropMeshReset(object sender, RoutedEventArgs e)
+    {
+        if (!IsLoaded) return;
+        await PropJsAsync("window.resetPropMesh && window.resetPropMesh()");
+        _vm.StatusText = "Preview mesh orientation and size reset. The grip is untouched.";
+    }
+
+    /// <summary>Scroll-to-scrub on the prop NumberBoxes, matching the Props
+    /// stage's TRANSFORM fields: wheel steps by SmallChange, Shift by
+    /// LargeChange. Handled so the popup doesn't scroll out from under the
+    /// value being edited.</summary>
+    private void OnPropNumberWheel(object sender, System.Windows.Input.MouseWheelEventArgs e)
+    {
+        if (sender is not Wpf.Ui.Controls.NumberBox box) return;
+        var step = System.Windows.Input.Keyboard.Modifiers.HasFlag(System.Windows.Input.ModifierKeys.Shift)
+            ? box.LargeChange : box.SmallChange;
+        var next = (box.Value ?? 0) + (e.Delta > 0 ? step : -step);
+        if (box.Maximum is double max && next > max) next = max;
+        if (box.Minimum is double min && next < min) next = min;
+        // Round to the box's own precision so a run of wheel ticks doesn't
+        // leave a trailing 0.99999...
+        next = Math.Round(next, Math.Max(0, Math.Min(15, box.MaxDecimalPlaces)));
+        box.Value = next;
+        e.Handled = true;
     }
 
     /// <summary>Fetch the prop's transform relative to its attach bone
