@@ -85,3 +85,7 @@ docs/videos/
 # ── Internal dev diagnostics & smoke tests (local only, not shipped) ─
 /dev/tests/
 /dev/smoketest/
+
+# ── Editor / AI assistant config (per-machine, not project state) ─
+/.claude/
+/.cursor/
